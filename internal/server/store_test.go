@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,6 +139,90 @@ func TestSQLStoreConsumesFlowAtomically(t *testing.T) {
 				}
 			} else if !errors.Is(err, failure) {
 				t.Fatalf("failure not returned: %v", err)
+			}
+		})
+	}
+}
+
+func TestSQLCredentialRotationLocksAndPreservesAbsoluteExpiry(t *testing.T) {
+	for _, mode := range []string{"changed", "already rotated", "begin failure", "missing", "query failure", "callback failure", "invalid token", "invalidate delete failure", "invalidate commit failure", "update failure", "commit failure"} {
+		t.Run(mode, func(t *testing.T) {
+			store, mock := mockStore(t)
+			expiry := time.Now().UTC().Add(sessionLifetime)
+			unavailable := errors.New("storage unavailable")
+			begin := mock.ExpectBegin()
+			if mode == "begin failure" {
+				begin.WillReturnError(unavailable)
+			} else {
+				query := mock.ExpectQuery("SELECT access_ciphertext,expires_at FROM guidance_sessions.*FOR UPDATE").WithArgs("hash")
+				switch mode {
+				case "missing":
+					query.WillReturnError(sql.ErrNoRows)
+					mock.ExpectRollback()
+				case "query failure":
+					query.WillReturnError(unavailable)
+					mock.ExpectRollback()
+				default:
+					query.WillReturnRows(sqlmock.NewRows([]string{"access_ciphertext", "expires_at"}).AddRow([]byte("before"), expiry))
+					switch mode {
+					case "callback failure":
+						mock.ExpectRollback()
+					case "invalid token", "invalidate delete failure", "invalidate commit failure":
+						remove := mock.ExpectExec("DELETE FROM guidance_sessions WHERE token_hash").WithArgs("hash")
+						if mode == "invalidate delete failure" {
+							remove.WillReturnError(unavailable)
+							mock.ExpectRollback()
+						} else {
+							remove.WillReturnResult(sqlmock.NewResult(0, 1))
+							commit := mock.ExpectCommit()
+							if mode == "invalidate commit failure" {
+								commit.WillReturnError(unavailable)
+							}
+						}
+					default:
+						if mode != "already rotated" {
+							update := mock.ExpectExec("UPDATE guidance_sessions SET access_ciphertext=\\? WHERE token_hash=\\?").WithArgs([]byte("after"), "hash")
+							if mode == "update failure" {
+								update.WillReturnError(unavailable)
+								mock.ExpectRollback()
+							} else {
+								update.WillReturnResult(sqlmock.NewResult(0, 1))
+							}
+						}
+						if mode != "update failure" {
+							commit := mock.ExpectCommit()
+							if mode == "commit failure" {
+								commit.WillReturnError(unavailable)
+							}
+						}
+					}
+				}
+			}
+			value, actualExpiry, err := store.RotateSession(context.Background(), "hash", func(current []byte, absolute time.Time) ([]byte, error) {
+				if string(current) != "before" || !absolute.Equal(expiry) {
+					t.Fatal("rotation lost the stored credentials or deadline")
+				}
+				if mode == "callback failure" {
+					return nil, unavailable
+				}
+				if strings.HasPrefix(mode, "invalidate ") || mode == "invalid token" {
+					return nil, &invalidRotation{unavailable}
+				}
+				if mode == "already rotated" {
+					return current, nil
+				}
+				return []byte("after"), nil
+			})
+			if mode == "changed" || mode == "already rotated" {
+				if err != nil || len(value) == 0 || !actualExpiry.Equal(expiry) {
+					t.Fatalf("rotation changed the absolute expiry: %v", err)
+				}
+			} else if mode == "missing" {
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatal("missing session was not mapped")
+				}
+			} else if !errors.Is(err, unavailable) {
+				t.Fatalf("rotation failure hidden: %v", err)
 			}
 		})
 	}

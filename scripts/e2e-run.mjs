@@ -99,7 +99,7 @@ try {
     },
     {
       id: "PM-2",
-      name: "架空よつば研究",
+      name: "架空よつば研究・環境設備・情報技術・共同研究開発センター株式会社",
       session: "PM",
       booth: 2,
       industries: [

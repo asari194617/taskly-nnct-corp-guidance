@@ -85,23 +85,23 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		failure(w, 502, "login_exchange_failed")
 		return
 	}
-	var tokens struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err = decodeResponse(resp, &tokens); err != nil || tokens.AccessToken == "" || !strings.EqualFold(tokens.TokenType, "Bearer") || tokens.ExpiresIn <= 0 {
+	var tokens oauthTokens
+	if err = decodeResponse(resp, &tokens); err != nil || !tokens.valid() {
 		failure(w, 502, "invalid_identity_response")
 		return
 	}
-	if _, _, err = s.userinfo(r.Context(), tokens.AccessToken); err != nil {
+	stored := false
+	defer func() {
+		if !stored {
+			s.revokeSessionTokens(r.Context(), sessionCredentials{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken})
+		}
+	}()
+	user, _, err := s.userinfo(r.Context(), tokens.AccessToken)
+	if err != nil {
 		failure(w, 502, "identity_unavailable")
 		return
 	}
-	if tokens.ExpiresIn > 900 {
-		tokens.ExpiresIn = 900
-	}
-	access, err := s.encrypt(tokens.AccessToken)
+	access, err := s.encryptCredentials(tokens.credentials(user.Sub))
 	if err != nil {
 		failure(w, 500, "login_unavailable")
 		return
@@ -111,15 +111,18 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		failure(w, 500, "login_unavailable")
 		return
 	}
-	expiry := time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+	expiry := time.Now().Add(sessionLifetime)
 	if err = s.store.SaveSession(r.Context(), digest(session), access, expiry); err != nil {
 		failure(w, 503, "login_unavailable")
 		return
 	}
+	stored = true
 	// Successful re-authentication rotates the local session and removes the old
 	// one without ever exposing the upstream access token to the browser.
 	if old, err := r.Cookie(s.sessionCookieName()); err == nil && validToken(old.Value) {
+		previous, _, _ := s.store.Session(r.Context(), digest(old.Value))
 		_ = s.store.DeleteSession(r.Context(), digest(old.Value))
+		s.revokeCredentials(r.Context(), previous)
 	}
 	s.cookie(w, s.sessionCookieName(), session, expiry)
 	http.Redirect(w, r, s.config.UIOrigin+"/", http.StatusFound)
@@ -174,12 +177,26 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearCookie(w, s.sessionCookieName())
 	if lookupErr == nil {
-		if token, err := s.decrypt(access); err == nil {
-			resp, err := s.postForm(r.Context(), "/oauth/revoke", url.Values{"token": {token}, "client_id": {s.config.ClientID}})
-			if err == nil {
-				resp.Body.Close()
-			}
-		}
+		s.revokeCredentials(r.Context(), access)
 	}
 	w.WriteHeader(204)
+}
+
+func (s *Server) revokeCredentials(ctx context.Context, encrypted []byte) {
+	credentials, err := s.decryptCredentials(encrypted)
+	if err != nil {
+		return
+	}
+	s.revokeSessionTokens(ctx, credentials)
+}
+
+func (s *Server) revokeSessionTokens(ctx context.Context, credentials sessionCredentials) {
+	token := credentials.RefreshToken
+	if token == "" {
+		token = credentials.AccessToken
+	}
+	response, err := s.postForm(ctx, "/oauth/revoke", url.Values{"token": {token}, "client_id": {s.config.ClientID}})
+	if err == nil {
+		response.Body.Close()
+	}
 }

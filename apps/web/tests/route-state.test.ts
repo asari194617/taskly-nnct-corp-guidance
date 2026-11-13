@@ -8,7 +8,7 @@ describe("shareable guidance routes", () => {
     expect(readRoute("?view=companies&session=all&saved=0&assigned=0")).toEqual(defaultRoute);
   });
 
-  it.each(["companies", "search", "schedule", "map", "plan"] as const)(
+  it.each(["companies", "search", "schedule", "map", "plan", "info"] as const)(
     "roundtrips the %s view without losing company context or filters",
     (view) => {
       const route = {

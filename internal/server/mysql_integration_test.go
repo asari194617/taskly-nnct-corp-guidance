@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -73,6 +74,27 @@ func TestMySQLIntegration(t *testing.T) {
 	var mu sync.Mutex
 	var subject, expectedChallenge string
 	revoked := map[string]bool{}
+	identities := map[string]string{}
+	refreshFamilies := map[string]string{}
+	activeRefresh := map[string]bool{}
+	familySubjects := map[string]string{}
+	familyTokens := map[string][]string{}
+	refreshCounts := map[string]int{}
+	serial := 0
+	issueTokens := func(id, family string) map[string]any {
+		serial++
+		if family == "" {
+			family = fmt.Sprintf("family-%d", serial)
+			familySubjects[family] = id
+		}
+		access := fmt.Sprintf("access-%s-%d", id, serial)
+		refresh := fmt.Sprintf("refresh-%s-%d", id, serial)
+		identities[access] = id
+		refreshFamilies[refresh] = family
+		activeRefresh[refresh] = true
+		familyTokens[family] = append(familyTokens[family], access, refresh)
+		return map[string]any{"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 900}
+	}
 	var apiOrigin string
 	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -91,21 +113,40 @@ func TestMySQLIntegration(t *testing.T) {
 			if err := r.ParseForm(); err != nil {
 				t.Error(err)
 			}
+			if r.Form.Get("grant_type") == "refresh_token" {
+				refresh := r.Form.Get("refresh_token")
+				family := refreshFamilies[refresh]
+				if family == "" || !activeRefresh[refresh] || revoked[refresh] || r.Form.Get("client_id") != "integration-client" || r.Header.Get("Authorization") != "" {
+					w.WriteHeader(400)
+					return
+				}
+				activeRefresh[refresh] = false
+				id := familySubjects[family]
+				refreshCounts[id]++
+				_ = json.NewEncoder(w).Encode(issueTokens(id, family))
+				return
+			}
 			h := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
 			if base64.RawURLEncoding.EncodeToString(h[:]) != expectedChallenge || r.Form.Get("client_id") != "integration-client" || r.Header.Get("Authorization") != "" {
 				t.Error("PKCE/public client exchange mismatch")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access-" + subject, "token_type": "Bearer", "expires_in": 900})
+			_ = json.NewEncoder(w).Encode(issueTokens(subject, ""))
 		case "/oauth/userinfo":
 			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if revoked[token] {
+			if revoked[token] || identities[token] == "" {
 				w.WriteHeader(401)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(User{Sub: strings.TrimPrefix(token, "access-"), Email: "student@example.test", Name: "Example student"})
+			_ = json.NewEncoder(w).Encode(User{Sub: identities[token], Email: "student@example.test", Name: "Example student"})
 		case "/oauth/revoke":
 			_ = r.ParseForm()
-			revoked[r.Form.Get("token")] = true
+			token := r.Form.Get("token")
+			revoked[token] = true
+			if family := refreshFamilies[token]; family != "" {
+				for _, credential := range familyTokens[family] {
+					revoked[credential] = true
+				}
+			}
 			w.WriteHeader(200)
 		default:
 			w.WriteHeader(404)
@@ -166,6 +207,11 @@ func TestMySQLIntegration(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != 302 || resp.Header.Get("Location") != cfg.UIOrigin+"/" {
 			t.Fatalf("login failed: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+		}
+		for _, cookie := range resp.Cookies() {
+			if cookie.Name == "guidance_session" && (cookie.MaxAge < 2591990 || cookie.MaxAge > 2592000 || time.Until(cookie.Expires) < sessionLifetime-time.Minute) {
+				t.Fatal("one-month browser session deadline not issued")
+			}
 		}
 		return client
 	}
@@ -241,13 +287,114 @@ func TestMySQLIntegration(t *testing.T) {
 	request(bob, "POST", "/auth/logout", 204)
 	request(bob, "GET", "/api/me", 401)
 	mu.Lock()
-	revoked["access-alice"] = true
+	for token, id := range identities {
+		if id == "alice" {
+			revoked[token] = true
+		}
+	}
 	mu.Unlock()
 	request(alice, "GET", "/api/guidance", 401)
 	request(aliceOtherDevice, "GET", "/api/documents/example-map", 401)
 	request(http.DefaultClient, "GET", aliceDocumentPath, 403)
-	expired := login("expired")
+	// Independent API instances share a DB row lock, not an in-process mutex.
+	// Age the encrypted access credential beyond its 900-second lifetime while
+	// retaining the same 30-day browser session, preferences and saved companies.
+	rotating := login("rotating")
+	request(rotating, "PUT", "/api/preferences", 200, `{"roster_number":7}`)
+	request(rotating, "PUT", "/api/bookmarks/AM-1", 204)
 	apiURL, _ := url.Parse(apiOrigin)
+	var rotatingHash string
+	for _, cookie := range rotating.Jar.Cookies(apiURL) {
+		if cookie.Name == "guidance_session" {
+			rotatingHash = digest(cookie.Value)
+		}
+	}
+	if rotatingHash == "" {
+		t.Fatal("missing rotating session")
+	}
+	oldCiphertext, absoluteExpiry, err := (SQLStore{DB: db}).Session(ctx, rotatingHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := app.decryptCredentials(oldCiphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldAccess, oldRefresh := credentials.AccessToken, credentials.RefreshToken
+	credentials.AccessExpiry = time.Now().Add(-16 * time.Minute)
+	aged, err := app.encryptCredentials(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE guidance_sessions SET access_ciphertext=? WHERE token_hash=?`, aged, rotatingHash); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	revoked[oldAccess] = true // An expired upstream access token cannot be used.
+	mu.Unlock()
+	secondDB, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondDB.Close()
+	secondDB.SetMaxOpenConns(1)
+	secondApp, err := New(cfg, SQLStore{DB: secondDB}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var concurrent sync.WaitGroup
+	results := make(chan error, 8)
+	for index := range 8 {
+		instance := app
+		if index%2 == 1 {
+			instance = secondApp
+		}
+		concurrent.Add(1)
+		go func() {
+			defer concurrent.Done()
+			user, failure := instance.sessionIdentity(ctx, rotatingHash)
+			if failure != nil {
+				results <- failure
+			} else if user.Sub != "rotating" {
+				results <- fmt.Errorf("rotation changed subject")
+			} else {
+				results <- nil
+			}
+		}()
+	}
+	concurrent.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("concurrent cross-instance refresh failed: %v", err)
+		}
+	}
+	mu.Lock()
+	count := refreshCounts["rotating"]
+	mu.Unlock()
+	if count != 1 {
+		t.Fatalf("rotating refresh token consumed %d times", count)
+	}
+	updatedCiphertext, updatedExpiry, err := (SQLStore{DB: db}).Session(ctx, rotatingHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := app.decryptCredentials(updatedCiphertext)
+	if err != nil || updated.AccessToken == oldAccess || updated.RefreshToken == oldRefresh || !absoluteExpiry.Equal(updatedExpiry) {
+		t.Fatal("refresh did not atomically replace encrypted tokens at the original deadline")
+	}
+	if !strings.Contains(request(rotating, "GET", "/api/preferences", 200), `"roster_number":7`) || !strings.Contains(request(rotating, "GET", "/api/bookmarks", 200), `"AM-1"`) {
+		t.Fatal("session refresh lost user preferences or saved companies")
+	}
+	request(rotating, "POST", "/auth/logout", 204)
+	request(rotating, "GET", "/api/me", 401)
+	mu.Lock()
+	familyRevoked := revoked[updated.AccessToken] && revoked[updated.RefreshToken]
+	mu.Unlock()
+	if !familyRevoked {
+		t.Fatal("logout did not revoke the rotated upstream token family")
+	}
+	expired := login("expired")
 	for _, cookie := range expired.Jar.Cookies(apiURL) {
 		if cookie.Name == "guidance_session" {
 			if _, err := db.ExecContext(ctx, `UPDATE guidance_sessions SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE token_hash=?`, digest(cookie.Value)); err != nil {
@@ -256,5 +403,5 @@ func TestMySQLIntegration(t *testing.T) {
 		}
 	}
 	request(expired, "GET", "/api/me", 401)
-	t.Log("Real MySQL verified OAuth PKCE, signed documents, roster preferences, user isolation, cross-device bookmarks, logout and revocation")
+	t.Log("Real MySQL verified OAuth PKCE, signed documents, roster preferences, user isolation, cross-device bookmarks, cross-instance rotating refresh, logout and revocation")
 }

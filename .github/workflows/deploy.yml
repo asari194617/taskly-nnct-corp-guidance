@@ -3,6 +3,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -80,6 +81,22 @@ jobs:
           redirect=$(curl --silent --show-error --output /dev/null --write-out '%{redirect_url}' \
             'https://nnct-corp-guidance-2026.taskly.iy0306.com/index.html?view=map&focus=AM-1')
           test "$redirect" = 'https://nnct-corp-guidance-2026.taskly.iy0306.com/?view=map&focus=AM-1'
+          guidance_info_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            'https://nnct-corp-guidance-2026.taskly.iy0306.com/?view=info')
+          test "$guidance_info_status" = 200
+      - name: Record production deployment
+        env:
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
+        run: |
+          {
+            echo '### Production deployment verified'
+            echo
+            echo "Commit: [$RELEASE_SHA](https://github.com/$GITHUB_REPOSITORY/commit/$RELEASE_SHA)"
+            echo
+            echo '- [企業ガイダンス](https://nnct-corp-guidance-2026.taskly.iy0306.com/)'
+            echo '- [配布資料の案内](https://nnct-corp-guidance-2026.taskly.iy0306.com/?view=info)'
+            echo '- API readiness, protected data, static security policy and shared URLs verified.'
+          } >> "$GITHUB_STEP_SUMMARY"
   api:
     needs: release
     runs-on: ubuntu-latest
@@ -120,9 +137,14 @@ jobs:
         run: |
           curl --fail --silent --show-error --retry 5 --retry-delay 5 \
             https://api.nnct-corp-guidance-2026.taskly.iy0306.com/readyz
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            https://api.nnct-corp-guidance-2026.taskly.iy0306.com/api/guidance)
-          test "$status" = 401
+          for guidance_endpoint in /api/guidance /api/preferences /api/bookmarks /api/documents/guidebook/url; do
+            guidance_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              "https://api.nnct-corp-guidance-2026.taskly.iy0306.com$guidance_endpoint")
+            test "$guidance_status" = 401
+          done
+          guidance_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            'https://api.nnct-corp-guidance-2026.taskly.iy0306.com/documents/guidebook?token=invalid')
+          test "$guidance_status" = 403
       - if: always()
         name: Remove deployment credentials
         run: rm -rf "$RUNNER_TEMP/guidance-ssh"
