@@ -20,6 +20,7 @@ type Document struct {
 type Store interface {
 	Ping(context.Context) error
 	SaveFlow(context.Context, string, []byte, time.Time) error
+	Flow(context.Context, string) ([]byte, error)
 	ConsumeFlow(context.Context, string) ([]byte, error)
 	SaveSession(context.Context, string, []byte, time.Time) error
 	Session(context.Context, string) ([]byte, time.Time, error)
@@ -35,6 +36,14 @@ func (s SQLStore) Ping(ctx context.Context) error { return s.DB.PingContext(ctx)
 func (s SQLStore) SaveFlow(ctx context.Context, state string, verifier []byte, expiry time.Time) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO guidance_oauth_flows (state_hash,verifier_ciphertext,expires_at) VALUES (?,?,?)`, state, verifier, expiry.UTC())
 	return err
+}
+func (s SQLStore) Flow(ctx context.Context, state string) ([]byte, error) {
+	var verifier []byte
+	err := s.DB.QueryRowContext(ctx, `SELECT verifier_ciphertext FROM guidance_oauth_flows WHERE state_hash=? AND expires_at>UTC_TIMESTAMP()`, state).Scan(&verifier)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return verifier, err
 }
 func (s SQLStore) ConsumeFlow(ctx context.Context, state string) ([]byte, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)

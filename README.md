@@ -20,13 +20,15 @@
 
 ## ローカル開発
 
-必要環境: Go（`go.mod`）、Node.js 24系（24.18.0 以上、CIも24系）、npm、Docker Compose、Python 3.12。配布資料の再抽出には Tesseract OCR も必要です。以下はリポジトリのルートから実行します。
+必要環境: Go（`go.mod`）、Node.js 26.13.1（CIも同じバージョン）、npm、Docker Compose、Python 3.12。ローカル DB は MySQL 9.7.4 LTS を使用します。配布資料の再抽出には Tesseract OCR も必要です。以下はリポジトリのルートから実行します。
 
 ```sh
 cp .env.example .env
 cp apps/web/.env.example apps/web/.env.local
 docker compose up -d --wait db
 ```
+
+既存の `db` volume を MySQL 8.4 から継続利用する場合は、起動前に DB のバックアップを取得し、MySQL Shell の Upgrade Checker で互換性を確認してください。
 
 `.env` の `SESSION_ENCRYPTION_KEY` に `openssl rand -base64 32` で生成した値を設定します。資料用の非公開R2 bucketを用意し、`R2_ENDPOINT`・`R2_BUCKET` とそのbucketだけの読み取り用 `R2_ACCESS_KEY_ID`・`R2_SECRET_ACCESS_KEY` を設定してください。APIはR2設定がない場合に起動を拒否し、ローカルファイルへはフォールバックしません。CIでは架空のS3互換サービスを使います。開発用 `.env` の読み込みは、値をログに表示せず次のように行えます。
 

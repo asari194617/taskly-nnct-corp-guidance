@@ -21,6 +21,7 @@ type Server struct {
 	aead       cipher.AEAD
 	documents  *s3.PresignClient
 	homeBudget *homeRequestBudget
+	flowLimit  *flowLimiter
 }
 type authenticatedAccessTokenKey struct{}
 type User struct {
@@ -41,7 +42,7 @@ func New(c Config, store Store, client *http.Client) (*Server, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c), homeBudget: &homeRequestBudget{}}, nil
+	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c), homeBudget: &homeRequestBudget{}, flowLimit: newFlowLimiter(5, 60)}, nil
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

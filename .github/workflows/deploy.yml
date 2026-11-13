@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26.13.1'
           cache: npm
           cache-dependency-path: |
             apps/web/package-lock.json
@@ -115,10 +115,30 @@ jobs:
         with:
           ref: ${{ needs.release.outputs.sha }}
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Build Go service with immutable revision
         run: |
           docker build --label "org.opencontainers.image.revision=$RELEASE_SHA" \
             --tag "ghcr.io/asari194617/taskly-nnct-corp-guidance:$RELEASE_SHA" .
+      - name: Verify the API binary in the release image
+        run: |
+          image="ghcr.io/asari194617/taskly-nnct-corp-guidance:$RELEASE_SHA"
+          container=$(docker create "$image")
+          trap 'docker rm "$container" > /dev/null' EXIT
+          docker cp "$container:/usr/local/bin/api" "$RUNNER_TEMP/guidance-api"
+          expected=$(go env GOVERSION)
+          actual=$(go version "$RUNNER_TEMP/guidance-api" | awk '{print $NF}')
+          test "$actual" = "$expected"
+          go version -m "$RUNNER_TEMP/guidance-api" | awk '
+            $1 == "build" && $2 == "CGO_ENABLED=0" { cgo = 1 }
+            $1 == "build" && $2 == "GOOS=linux" { os = 1 }
+            $1 == "build" && $2 == "GOARCH=amd64" { arch = 1 }
+            END { exit !(cgo && os && arch) }
+          '
+          echo "API image binary: $actual / linux / amd64 / CGO_ENABLED=0" >> "$GITHUB_STEP_SUMMARY"
       - name: Install dedicated deployment key and pinned host identity
         env:
           PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}

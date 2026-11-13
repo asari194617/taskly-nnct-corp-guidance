@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.4
+        image: mysql:9.7.4
         env:
           MYSQL_DATABASE: guidance_test
           MYSQL_ROOT_PASSWORD: synthetic-ci-only
@@ -51,8 +51,18 @@ jobs:
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26.13.1'
       - run: go vet ./...
+      - name: Check API vulnerabilities for the production platform
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p coverage
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          set -o pipefail
+          "$(go env GOPATH)/bin/govulncheck" ./cmd/api | tee coverage/govulncheck.txt
       - name: Test API and require 80% statement coverage
         run: |
           mkdir -p coverage
@@ -73,6 +83,7 @@ jobs:
             integration.json
             coverage/integration.out
             coverage/go.out
+            coverage/govulncheck.txt
           retention-days: 14
           if-no-files-found: ignore
   web:
@@ -88,7 +99,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26.13.1'
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
@@ -118,7 +129,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26.13.1'
       - run: python -m pip install -r scripts/requirements-data.txt coverage
       - name: Test importer/extractor with synthetic fixtures
         run: |
@@ -138,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.4
+        image: mysql:9.7.4
         env:
           MYSQL_DATABASE: guidance_e2e
           MYSQL_ROOT_PASSWORD: synthetic-ci-only
@@ -163,13 +174,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: .e2e/taskly/apps/server/go.mod
+          go-version-file: go.mod
           cache-dependency-path: |
             go.sum
             .e2e/taskly/apps/server/go.sum
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26.13.1'
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm --prefix apps/web ci
@@ -193,6 +204,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Require the production builder and CI to use the same Go version
+        run: |
+          declared=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          builder=$(sed -nE 's/^FROM golang:([0-9.]+)-alpine.* AS build$/\1/p' Dockerfile)
+          test -n "$declared" && test "$builder" = "$declared"
       - run: docker build --tag guidance-ci:${{ github.sha }} .
   required-ci:
     if: always()

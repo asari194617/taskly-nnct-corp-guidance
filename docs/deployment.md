@@ -6,6 +6,7 @@
 - UI の HTTPS は R2 custom domain が管理する証明書を使用。Cloudflare の URL rewrite で `/` は `/index.html`、`/search/`・`/favorites/`・`/schedule/`・`/documents/`・`/map/` はそれぞれの `index.html` を取得し、外部URLとクエリを保持する。対象ページの末尾スラッシュなしURLは308で補完し、旧 `/index.html` はクエリ保持302で `/` へ転送する。旧 `?view=` は画面側で実ページへ正規化する。
 - API の DNS は `api.nnct-corp-guidance-2026.taskly.iy0306.com`、DNS-only。mirai-sv の Nginx が専用 Let's Encrypt 証明書で HTTPS を終端し、`127.0.0.1:3071` の Go コンテナへ転送する。
 - API は既存 Docker network `infra_default` の MySQL 8.4 を使用する。専用 database `taskly_nnct_corp_guidance`、専用ユーザー `nnct_guidance` はこの DB の読み書きだけを許可する。
+- 開発・CI の MySQL は 9.7.4 LTS。本番の `infra-db-1` は taskly 本体や認証サービスと共有しているため、このリポジトリの Compose や API 配備では更新されない。共有 DB の更新には利用する全サービスの互換性確認、バックアップ、切り戻し手順が必要。
 - 作業ディレクトリは `/home/ubuntu/taskly-nnct-corp-guidance`。外側のディレクトリ0700、`.env.production` は0600。API は資料のファイルを読み込まず、非公開R2 bucketのオブジェクトへの一時URLだけを発行する。APIコンテナへPDF・PNGや私有 `data` ディレクトリをマウントしない。
 
 ## 認証とデータの境界
@@ -23,6 +24,10 @@ confidential client、既存利用者、認証の移行フラグは変更しま�
 既存の暗号化 access token のみのセッションは従来の短い期限で利用でき、次のログインから30日へ切り替わります。暗号化データは既存の BLOB 列へ保存するため追加DDLは不要です。この形式を知らない旧APIへ切り戻す場合、新形式のセッションは再ログインが必要ですが、名簿番号設定・気になる企業は保持されます。
 
 企業一覧・指定企業・利用者設定と、文書 URL 発行の各 API は認証必須です。Cookie は HttpOnly、Secure、本番は host-only。変更 API は正確な UI Origin を検証します。名簿番号とブックマークは OAuth のユーザー ID ごとに保存し、名簿番号を URL へ含めません。
+
+未認証の `/auth/start` は、Nginx が実際の接続元 IP ごとに毎分30件・初期バースト15件、vhost 全体で毎分300件・初期バースト60件に制限します。`X-Forwarded-For` は制限のキーに使いません。超過時は429と `Retry-After: 2` を返します。APIプロセスも毎秒5件・バースト60件の全体上限を持ち、Nginxを経由しないローカル接続でも上限超過時にDBへ新しいflowを書き込みません。同じブラウザーの有効な未完了flowは再利用し、再ログイン時は消費済みflowに代えて新しいものを作ります。複数APIプロセスへ増やす場合はAPI内の上限がプロセスごとになるため、全体上限を維持するNginx経由の公開入口を必須とします。
+
+`deploy/nginx/api.conf` はGitHub Actionsの通常配備では本番へ同期されません。この制限の変更を反映するときは、レビュー済みvhostを管理者が同期し、`nginx -t` の成功を確認してからreloadしてください。APIイメージ更新だけでは送信元IPごとの制限は有効になりません。
 
 `GET /api/documents/{id}/url` は非公開R2のPDF・PNGに対するS3 presigned GET URLと `expires_at` を返します。AWS SDK for Go v2を使い、リージョン `auto`、path-styleで、MySQLの許可リストにあるフラットなファイル名だけを署名します。APIは資料本体を読み込んだり転送したりしません。有効期間は最大5分で、発行時のセッション残存期間も超えません。PDFの部分取得は同じGET URLに `Range` ヘッダーを付けてR2へ直接要求します。GETとHEADは署名のHTTPメソッドが異なるため、同じGET URLをHEADに使うことはできません。
 
@@ -53,9 +58,9 @@ API の配備・readiness・未認証アクセスの拒否を確認してから 
 
 UI配備用のR2資格情報はUI専用1バケットのObject Read & Writeに限定します。API 配備鍵は新規サービス専用で、サーバー側の authorized_keys は `restrict,command=".../deploy-entrypoint.sh"` を設定します。private key を Actions に登録する際はユーザーの明示的な承認を得てください。
 
-API イメージは GitHub のランナーでビルドし、コミット SHA と OCI revision label を付け、圧縮して SSH の標準入力で送ります。レジストリのパスワードを本番へ保存しません。強制コマンドは `deploy <40桁SHA>` だけを受け付け、排他制御、イメージの revision 検証、readiness 検査を実行します。
+API イメージは GitHub のランナーでビルドし、コミット SHA と OCI revision label を付け、圧縮して SSH の標準入力で送ります。レジストリのパスワードを本番へ保存しません。強制コマンドは `deploy <40桁SHA>` だけを受け付け、排他制御を行います。受信した archive は共有 Docker daemon にロードする前に `validate-image-archive.py` で検査し、対象リポジトリの要求 SHA だけを持つ単一イメージ、同じ revision label、許可された構成ファイルと layer だけであることを確認します。検査済みの manifest・config・layer から archive を組み直してからロードし、readiness を確認します。圧縮入力は最大 512 MiB、展開後は最大 2 GiB です。
 
-Compose と強制コマンドはサーバーに初回設置したファイルを使用します。これらの運用設定を変更する PR では、レビュー済みのファイルを管理者が明示的に同期してください。日常配備はイメージだけを送り、設定・鍵・データを上書きしません。
+Compose と強制コマンドはサーバーに初回設置したファイルを使用します。これらの運用設定を変更する PR では、レビュー済みのファイルを管理者が明示的に同期してください。この検査を有効にするには `deploy/deploy-entrypoint.sh` をサーバーの `deploy-entrypoint.sh` へ、`deploy/validate-image-archive.py` を同じディレクトリの `validate-image-archive.py` へ、同時に設置します。設置後は強制コマンドが新しいスクリプトを指し、両ファイルが所有者以外から書き換えられないことを確認します。日常配備はイメージだけを送り、設定・鍵・データを上書きしません。
 
 R2 配備は immutable asset を先、HTML を最後にアップロードし、旧 asset を保持します。HTML の Next.js bootstrap inline script から CSP の SHA-256 を生成し、meta CSP に埋め込みます。CSS の動的スタイルと設定したR2 endpoint originの署名付き地図画像を許可し、スクリプトの `unsafe-inline` は使用しません。PDF は別タブで開き、iframe・object の埋め込みは許可しません。Cloudflare の応答ヘッダールールは新 UI host にだけ限定します。
 
