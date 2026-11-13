@@ -14,6 +14,29 @@ import (
 )
 
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {
+	if allowed, retryAfter := s.flowLimit.allow(time.Now()); !allowed {
+		w.Header().Set("Retry-After", fmt.Sprint(retryAfter))
+		failure(w, http.StatusTooManyRequests, "login_rate_limited")
+		return
+	}
+	// A still-active flow belongs to the browser. Reuse it across repeated
+	// starts and tabs so one browser cannot accumulate rows by refreshing.
+	if cookie, err := r.Cookie(s.flowCookieName()); err == nil && validToken(cookie.Value) {
+		encrypted, err := s.store.Flow(r.Context(), digest(cookie.Value))
+		if err == nil {
+			verifier, err := s.decrypt(encrypted)
+			if err != nil {
+				failure(w, 503, "login_unavailable")
+				return
+			}
+			s.redirectToAuthorization(w, r, cookie.Value, verifier)
+			return
+		}
+		if !errors.Is(err, ErrNotFound) {
+			failure(w, 503, "login_unavailable")
+			return
+		}
+	}
 	state, err := randomToken()
 	if err != nil {
 		failure(w, 500, "login_unavailable")
@@ -35,6 +58,10 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cookie(w, s.flowCookieName(), state, expiry)
+	s.redirectToAuthorization(w, r, state, verifier)
+}
+
+func (s *Server) redirectToAuthorization(w http.ResponseWriter, r *http.Request, state, verifier string) {
 	h := sha256.Sum256([]byte(verifier))
 	q := url.Values{"response_type": {"code"}, "client_id": {s.config.ClientID}, "redirect_uri": {s.config.APIOrigin + "/auth/callback"}, "scope": {"taskly:login"}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(h[:])}, "code_challenge_method": {"S256"}}
 	http.Redirect(w, r, s.config.AuthIssuer+"/oauth/authorize?"+q.Encode(), http.StatusFound)
