@@ -863,14 +863,14 @@ describe("shareable routes and venue navigation", () => {
     await ready();
     const first = dataset.companies[0];
     const second = dataset.companies[1];
-    await expandDetailMap(screen.getByRole("dialog", { name: first.name }));
+    const initial = await screen.findByRole("dialog", { name: first.name });
+    await expandDetailMap(initial);
     await userEvent.click(
-      within(screen.getByRole("dialog", { name: first.name })).getByRole(
-        "button",
-        { name: `午前 ブース 2 ${second.name}` },
-      ),
+      await within(initial).findByRole("button", {
+        name: `午前 ブース 2 ${second.name}`,
+      }),
     );
-    const updated = screen.getByRole("dialog", { name: second.name });
+    const updated = await screen.findByRole("dialog", { name: second.name });
     expect(locationURL().searchParams.get("company")).toBe(second.id);
     expect(locationURL().searchParams.get("focus")).toBe(second.id);
     expect(locationURL().searchParams.get("session")).toBe(second.session);
