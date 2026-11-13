@@ -48,6 +48,8 @@ type Props = {
   mode?: "fullscreen" | "embedded";
   navigation?: ReactNode;
   topRight?: ReactNode;
+  detailPanelOpen?: boolean;
+  detailPanel?: ReactNode;
   onlySaved?: boolean;
   onlyAssigned?: boolean;
   onFiltersChange?: (patch: Partial<Filters>) => void;
@@ -93,6 +95,8 @@ export default function VenueMap({
   mode = "fullscreen",
   navigation,
   topRight,
+  detailPanelOpen = false,
+  detailPanel,
   onlySaved,
   onlyAssigned,
   onFiltersChange,
@@ -108,6 +112,7 @@ export default function VenueMap({
   const [resultsOpen, setResultsOpen] = useState(false);
   const componentId = useId();
   const embedded = mode === "embedded";
+  const panelOpen = detailPanelOpen && !embedded;
   const [localFilters, setLocalFilters] = useState<Filters>({
     q: "",
     industries: [],
@@ -458,23 +463,54 @@ export default function VenueMap({
     const element = viewport.current,
       target = highlighted.current;
     if (!url || !element || !target || !element.clientWidth) return;
-    const bounds = element.getBoundingClientRect(),
+    const panel = panelOpen
+      ? element
+          .closest(".venue-map")
+          ?.querySelector<HTMLElement>(".map-company-panel")
+      : null;
+    const reveal = () => {
+      const bounds = element.getBoundingClientRect();
+      let selectedBounds = target.getBoundingClientRect();
+      const padding = 16;
+      if (selectedBounds.right <= bounds.left)
+        element.scrollLeft -= bounds.left + padding - selectedBounds.left;
+      else if (selectedBounds.left >= bounds.right)
+        element.scrollLeft += selectedBounds.right - bounds.right + padding;
+      if (selectedBounds.bottom <= bounds.top)
+        element.scrollTop -= bounds.top + padding - selectedBounds.top;
+      else if (selectedBounds.top >= bounds.bottom)
+        element.scrollTop += selectedBounds.bottom - bounds.bottom + padding;
+
+      const panelBounds = panel?.getBoundingClientRect();
+      if (!panelBounds?.width || !panelBounds.height) return;
       selectedBounds = target.getBoundingClientRect();
-    const padding = 16;
-    if (selectedBounds.right <= bounds.left)
-      element.scrollLeft -= bounds.left + padding - selectedBounds.left;
-    else if (selectedBounds.left >= bounds.right)
-      element.scrollLeft += selectedBounds.right - bounds.right + padding;
-    if (selectedBounds.bottom <= bounds.top)
-      element.scrollTop -= bounds.top + padding - selectedBounds.top;
-    else if (selectedBounds.top >= bounds.bottom)
-      element.scrollTop += selectedBounds.bottom - bounds.bottom + padding;
-  }, [url, selectedCompanyId, session, imageSize]);
+      const overlaps =
+        selectedBounds.right > panelBounds.left &&
+        selectedBounds.left < panelBounds.right &&
+        selectedBounds.bottom > panelBounds.top &&
+        selectedBounds.top < panelBounds.bottom;
+      if (!overlaps) return;
+      const sidePane =
+        panelBounds.left > bounds.left + bounds.width * 0.35 &&
+        panelBounds.width < bounds.width * 0.75;
+      if (sidePane)
+        element.scrollLeft += selectedBounds.right - panelBounds.left + padding;
+      else
+        element.scrollTop += selectedBounds.bottom - panelBounds.top + padding;
+    };
+    reveal();
+    if (panel && typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(reveal);
+      observer.observe(panel);
+      return () => observer.disconnect();
+    }
+  }, [url, selectedCompanyId, session, imageSize, panelOpen, viewportSize]);
 
   return (
     <section
       className="venue-map"
       data-mode={mode}
+      data-detail-open={panelOpen ? "true" : undefined}
       aria-label={embedded ? "企業のブース位置" : "会場マップ"}
     >
       {!embedded && <h1 className="sr-only">会場マップ</h1>}
@@ -681,7 +717,8 @@ export default function VenueMap({
                 ))}
               </div>
             )}
-            {selected &&
+            {!panelOpen &&
+              selected &&
               selected.session === session &&
               matchedIds.has(selected.id) &&
               booths.length > 0 && (
@@ -872,6 +909,7 @@ export default function VenueMap({
           </InlineNotification.Frame>
         </div>
       )}
+      {!embedded && detailPanel}
       <p id={`${componentId}-keyboard-help`} className="sr-only">
         矢印キーで移動、プラス・マイナスキーで拡大縮小、0キーで全体表示。ブースでは左右キーで移動し、Enterキーで詳細を開けます。ドラッグで移動、2本指で拡大縮小できます。
       </p>

@@ -68,21 +68,33 @@
 .venue-map-booth[data-assigned="true"] {
   box-shadow: inset 0 0 0 3px var(--primary-green-80);
 }
-.venue-map-booth[data-selected="true"],
 .venue-map-booth:focus-visible {
-  box-shadow: inset 0 0 0 3px var(--primary-green-80);
   outline: 3px solid var(--focus-blue-100);
   outline-offset: 2px;
   z-index: 1;
 }
 .venue-map-booth:not(:disabled):hover {
-  background: rgb(35 123 49 / 20%);
-  border-color: var(--primary-green-80);
+  background: transparent;
+  border-color: var(--gray-80);
+  outline: 2px solid var(--gray-80);
+  outline-offset: 0;
 }
 .venue-map-booth[data-match="false"] {
   background: rgb(255 255 255 / 80%);
   box-shadow: none;
   outline: none;
+}
+/* Selection wins over assigned, saved, hover and filtered states. Keep the
+   drawing unpainted, so the original booth number always remains readable. */
+.venue-map-booth[data-selected="true"],
+.venue-map-booth[data-selected="true"]:hover,
+.venue-map-booth[data-selected="true"]:focus-visible {
+  background: transparent;
+  border-color: var(--focus-blue-100);
+  box-shadow: inset 0 0 0 3px var(--focus-blue-100);
+  outline: 3px solid var(--focus-blue-100);
+  outline-offset: 2px;
+  z-index: 2;
 }
 .venue-map-floating {
   position: absolute;
@@ -299,4 +311,40 @@
 .venue-map[data-mode="embedded"] .venue-map-bottom-left > .venue-map-selection {
   inset: auto;
   max-width: 100%;
+}
+
+/* Keep controls outside the nonmodal company pane without shrinking the map. */
+@media (min-width: 1024px) {
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-zoom,
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-error {
+    right: calc(360px + var(--map-edge) * 2);
+  }
+}
+@media (max-width: 1023px) {
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
+    .venue-map-search-panel,
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-sheet {
+    display: none;
+  }
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-zoom,
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
+    .venue-map-bottom-left {
+    bottom: calc(40dvh + var(--map-edge));
+  }
+}
+@media (max-width: 1023px) and (max-height: 480px) {
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-zoom {
+    display: flex;
+  }
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
+    .venue-map-bottom-left {
+    max-width: calc(100% - 180px);
+  }
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
+    .venue-map-floors
+    > button {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
 }

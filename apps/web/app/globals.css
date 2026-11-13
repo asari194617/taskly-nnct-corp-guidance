@@ -473,6 +473,61 @@ h2 {
   font-size: 1.5rem;
   overflow-wrap: anywhere;
 }
+.company-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-relative-spacing-lv6);
+}
+.company-detail-heading > h2 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.map-company-panel {
+  position: absolute;
+  z-index: 4;
+  top: 72px;
+  right: var(--map-edge, 16px);
+  width: 360px;
+  max-height: calc(100dvh - 88px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-border-low-emphasis);
+  border-radius: 16px;
+  background: var(--color-surface-primary);
+  color: var(--color-text-high-emphasis);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 18%);
+}
+.map-company-panel-inner {
+  padding: var(--spacing-relative-spacing-lv8);
+}
+.map-company-panel h2 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+  text-align: left;
+}
+.map-company-panel .company-detail-heading > .spui-IconButton {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+.favorites-panel > .section-heading {
+  margin-top: 0;
+}
+@media (max-width: 1023px) {
+  .map-company-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    height: 40dvh;
+    max-height: 40dvh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: 0;
+  }
+}
 .booth-detail {
   display: flex;
   align-items: center;
