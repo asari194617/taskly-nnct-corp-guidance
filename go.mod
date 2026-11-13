@@ -1,8 +1,9 @@
 module github.com/asari194617/taskly-nnct-corp-guidance
 
-go 1.25.0
+go 1.27.4
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10
@@ -10,6 +11,7 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.27 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.12 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.12 // indirect
@@ -19,9 +21,4 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.12 // indirect
 	github.com/aws/smithy-go v1.28.9 // indirect
-)
-
-require (
-	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/DATA-DOG/go-sqlmock v1.5.2
 )
