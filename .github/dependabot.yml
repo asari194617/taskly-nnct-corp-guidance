@@ -65,6 +65,9 @@ updates:
       minor-and-patch:
         patterns: ['*']
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: mysql
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
     directory: /
