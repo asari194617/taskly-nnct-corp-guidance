@@ -1814,12 +1814,10 @@ test("Interest changes appear before a delayed API response and roll back a fail
   await expect(favorite).toBeEnabled();
   await expect(favorite).toHaveAttribute("aria-pressed", "true");
   await expect(nav(page, "気になる")).toContainText("1");
-  const errorAlert = page
-    .getByRole("alert")
-    .filter({
-      hasText:
-        "情報を取得できませんでした。時間をおいて、もう一度お試しください。",
-    });
+  const errorAlert = page.getByRole("alert").filter({
+    hasText:
+      "情報を取得できませんでした。時間をおいて、もう一度お試しください。",
+  });
   await expect(errorAlert).toBeVisible();
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
@@ -1842,4 +1840,129 @@ test("Interest changes appear before a delayed API response and roll back a fail
   await expect(company).toBeVisible();
   await page.reload();
   await expect(company).toHaveCount(0);
+});
+
+test("Event-day defaults follow JST noon across real search and map pages", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2030-05-13T09:01:00+09:00"));
+  await login(page, "presentation", "/search/");
+  await expect(
+    page.getByRole("radio", { name: "すべて", exact: true }),
+  ).toBeChecked();
+  await assertCompanyCount(page, 4);
+  await page.clock.setFixedTime(new Date("2030-05-14T09:01:00+09:00"));
+  await page.reload();
+  await expect(
+    page.getByRole("radio", { name: "午前の部", exact: true }),
+  ).toBeChecked();
+  await assertCompanyCount(page, 2);
+  expect(new URL(page.url()).searchParams.has("session")).toBe(false);
+  await nav(page, "マップ").click();
+  await expect(
+    page.getByRole("button", {
+      name: "午前 ブース 1 架空あおばソフト",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.clock.setFixedTime(new Date("2030-05-14T12:00:00+09:00"));
+  await page.reload();
+  await expect(
+    page.getByRole("radio", { name: "午後の部", exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.getByRole("button", {
+      name: "午後 ブース 1 架空みらい建設",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(new URL(page.url()).searchParams.has("session")).toBe(false);
+  await nav(page, "探す").click();
+  await expect(
+    page.getByRole("radio", { name: "午後の部", exact: true }),
+  ).toBeChecked();
+  await assertCompanyCount(page, 2);
+  await page.clock.setFixedTime(new Date("2030-05-15T09:01:00+09:00"));
+  await page.reload();
+  await expect(
+    page.getByRole("radio", { name: "すべて", exact: true }),
+  ).toBeChecked();
+  await assertCompanyCount(page, 4);
+  await nav(page, "マップ").click();
+  await expect(
+    page.getByRole("radio", { name: "午前の部", exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.getByRole("button", {
+      name: "午前 ブース 1 架空あおばソフト",
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
+test("Manual AM and all choices survive the live clock, reload and browser history", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2030-05-14T13:01:00+09:00"));
+  await login(page, "routing", "/search/?session=AM");
+  await expect(
+    page.getByRole("radio", { name: "午前の部", exact: true }),
+  ).toBeChecked();
+  await assertCompanyCount(page, 2);
+  await nav(page, "マップ").click();
+  await expect(
+    page.getByRole("radio", { name: "午前の部", exact: true }),
+  ).toBeChecked();
+  await nav(page, "探す").click();
+  await page.getByRole("radio", { name: "すべて", exact: true }).click();
+  await assertCompanyCount(page, 4);
+  expect(new URL(page.url()).searchParams.get("session")).toBe("all");
+  await page.clock.setFixedTime(new Date("2030-05-14T14:01:00+09:00"));
+  await page.reload();
+  await expect(
+    page.getByRole("radio", { name: "すべて", exact: true }),
+  ).toBeChecked();
+  await assertCompanyCount(page, 4);
+  await page.goBack();
+  await expect(
+    page.getByRole("radio", { name: "午前の部", exact: true }),
+  ).toBeChecked();
+  expect(new URL(page.url()).searchParams.get("session")).toBe("AM");
+  await page.goForward();
+  await expect(
+    page.getByRole("radio", { name: "すべて", exact: true }),
+  ).toBeChecked();
+  expect(new URL(page.url()).searchParams.get("session")).toBe("all");
+});
+
+test("The schedule's current row and next term advance through a real browser clock", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2030-05-14T09:00:00+09:00") });
+  await login(page, "presentation", "/schedule/");
+  await page.clock.pauseAt(new Date("2030-05-14T09:04:59+09:00"));
+  const status = page.getByRole("status", {
+    name: "現在のスケジュール",
+    exact: true,
+  });
+  await expect(status).toContainText("現在時刻 09:04");
+  const current = page.locator('.timeline-item[aria-current="time"]');
+  await expect(current).toContainText("検証ターム1");
+  await expect(current.getByText("現在", { exact: true })).toBeVisible();
+  await page.clock.runFor(1000);
+  await expect(current).toHaveCount(0);
+  await expect(status).toContainText("次は 09:10");
+  await expect(page.locator('.timeline-item[data-state="next"]')).toContainText(
+    "検証ターム2",
+  );
+  await expect(status).toContainText("現在時刻 09:05");
+  await page.clock.runFor(5 * 60_000);
+  await expect(current).toContainText("検証ターム2");
+  await expect(status).toContainText("現在時刻 09:10");
+  await page.clock.fastForward(4 * 60 * 60_000 + 25 * 60_000);
+  await expect(current).toHaveCount(0);
+  await expect(status).toContainText("終了");
+  await page.clock.setSystemTime(new Date("2030-05-15T00:00:00+09:00"));
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+  await expect(status).toHaveCount(0);
 });
