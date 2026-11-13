@@ -442,23 +442,19 @@ describe("interactive private venue map", () => {
 
   it("provides a fullscreen canvas or compact embedded map without duplicate page controls", async () => {
     const options = props();
-    const view = render(
-      <VenueMap
-        {...options}
-        navigation={<a href="/">一覧</a>}
-        topRight={<button>アカウント</button>}
-      />,
-    );
+    const view = render(<VenueMap {...options} />);
     await screen.findByRole("img", { name: "検証1階マップ" });
     expect(screen.getByRole("region", { name: "会場マップ" })).toHaveAttribute(
       "data-mode",
       "fullscreen",
     );
     expect(document.body).toHaveStyle({ overflow: "hidden" });
-    expect(screen.getByRole("link", { name: "一覧" })).toHaveAttribute(
-      "href",
-      "/",
-    );
+    expect(
+      screen.queryByRole("link", { name: "一覧" }),
+    ).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".venue-map-search-icon svg"),
+    ).toBeInTheDocument();
     view.unmount();
     expect(document.body.style.overflow).toBe("");
     render(<VenueMap {...options} mode="embedded" selectedCompanyId="AM-1" />);

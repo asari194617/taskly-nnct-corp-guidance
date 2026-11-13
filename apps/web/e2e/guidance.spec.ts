@@ -431,11 +431,24 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   expect(await image.evaluate((node) => getComputedStyle(node).opacity)).toBe(
     "1",
   );
+  await expect(full.locator(".venue-map-search-icon svg")).toBeVisible();
+  await expect(
+    full.getByRole("searchbox", { name: "マップの企業名", exact: true }),
+  ).toBeVisible();
+  const zoomInBounds = (await full
+    .getByRole("button", { name: "マップを拡大", exact: true })
+    .boundingBox())!;
+  expect(zoomInBounds.width).toBeLessThanOrEqual(40);
+  expect(zoomInBounds.height).toBeLessThanOrEqual(40);
   const area = (await viewport.boundingBox())!;
   expect(area.x).toBe(0);
-  expect(area.y).toBe(0);
+  const header = page.getByRole("banner");
+  await expect(header).toBeVisible();
+  await expect(nav(page, "マップ")).toHaveAttribute("aria-current", "page");
+  const headerBounds = (await header.boundingBox())!;
+  expect(area.y).toBeCloseTo(headerBounds.y + headerBounds.height, 0);
   expect(area.width).toBe(page.viewportSize()!.width);
-  expect(area.height).toBe(page.viewportSize()!.height);
+  expect(area.y + area.height).toBeCloseTo(page.viewportSize()!.height, 0);
   for (let step = 0; step < 3; step++)
     await full
       .getByRole("button", { name: "マップを拡大", exact: true })
@@ -493,7 +506,20 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   expect(bottom.x).toBeGreaterThanOrEqual(0);
   expect(bottom.x + bottom.width).toBeLessThanOrEqual(390);
   expect(bottom.y).toBeGreaterThan(844 * 0.4);
-  expect(bottom.y + bottom.height).toBeGreaterThanOrEqual(824);
+  const mobileNavigation = page.getByRole("navigation", {
+    name: "モバイルナビゲーション",
+  });
+  await expect(mobileNavigation).toBeVisible();
+  await expect(
+    mobileNavigation.getByRole("link", { name: "マップ", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  const navigationBounds = (await mobileNavigation.boundingBox())!;
+  const mobileMap = (await viewport.boundingBox())!;
+  const mobileHeader = (await header.boundingBox())!;
+  expect(mobileMap.y).toBeCloseTo(mobileHeader.y + mobileHeader.height, 0);
+  expect(mobileMap.y + mobileMap.height).toBeCloseTo(navigationBounds.y, 0);
+  expect(bottom.y + bottom.height).toBeLessThanOrEqual(navigationBounds.y);
+  expect(bottom.y + bottom.height).toBeGreaterThan(navigationBounds.y - 20);
   await full.getByRole("button", { name: "マップを拡大", exact: true }).click();
   await expect(zoom).toHaveText("200%");
   await expect(panel).toBeVisible();
@@ -508,6 +534,31 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     name: "表示中の一覧",
     exact: true,
   });
+  await expect(results).toBeVisible();
+  const floorControls = full.locator(".venue-map-floors");
+  const floorsBounds = (await floorControls.boundingBox())!;
+  const resultBounds = (await results.boundingBox())!;
+  const intersects =
+    floorsBounds.x < resultBounds.x + resultBounds.width &&
+    floorsBounds.x + floorsBounds.width > resultBounds.x &&
+    floorsBounds.y < resultBounds.y + resultBounds.height &&
+    floorsBounds.y + floorsBounds.height > resultBounds.y;
+  expect(intersects).toBe(false);
+  expect(floorsBounds.x + floorsBounds.width).toBeGreaterThan(1440 - 40);
+  expect(
+    await floorControls
+      .getByRole("button")
+      .first()
+      .evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return node.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        );
+      }),
+  ).toBe(true);
   await results
     .getByRole("button", { name: "企業詳細 架空いろは機械", exact: true })
     .click();

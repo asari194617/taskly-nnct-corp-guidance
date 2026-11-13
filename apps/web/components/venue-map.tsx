@@ -46,8 +46,6 @@ type Props = {
   search?: string;
   industries?: string[];
   mode?: "fullscreen" | "embedded";
-  navigation?: ReactNode;
-  topRight?: ReactNode;
   detailPanelOpen?: boolean;
   detailPanel?: ReactNode;
   onlySaved?: boolean;
@@ -93,8 +91,6 @@ export default function VenueMap({
   search,
   industries: chosenIndustries,
   mode = "fullscreen",
-  navigation,
-  topRight,
   detailPanelOpen = false,
   detailPanel,
   onlySaved,
@@ -514,12 +510,6 @@ export default function VenueMap({
       aria-label={embedded ? "企業のブース位置" : "会場マップ"}
     >
       {!embedded && <h1 className="sr-only">会場マップ</h1>}
-      {!embedded && (navigation || topRight) && (
-        <div className="venue-map-navigation">
-          <div>{navigation}</div>
-          <div>{topRight}</div>
-        </div>
-      )}
       {current ? (
         <>
           {!embedded && (
@@ -527,14 +517,19 @@ export default function VenueMap({
               <label className="sr-only" htmlFor={`${componentId}-search`}>
                 マップの企業名
               </label>
-              <TextField
-                id={`${componentId}-search`}
-                aria-label="マップの企業名"
-                type="search"
-                placeholder="名前・ブース番号"
-                value={filters.q}
-                onChange={(event) => changeFilters({ q: event.target.value })}
-              />
+              <div className="venue-map-search-input">
+                <span className="venue-map-search-icon" aria-hidden="true">
+                  <Icon name="search" size={20} />
+                </span>
+                <TextField
+                  id={`${componentId}-search`}
+                  aria-label="マップの企業名"
+                  type="search"
+                  placeholder="名前・ブース番号"
+                  value={filters.q}
+                  onChange={(event) => changeFilters({ q: event.target.value })}
+                />
+              </div>
               {booths.length > 0 && (
                 <div className="venue-map-search-actions">
                   <SegmentedControl
@@ -671,34 +666,36 @@ export default function VenueMap({
               )}
             </section>
           )}
-          <div
-            className="venue-map-zoom venue-map-floating"
-            aria-label="マップの拡大縮小"
-          >
-            <IconButton
-              variant="neutral"
-              aria-label="マップを拡大"
-              disabled={zoom >= 800}
-              onClick={() => changeZoom(zoom + 25)}
+          <div className="venue-map-bottom-right">
+            <div
+              className="venue-map-zoom venue-map-floating"
+              aria-label="マップの拡大縮小"
             >
-              <Icon name="plus" size={18} />
-            </IconButton>
-            <TextButton
-              aria-label="拡大率を100パーセントに戻す"
-              onClick={resetView}
-            >
-              {zoom}%
-            </TextButton>
-            <IconButton
-              variant="neutral"
-              aria-label="マップを縮小"
-              disabled={zoom <= 50}
-              onClick={() => changeZoom(zoom - 25)}
-            >
-              <Icon name="minus" size={18} />
-            </IconButton>
-          </div>
-          <div className="venue-map-bottom-left">
+              <IconButton
+                variant="neutral"
+                size="small"
+                aria-label="マップを拡大"
+                disabled={zoom >= 800}
+                onClick={() => changeZoom(zoom + 25)}
+              >
+                <Icon name="plus" size={18} />
+              </IconButton>
+              <TextButton
+                aria-label="拡大率を100パーセントに戻す"
+                onClick={resetView}
+              >
+                {zoom}%
+              </TextButton>
+              <IconButton
+                variant="neutral"
+                size="small"
+                aria-label="マップを縮小"
+                disabled={zoom <= 50}
+                onClick={() => changeZoom(zoom - 25)}
+              >
+                <Icon name="minus" size={18} />
+              </IconButton>
+            </div>
             {!embedded && (
               <div
                 className="venue-map-floors venue-map-floating"
@@ -717,6 +714,8 @@ export default function VenueMap({
                 ))}
               </div>
             )}
+          </div>
+          <div className="venue-map-bottom-left">
             {!panelOpen &&
               selected &&
               selected.session === session &&

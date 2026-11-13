@@ -1,6 +1,6 @@
 .venue-map {
   --map-edge: 16px;
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 1;
   background: var(--white-100);
@@ -105,30 +105,9 @@
   color: var(--color-text-high-emphasis);
   box-shadow: 0 2px 12px rgb(0 0 0 / 12%);
 }
-.venue-map-navigation {
-  position: absolute;
-  z-index: 5;
-  inset: max(12px, env(safe-area-inset-top)) var(--map-edge) auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  pointer-events: none;
-}
-.venue-map-navigation > div {
-  pointer-events: auto;
-  min-width: 0;
-}
-.venue-map-navigation > div:first-child {
-  padding: 6px 12px;
-  border: 1px solid var(--color-border-low-emphasis);
-  border-radius: 12px;
-  background: var(--color-surface-primary);
-  box-shadow: 0 2px 12px rgb(0 0 0 / 12%);
-}
 .venue-map-search-panel {
   left: var(--map-edge);
-  top: calc(var(--map-header-offset, 80px) + env(safe-area-inset-top));
+  top: var(--map-edge);
   width: min(388px, calc(100% - var(--map-edge) * 2));
   padding: 12px;
   display: grid;
@@ -147,12 +126,9 @@
 .venue-map-sheet {
   z-index: 4;
   left: var(--map-edge);
-  top: calc(var(--map-header-offset, 80px) + 184px + env(safe-area-inset-top));
+  top: calc(var(--map-edge) + 184px);
   width: min(388px, calc(100% - var(--map-edge) * 2));
-  max-height: calc(
-    100dvh - var(--map-header-offset, 80px) - 210px - env(safe-area-inset-top) -
-      env(safe-area-inset-bottom)
-  );
+  max-height: max(32px, calc(100% - var(--map-edge) * 2 - 184px - 248px));
   overflow: auto;
   padding: 16px;
   display: grid;
@@ -205,7 +181,7 @@
   gap: 2px;
 }
 .venue-map-zoom > button {
-  min-height: 44px;
+  min-height: 36px;
 }
 .venue-map-floors {
   left: var(--map-edge);
@@ -234,7 +210,7 @@
 .venue-map-error {
   left: var(--map-edge);
   right: var(--map-edge);
-  top: calc(var(--map-header-offset, 80px) + 8px + env(safe-area-inset-top));
+  top: calc(var(--map-edge) + 8px);
   padding: 8px;
   z-index: 7;
 }
@@ -313,9 +289,60 @@
   max-width: 100%;
 }
 
+.venue-map-search-input {
+  position: relative;
+}
+.venue-map-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  color: var(--color-object-medium-emphasis);
+  pointer-events: none;
+}
+.venue-map-search-input input {
+  padding-left: 40px;
+}
+.venue-map-bottom-right {
+  position: absolute;
+  right: var(--map-edge);
+  bottom: var(--map-edge);
+  z-index: 3;
+  max-width: min(388px, calc(100% - var(--map-edge) * 2));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.venue-map-bottom-right > .venue-map-floating {
+  position: relative;
+  inset: auto;
+  max-width: 100%;
+}
+.venue-map-zoom > button {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px;
+}
+.venue-map-zoom > .spui-TextButton {
+  width: auto;
+  min-width: 44px;
+  font-size: 0.75rem;
+}
+.venue-map[data-mode="embedded"] .venue-map-bottom-right {
+  right: 8px;
+  bottom: 8px;
+}
+.venue-map[data-mode="embedded"] .venue-map-bottom-right > .venue-map-zoom {
+  inset: auto;
+}
 /* Keep controls outside the nonmodal company pane without shrinking the map. */
 @media (min-width: 1024px) {
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-zoom,
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
+    .venue-map-bottom-right,
   .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-error {
     right: calc(360px + var(--map-edge) * 2);
   }
@@ -326,25 +353,10 @@
   .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-sheet {
     display: none;
   }
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-zoom,
+  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
+    .venue-map-bottom-right,
   .venue-map[data-mode="fullscreen"][data-detail-open="true"]
     .venue-map-bottom-left {
-    bottom: calc(40dvh + var(--map-edge));
-  }
-}
-@media (max-width: 1023px) and (max-height: 480px) {
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-zoom {
-    display: flex;
-  }
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
-    .venue-map-bottom-left {
-    max-width: calc(100% - 180px);
-  }
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
-    .venue-map-floors
-    > button {
-    min-width: 0;
-    max-width: 100%;
-    white-space: normal;
+    bottom: calc(40% + var(--map-edge));
   }
 }

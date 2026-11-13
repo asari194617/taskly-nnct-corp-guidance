@@ -859,6 +859,42 @@ describe("shareable routes and venue navigation", () => {
     expect(locationURL().searchParams.has("company")).toBe(false);
   });
 
+  it("keeps normal header and mobile navigation available on the map", async () => {
+    window.history.replaceState(null, "", "/map/?session=AM");
+    await ready();
+    const header = screen.getByRole("banner");
+    expect(
+      within(header).getByRole("link", {
+        name: "Taskly 企業ガイダンス ホーム",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(header).getByRole("navigation", { name: "メインナビゲーション" }),
+    ).toBeInTheDocument();
+    expect(
+      within(header).getByRole("button", { name: "ユーザーメニュー" }),
+    ).toBeInTheDocument();
+    const mobile = screen.getByRole("navigation", {
+      name: "モバイルナビゲーション",
+    });
+    expect(
+      within(mobile).getByRole("link", { name: "マップ" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(mobile)
+        .getByRole("link", { name: "マップ" })
+        .querySelector("svg[data-filled=true]"),
+    ).not.toBeNull();
+    expect(document.querySelector(".venue-map-navigation")).toBeNull();
+    const search = await screen.findByRole("searchbox", {
+      name: "マップの企業名",
+    });
+    expect(
+      search
+        .closest(".venue-map-search-input")
+        ?.querySelector(".venue-map-search-icon[aria-hidden=true] svg"),
+    ).not.toBeNull();
+  });
   it("keeps the map interactive while a non-modal company panel changes its selection", async () => {
     window.history.replaceState(
       null,

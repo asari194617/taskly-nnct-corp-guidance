@@ -415,30 +415,28 @@ export default function GuidanceApp({
       <a className="skip-link" href="#main">
         本文へ移動
       </a>
-      {(!ready || route.view !== "map") && (
-        <header className="topbar">
-          <div className="header-brand">
-            <Brand />
-          </div>
-          {ready && menu(false)}
-          <div className="header-right">
-            {ready && (
-              <HeaderActions
-                name={user.name}
-                rosterNumber={preferences.roster_number}
-                busy={busy}
-                currentView={route.view}
-                onConfigure={() => setSettingNumber(true)}
-                onInformation={() => {
-                  changeRoute({ ...defaultRoute, view: "info" });
-                  window.scrollTo({ top: 0, behavior: "instant" });
-                }}
-                onLogout={() => void logout()}
-              />
-            )}
-          </div>
-        </header>
-      )}
+      <header className="topbar">
+        <div className="header-brand">
+          <Brand />
+        </div>
+        {ready && menu(false)}
+        <div className="header-right">
+          {ready && (
+            <HeaderActions
+              name={user.name}
+              rosterNumber={preferences.roster_number}
+              busy={busy}
+              currentView={route.view}
+              onConfigure={() => setSettingNumber(true)}
+              onInformation={() => {
+                changeRoute({ ...defaultRoute, view: "info" });
+                window.scrollTo({ top: 0, behavior: "instant" });
+              }}
+              onLogout={() => void logout()}
+            />
+          )}
+        </div>
+      </header>
       {!ready ? (
         <main id="main" className="welcome-main">
           <section className="welcome-content" aria-labelledby="welcome-title">
@@ -546,42 +544,6 @@ export default function GuidanceApp({
                     />
                   ) : undefined
                 }
-                navigation={
-                  <div className="map-page-navigation">
-                    <TextLink
-                      href="/"
-                      icon={<Icon name="arrow" />}
-                      onClick={(event) =>
-                        intercept(event, () => navigate("companies"))
-                      }
-                    >
-                      一覧
-                    </TextLink>
-                    <TextLink
-                      href="/search/"
-                      icon={<Icon name="search" />}
-                      onClick={(event) =>
-                        intercept(event, () => navigate("search"))
-                      }
-                    >
-                      探す
-                    </TextLink>
-                  </div>
-                }
-                topRight={
-                  <HeaderActions
-                    name={user.name}
-                    rosterNumber={preferences.roster_number}
-                    busy={busy}
-                    currentView={route.view}
-                    onConfigure={() => setSettingNumber(true)}
-                    onInformation={() => {
-                      changeRoute({ ...defaultRoute, view: "info" });
-                      window.scrollTo({ top: 0, behavior: "instant" });
-                    }}
-                    onLogout={() => void logout()}
-                  />
-                }
                 onlySaved={route.saved}
                 onlyAssigned={route.assigned}
                 onFiltersChange={(patch) =>
@@ -629,7 +591,7 @@ export default function GuidanceApp({
               <Information data={data} onExpired={expireSession} />
             )}
           </main>
-          {route.view !== "map" && menu(true)}
+          {menu(true)}
         </>
       )}
       {ready && settingNumber && (
