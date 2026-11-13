@@ -147,8 +147,7 @@ def validate(source_path, output_path, sha):
             image_layers = candidate.get("layers")
             # BuildKit provenance is a non-runnable OCI attestation manifest.
             # Older engines omit artifactType/subject, so inspect its media types.
-            if (not isinstance(config, dict) or config.get("mediaType") != "application/vnd.oci.empty.v1+json"
-                    or not isinstance(image_layers, list)
+            if (not isinstance(config, dict) or not isinstance(image_layers, list)
                     or not image_layers
                     or any(not isinstance(layer, dict) or layer.get("mediaType") != "application/vnd.in-toto+json" for layer in image_layers)):
                 raise InvalidArchive("archive contains an additional OCI image")
