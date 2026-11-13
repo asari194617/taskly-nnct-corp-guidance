@@ -543,26 +543,52 @@ test("Desktop map previews follow the cursor and flip within map edges without m
     })),
   ).toEqual(before);
   await expect(booth).toHaveAttribute("aria-pressed", "false");
+  // Stay clear of native scrollbar gutters while remaining close enough to
+  // the edge that a 360px tooltip must flip to the other side of the cursor.
   const targets = [
-    { x: map.x + map.width - 4, y: map.y + map.height / 2, edge: "right" },
-    { x: map.x + map.width / 2, y: map.y + map.height - 4, edge: "bottom" },
+    { x: map.x + map.width - 24, y: map.y + map.height * 0.45, edge: "right" },
+    { x: map.x + map.width * 0.55, y: map.y + map.height - 24, edge: "bottom" },
   ];
   for (const target of targets) {
-    // Move the drawing so a real hover can occur beside the viewport edge.
-    await booth.evaluate((node, point) => {
-      const area = node.closest(".venue-map-viewport")!;
-      const box = node.getBoundingClientRect();
-      area.scrollLeft += box.left + box.width / 2 - point.x;
-      area.scrollTop += box.top + box.height / 2 - point.y;
-    }, target);
-    await page.mouse.move(target.x, target.y);
+    const source = (await booth.boundingBox())!;
+    await page.mouse.move(
+      source.x + source.width / 2,
+      source.y + source.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(target.x, target.y, { steps: 8 });
+    await page.mouse.up();
+    const actual = (await booth.boundingBox())!;
+    const pointer = {
+      x: Math.max(
+        actual.x + 4,
+        Math.min(target.x, actual.x + actual.width - 4),
+      ),
+      y: Math.max(
+        actual.y + 4,
+        Math.min(target.y, actual.y + actual.height - 4),
+      ),
+    };
+    expect(
+      await booth.evaluate((node, point) => {
+        const hit = document.elementFromPoint(point.x, point.y);
+        return hit === node || node.contains(hit);
+      }, pointer),
+    ).toBe(true);
+    const hoverPan = await viewport.evaluate((node) => ({
+      left: node.scrollLeft,
+      top: node.scrollTop,
+    }));
+    // Enter the booth with the real pointer after releasing the drag capture.
+    await page.mouse.move(0, 0);
+    await page.mouse.move(pointer.x, pointer.y);
     await expect(preview).toBeVisible();
     await expect
       .poll(async () => {
         const rect = (await preview.boundingBox())!;
         return target.edge === "right"
-          ? rect.x + rect.width <= target.x - 11
-          : rect.y + rect.height <= target.y - 11;
+          ? Math.abs(rect.x + rect.width - (pointer.x - 12)) <= 1
+          : Math.abs(rect.y + rect.height - (pointer.y - 12)) <= 1;
       })
       .toBe(true);
     const tooltip = (await preview.boundingBox())!;
@@ -577,6 +603,17 @@ test("Desktop map previews follow the cursor and flip within map edges without m
     expect(
       await preview.evaluate((node) => getComputedStyle(node).pointerEvents),
     ).toBe("none");
+    expect(page.url()).toBe(url);
+    expect(
+      await viewport.evaluate((node) => ({
+        left: node.scrollLeft,
+        top: node.scrollTop,
+      })),
+    ).toEqual(hoverPan);
+    await expect(booth).toHaveAttribute("aria-pressed", "false");
+    await expect(
+      full.getByRole("button", { name: "マップの表示をリセット", exact: true }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
   }
 });
 
