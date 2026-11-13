@@ -5,6 +5,7 @@ export type RouteState = {
   company: string;
   focus: string;
   session: "all" | "AM" | "PM";
+  sessionExplicit: boolean;
   q: string;
   industries: string[];
   saved: boolean;
@@ -23,6 +24,7 @@ export const defaultRoute: RouteState = {
   company: "",
   focus: "",
   session: "all",
+  sessionExplicit: false,
   q: "",
   industries: [],
   saved: false,
@@ -55,6 +57,7 @@ export function readRoute(search: string, pathname = "/"): RouteState {
     company: id(query.get("company")),
     focus: id(query.get("focus")),
     session: session === "AM" || session === "PM" ? session : "all",
+    sessionExplicit: session === "AM" || session === "PM" || session === "all",
     q: (query.get("q") || "").slice(0, 200),
     industries: [
       ...new Set(
@@ -72,7 +75,7 @@ export function routeHref(route: RouteState): string {
   const query = new URLSearchParams();
   if (route.company) query.set("company", route.company);
   if (route.focus) query.set("focus", route.focus);
-  if (route.session !== "all") query.set("session", route.session);
+  if (route.sessionExplicit) query.set("session", route.session);
   if (route.q) query.set("q", route.q);
   for (const industry of [...new Set(route.industries)])
     if (industry) query.append("industry", industry);
