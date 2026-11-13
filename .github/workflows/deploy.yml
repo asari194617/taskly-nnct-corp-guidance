@@ -1,0 +1,121 @@
+name: Deploy production
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: guidance-production
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        id: release
+        with:
+          script: |
+            if (context.ref !== 'refs/heads/main') throw new Error('Deploy only from main');
+            const { owner, repo } = context.repo;
+            const sha = context.payload.workflow_run?.head_sha || context.sha;
+            if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid release SHA');
+            const { data: head } = await github.rest.repos.getCommit({ owner, repo, ref: 'main' });
+            if (head.sha !== sha) throw new Error('A newer main revision exists; skip stale deployment');
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'ci.yml', head_sha: sha, branch: 'main', event: 'push', per_page: 20,
+            });
+            if (!runs.workflow_runs.some(run => run.head_sha === sha && run.conclusion === 'success'))
+              throw new Error('This exact main commit has not passed CI');
+            core.setOutput('sha', sha);
+  web:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: production-ui
+    env:
+      NEXT_PUBLIC_API_URL: https://api.nnct-corp-guidance-2026.taskly.iy0306.com
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            deploy/r2/package-lock.json
+      - run: npm --prefix apps/web ci
+      - run: npm --prefix apps/web run build
+      - run: npm --prefix deploy/r2 ci
+      - name: Upload static UI to its dedicated R2 bucket
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: node deploy/r2/deploy.mjs apps/web/out
+      - name: Verify public HTTPS and security policy
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            https://nnct-corp-guidance-2026.taskly.iy0306.com/index.html \
+            --output "$RUNNER_TEMP/guidance-index.html"
+          node -e 'const fs=require("node:fs"); const html=fs.readFileSync(process.env.RUNNER_TEMP+"/guidance-index.html","utf8"); if(!html.includes("Content-Security-Policy") || !html.includes("sha256-")) throw new Error("Missing static security policy")'
+  api:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: production-api
+    env:
+      RELEASE_SHA: ${{ needs.release.outputs.sha }}
+      PROD_HOST: ${{ vars.PROD_HOST }}
+      PROD_USER: ${{ vars.PROD_USER }}
+      PROD_SSH_PORT: ${{ vars.PROD_SSH_PORT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+          persist-credentials: false
+      - name: Build Go service with immutable revision
+        run: |
+          docker build --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+            --tag "ghcr.io/asari194617/taskly-nnct-corp-guidance:$RELEASE_SHA" .
+      - name: Install dedicated deployment key and pinned host identity
+        env:
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ vars.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$PROD_HOST" && test -n "$PROD_USER" && test -n "$PROD_SSH_PORT"
+          test -n "$PROD_SSH_KEY" && test -n "$PROD_SSH_KNOWN_HOSTS"
+          install -m 700 -d "$RUNNER_TEMP/guidance-ssh"
+          printf '%s\n' "$PROD_SSH_KEY" > "$RUNNER_TEMP/guidance-ssh/key"
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/guidance-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/guidance-ssh/key" "$RUNNER_TEMP/guidance-ssh/known_hosts"
+      - name: Deliver image to the restricted production command
+        run: |
+          docker save "ghcr.io/asari194617/taskly-nnct-corp-guidance:$RELEASE_SHA" | gzip -c | \
+            ssh -T -i "$RUNNER_TEMP/guidance-ssh/key" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o "UserKnownHostsFile=$RUNNER_TEMP/guidance-ssh/known_hosts" \
+              -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "deploy $RELEASE_SHA"
+      - name: Verify readiness and protected data boundary
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            https://api.nnct-corp-guidance-2026.taskly.iy0306.com/readyz
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            https://api.nnct-corp-guidance-2026.taskly.iy0306.com/api/guidance)
+          test "$status" = 401
+      - if: always()
+        name: Remove deployment credentials
+        run: rm -rf "$RUNNER_TEMP/guidance-ssh"

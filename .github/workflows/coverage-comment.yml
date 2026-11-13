@@ -1,0 +1,64 @@
+name: PR coverage report
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+permissions:
+  actions: read
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      # This privileged workflow never checks out or executes the PR's code.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        continue-on-error: true
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: coverage-*
+          merge-multiple: true
+          path: reports
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('node:fs');
+            const run = context.payload.workflow_run;
+            const {owner, repo} = context.repo;
+            const read = name => {
+              const file = `reports/${name}.json`;
+              if (fs.statSync(file).size > 4096) throw new Error('Oversized report');
+              return JSON.parse(fs.readFileSync(file, 'utf8'));
+            };
+            let metadata;
+            try { metadata = read('pr'); } catch { core.warning('PR metadata unavailable'); return; }
+            if (!Number.isSafeInteger(metadata.number) || metadata.number < 1 ||
+                !/^[0-9a-f]{40}$/.test(metadata.sha) || typeof metadata.repository !== 'string') return;
+            if (run.head_repository?.full_name !== metadata.repository ||
+                (run.pull_requests.length && !run.pull_requests.some(p => p.number === metadata.number))) return;
+            const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
+            if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
+                pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
+            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['PDF extractor (Python statements)', 'extractor'], ['Browser E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
+              let value = 'Unavailable (test/setup failed)';
+              try {
+                const {percent} = read(id);
+                if (typeof percent === 'number' && Number.isFinite(percent) && percent >= 0 && percent <= 100)
+                  value = `${percent.toFixed(1)}% ${['e2e','integration'].includes(id) ? '' : percent >= 80 ? '✅' : '❌'}`;
+              } catch {}
+              return `| ${name} | ${value} | ${['e2e','integration'].includes(id) ? 'Measured' : '80%'} |`;
+            });
+            const marker = '<!-- nnct-guidance-coverage -->';
+            const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
+              '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
+              'Go application, importer, Web unit tests and PDF extraction require 80%. Integration and browser execution are reported separately.',
+              `[CI run](${run.html_url})`].join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments,
+              {owner,repo,issue_number:metadata.number,per_page:100});
+            const previous = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (previous) await github.rest.issues.updateComment({owner,repo,comment_id:previous.id,body});
+            else await github.rest.issues.createComment({owner,repo,issue_number:metadata.number,body});
+            await core.summary.addRaw(body).write();

@@ -1,0 +1,40 @@
+# Runtime configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.gpg
+# Source documents, extracted event information and database exports
+/data/
+/private/
+**/private/
+*.pdf
+*.csv
+*.tsv
+*.sql.gz
+*.dump
+*.bak
+# Generated files
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.out
+__pycache__/
+.venv/
+.DS_Store
+# Private map renders must remain outside the repository
+/map-*.png
+/guidance-*.json
+.coverage
+.coverage.*
+python-coverage.json
+/api.json
+/importer.json
+/web.json
+/extractor.json
+/integration.json
+/e2e.json
+*.tsbuildinfo
