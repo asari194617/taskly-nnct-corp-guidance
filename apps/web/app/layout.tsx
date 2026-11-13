@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import "@openameba/spindle-tokens/spindle-tokens.css";
+import "@openameba/spindle-tokens/dist/css/spindle-tokens-animation.css";
+import "@openameba/spindle-tokens/dist/css/spindle-tokens-font.css";
+import "@openameba/spindle-tokens/dist/css/spindle-tokens-spacing-mobile.css";
 import "@openameba/spindle-ui/index.css";
 import "./globals.css";
 

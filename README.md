@@ -44,15 +44,17 @@ npm --prefix apps/web ci
 npm --prefix apps/web run dev
 ```
 
-画面は `http://127.0.0.1:3000`、API は `http://127.0.0.1:3071` です。`UI_ORIGIN`、`API_ORIGIN`、`NEXT_PUBLIC_API_URL` のホスト・ポートを一致させます。
+画面は `http://127.0.0.1:3000`、API は `http://127.0.0.1:3071` です。`UI_ORIGIN` は画面の origin、`API_ORIGIN` と `NEXT_PUBLIC_API_URL` は API の origin に一致させます。
 
-ローカルの taskly-auth を `AUTH_ISSUER=http://127.0.0.1:3067` で動かし、既存の `OAUTH_PUBLIC_CLIENTS_JSON` を保持して次の登録を追加します。
+ローカルの taskly-auth は標準の `http://localhost:3067` を利用し、既存の `OAUTH_PUBLIC_CLIENTS_JSON` を保持して次の登録を追加します。
 
 ```json
 {"client_id":"nnct-corp-guidance-dev","redirect_uri":"http://127.0.0.1:3071/auth/callback"}
 ```
 
 本番の登録は別の client ID・HTTPS callback を使います。ローカル確認のために本番認証の登録や認証データを変更しないでください。
+
+ガイダンスの画面・API・callback は `127.0.0.1` に揃えます。認証サービスは独立した origin を利用できるため、taskly-auth の認証画面・API・issuer は既存の `localhost` 設定を維持できます。認証サービス側を別の origin に設定済みの場合は、その実際の issuer をガイダンスの `AUTH_ISSUER` に指定してください。
 
 ## 手元の配布資料を取り込む
 

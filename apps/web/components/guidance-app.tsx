@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
+import { Checkbox } from "@openameba/spindle-ui/Form/Checkbox";
+import { IconButton } from "@openameba/spindle-ui/IconButton";
+import { TextButton } from "@openameba/spindle-ui/TextButton";
+import { SegmentedControl } from "@openameba/spindle-ui/SegmentedControl";
+import { UnderlineTab } from "@openameba/spindle-ui/NavigationTab";
 import { TextField } from "@openameba/spindle-ui/Form/TextField";
 import { DropDown } from "@openameba/spindle-ui/Form/DropDown";
 import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
@@ -10,6 +15,7 @@ import type { Company, Document, Guidance, User } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 
 type View = "companies" | "schedule" | "map" | "plan";
+const selectLayout = { width: "100%", maxWidth: "100%", minWidth: 0 };
 const navigation: { id: View; title: string; short: string; icon: IconName }[] =
   [
     { id: "companies", title: "企業を探す", short: "企業", icon: "building" },
@@ -208,34 +214,26 @@ export default function GuidanceApp() {
               <span className="user-name">
                 {user.name || "Taskly ユーザー"}
               </span>
-              <button
-                className="icon-button logout-button"
+              <IconButton
+                variant="neutral"
                 onClick={() => void logout()}
                 disabled={busy}
                 aria-label="ログアウト"
               >
                 <Icon name="logout" />
-              </button>
+              </IconButton>
             </>
           )}
         </div>
       </header>
       {!ready ? (
         <main id="main" className="welcome-main">
-          <div className="welcome-content">
-            <span className="eyebrow">
-              <span className="mini-line" /> FIND YOUR NEXT STEP
-            </span>
-            <h1>
-              知らなかった企業が、
-              <br />
-              未来の選択肢になる。
-            </h1>
+          <section className="welcome-content" aria-labelledby="welcome-title">
+            <h1 id="welcome-title">企業ガイダンス</h1>
             <p className="welcome-lead">
-              企業を知る。話を聞く。可能性を広げる。
-              <br />
-              ガイダンスの準備から、当日の会場案内まで。
+              企業情報・見学スケジュール・会場マップを確認できます。
             </p>
+            <p>気になる企業をチェックして、当日の見学を準備しましょう。</p>
             <div className="welcome-action">
               {status === "loading" ? (
                 <div className="loading-line" role="status">
@@ -248,8 +246,6 @@ export default function GuidanceApp() {
                   {status === "signed-out" ? (
                     <Button
                       size="large"
-                      icon={<Icon name="arrow" />}
-                      iconPosition="end"
                       onClick={() => {
                         window.location.href = `${API_URL}/auth/start`;
                       }}
@@ -262,83 +258,41 @@ export default function GuidanceApp() {
                     </Button>
                   )}
                   <p className="secure-note">
-                    <Icon name="lock" size={15} />
+                    <Icon name="lock" />
                     企業情報・資料の閲覧にはログインが必要です
                   </p>
                 </>
               )}
             </div>
-            <div className="welcome-features">
-              <span>
-                <Icon name="building" />
-                企業を探す
-              </span>
-              <span>
-                <Icon name="calendar" />
-                見学を準備
-              </span>
-              <span>
-                <Icon name="map" />
-                会場を確認
-              </span>
-            </div>
-          </div>
-          <div className="welcome-art" aria-hidden="true">
-            <div className="art-orbit orbit-one" />
-            <div className="art-orbit orbit-two" />
-            <div className="art-dot dot-one" />
-            <div className="art-dot dot-two" />
-            <div className="art-tag">
-              <Icon name="check" size={16} />
-              きっと、次の一歩が見つかる。
-            </div>
-            <div className="art-building">
-              <div className="building-top" />
-              <div className="building-windows">
-                {Array.from({ length: 12 }, (_, index) => (
-                  <i key={index} />
-                ))}
-              </div>
-              <div className="building-door" />
-            </div>
-            <div className="art-card card-one">
-              <span className="art-icon">
-                <Icon name="building" size={25} />
-              </span>
-              <div>
-                <b>企業との出会い</b>
-                <span>視野を、もっと広く。</span>
-              </div>
-            </div>
-            <div className="art-card card-two">
-              <Icon name="bookmark" size={21} />
-              <span>気になる企業を、見学リストに。</span>
-            </div>
-            <span className="art-caption">DISCOVER YOUR POSSIBILITIES</span>
-          </div>
+          </section>
         </main>
       ) : (
         <div className="app-layout">
           <aside className="sidebar">
-            <p className="sidebar-label">GUIDANCE GUIDE</p>
+            <p className="sidebar-label">ガイダンスメニュー</p>
             <nav aria-label="メインナビゲーション">
               {navigation.map((item) => (
-                <button
+                <div
+                  className="nav-item"
                   key={item.id}
-                  className={`nav-item ${view === item.id ? "active" : ""}`}
-                  onClick={() => navigate(item.id)}
-                  aria-current={view === item.id ? "page" : undefined}
+                  data-current={view === item.id ? "true" : undefined}
                 >
-                  <Icon name={item.icon} />
-                  <span>{item.title}</span>
-                  {item.id === "plan" && saved.size > 0 && (
-                    <span className="nav-count">{saved.size}</span>
-                  )}
-                </button>
+                  <TextButton
+                    variant={view === item.id ? undefined : "subtle"}
+                    icon={<Icon name={item.icon} />}
+                    onClick={() => navigate(item.id)}
+                    aria-current={view === item.id ? "page" : undefined}
+                  >
+                    {item.title}
+                    {item.id === "plan" && saved.size > 0
+                      ? ` (${saved.size})`
+                      : ""}
+                  </TextButton>
+                </div>
               ))}
             </nav>
             <div className="sidebar-event">
-              <span className="eyebrow">EVENT INFORMATION</span>
+              <h2>開催情報</h2>
               <b>{data.event.title}</b>
               <span>
                 <Icon name="calendar" size={16} />
@@ -349,11 +303,7 @@ export default function GuidanceApp() {
                 {data.event.venue}
               </span>
             </div>
-            <p className="sidebar-foot">
-              出会いを、次の一歩へ。
-              <br />
-              <span>Powered by Taskly</span>
-            </p>
+            <p className="sidebar-foot">Taskly · 企業ガイダンス</p>
           </aside>
           <main id="main" className="main-content">
             {error && (
@@ -394,17 +344,16 @@ export default function GuidanceApp() {
             className="mobile-navigation"
             aria-label="モバイルナビゲーション"
           >
-            {navigation.map((item) => (
-              <button
-                key={item.id}
-                className={view === item.id ? "active" : ""}
-                onClick={() => navigate(item.id)}
-                aria-current={view === item.id ? "page" : undefined}
-              >
-                <Icon name={item.icon} />
-                <span>{item.short}</span>
-              </button>
-            ))}
+            <UnderlineTab
+              key={view}
+              defaultSelectedId={view}
+              options={navigation.map((item) => ({
+                id: item.id,
+                label: item.short,
+              }))}
+              variant="fixed"
+              onClick={(_, id) => navigate(id as View)}
+            />
           </nav>
         </div>
       )}
@@ -431,12 +380,10 @@ export default function GuidanceApp() {
 }
 
 function ViewHeading({
-  label,
   title,
   description,
   children,
 }: {
-  label: string;
   title: string;
   description: string;
   children?: React.ReactNode;
@@ -444,7 +391,6 @@ function ViewHeading({
   return (
     <div className="view-heading">
       <div>
-        <span className="eyebrow">{label}</span>
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
@@ -468,6 +414,8 @@ function Companies({
   const [search, setSearch] = useState("");
   const [session, setSession] = useState("all");
   const [industry, setIndustry] = useState("");
+  // Spindle DropDown owns its visible label; remount only when filters reset.
+  const [industryReset, setIndustryReset] = useState(0);
   const [onlySaved, setOnlySaved] = useState(false);
   const industries = useMemo(
     () =>
@@ -490,14 +438,10 @@ function Companies({
       ),
     [data, search, session, industry, onlySaved, saved],
   );
-  const am = data.companies.filter(
-    (company) => company.session === "AM",
-  ).length;
   return (
     <>
       <ViewHeading
-        label="DISCOVER COMPANIES"
-        title="新しい可能性を、見つけよう。"
+        title="企業を探す"
         description="気になる企業を探して、当日の見学を準備しましょう。"
       />
       <div className="event-banner">
@@ -514,16 +458,18 @@ function Companies({
             </span>
           </p>
         </div>
-        <button onClick={onMap}>
+        <TextButton
+          icon={<Icon name="arrow" />}
+          iconPosition="end"
+          onClick={onMap}
+        >
           会場マップを見る
-          <Icon name="arrow" size={18} />
-        </button>
+        </TextButton>
       </div>
       <section className="company-search" aria-label="企業の検索と絞り込み">
         <div className="search-row">
           <label className="search-field">
             <span className="sr-only">企業名・業種・ブース番号で検索</span>
-            <Icon name="search" />
             <TextField
               id="company-search"
               type="search"
@@ -532,9 +478,14 @@ function Companies({
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          <label className="industry-select">
-            <span className="sr-only">業種で絞り込む</span>
+          <div className="industry-select bounded-field">
+            <label className="sr-only" htmlFor="industry-filter">
+              業種で絞り込む
+            </label>
             <DropDown
+              id="industry-filter"
+              key={industryReset}
+              style={selectLayout}
               value={industry}
               onChange={(event) => setIndustry(event.target.value)}
               aria-label="業種で絞り込む"
@@ -544,38 +495,29 @@ function Companies({
                 <option key={value}>{value}</option>
               ))}
             </DropDown>
-          </label>
+          </div>
         </div>
         <div className="filter-row">
-          <div className="session-tabs" aria-label="参加時間帯">
-            {[
-              { id: "all", label: "すべて", count: data.companies.length },
-              { id: "AM", label: "午前の部", count: am },
-              {
-                id: "PM",
-                label: "午後の部",
-                count: data.companies.length - am,
-              },
-            ].map((item) => (
-              <button
-                key={item.id}
-                aria-pressed={session === item.id}
-                className={session === item.id ? "active" : ""}
-                onClick={() => setSession(item.id)}
-              >
-                {item.label}
-                <span>{item.count}</span>
-              </button>
-            ))}
+          <fieldset className="session-tabs">
+            <legend>参加時間帯</legend>
+            <SegmentedControl
+              selectedId={session}
+              options={[
+                { id: "all", label: "すべて" },
+                { id: "AM", label: "午前の部" },
+                { id: "PM", label: "午後の部" },
+              ]}
+              onClick={(_, id) => setSession(id)}
+            />
+          </fieldset>
+          <div className="saved-filter">
+            <Checkbox
+              checked={onlySaved}
+              onChange={(event) => setOnlySaved(event.target.checked)}
+            >
+              保存した企業
+            </Checkbox>
           </div>
-          <button
-            className={`saved-filter ${onlySaved ? "active" : ""}`}
-            aria-pressed={onlySaved}
-            onClick={() => setOnlySaved(!onlySaved)}
-          >
-            <Icon name="bookmark" size={17} />
-            保存した企業
-          </button>
         </div>
       </section>
       <div className="results-label" aria-live="polite">
@@ -610,6 +552,7 @@ function Companies({
               setSearch("");
               setSession("all");
               setIndustry("");
+              setIndustryReset((previous) => previous + 1);
               setOnlySaved(false);
             }}
           >
@@ -634,36 +577,39 @@ function CompanyCard({
   return (
     <article className="company-card">
       <div className="company-card-top">
-        <span className={`session-badge ${company.session.toLowerCase()}`}>
+        <span className="session-badge">
           {sessionLabel(company.session)}の部
         </span>
-        <button
-          className={`save-button ${saved ? "saved" : ""}`}
-          onClick={onSave}
-          aria-pressed={saved}
+        <Checkbox
+          checked={saved}
+          onChange={onSave}
           aria-label={`${company.name}を${saved ? "見学リストから削除" : "見学リストに保存"}`}
         >
-          <Icon name="bookmark" size={21} />
-        </button>
+          気になる企業
+        </Checkbox>
       </div>
-      <button className="company-card-main" onClick={onSelect}>
-        <h2>{company.name}</h2>
+      <div className="company-card-main">
+        <h2>
+          <TextButton onClick={onSelect}>{company.name}</TextButton>
+        </h2>
         <div className="industry-tags">
           {company.industries.map((value) => (
             <span key={value}>{value}</span>
           ))}
         </div>
-        <span className="company-card-bottom">
-          <span>
-            <Icon name="location" size={16} />
-            ブース <b>{company.booth}</b>
-          </span>
-          <span className="card-more">
-            詳細を見る
-            <Icon name="arrow" size={17} />
-          </span>
+      </div>
+      <div className="company-card-bottom">
+        <span>
+          ブース <b>{company.booth}</b>
         </span>
-      </button>
+        <TextButton
+          onClick={onSelect}
+          icon={<Icon name="arrow" />}
+          iconPosition="end"
+        >
+          詳細を見る
+        </TextButton>
+      </div>
     </article>
   );
 }
@@ -723,13 +669,13 @@ function CompanyDialog({
           <span className={`session-badge ${company.session.toLowerCase()}`}>
             {sessionLabel(company.session)}の部
           </span>
-          <button
-            className="icon-button"
+          <IconButton
+            variant="neutral"
             onClick={onClose}
             aria-label="詳細を閉じる"
           >
             <Icon name="close" />
-          </button>
+          </IconButton>
         </div>
         <h2 id="company-dialog-title">{company.name}</h2>
         <div className="industry-tags">
@@ -743,22 +689,26 @@ function CompanyDialog({
             <span>会場ブース番号</span>
             <strong>{company.booth}</strong>
           </div>
-          <button onClick={onMap}>
+          <TextButton
+            onClick={onMap}
+            icon={<Icon name="arrow" />}
+            iconPosition="end"
+          >
             マップを確認
-            <Icon name="arrow" size={18} />
-          </button>
+          </TextButton>
         </div>
         <p className="detail-note">
           同じブース番号でも、午前と午後で企業が入れ替わります。時間帯をご確認ください。
         </p>
-        <Button
-          layout="fullWidth"
-          variant={saved ? "outlined" : "contained"}
-          icon={<Icon name={saved ? "check" : "bookmark"} />}
-          onClick={onSave}
-        >
-          {saved ? "見学リストに保存済み · 解除する" : "見学リストに保存する"}
-        </Button>
+        <div className="detail-interest">
+          <Checkbox
+            checked={saved}
+            onChange={onSave}
+            aria-label={`${company.name}を${saved ? "見学リストから削除" : "見学リストに保存"}`}
+          >
+            気になる企業
+          </Checkbox>
+        </div>
         <p className="source-note">
           出典：配布PDF {company.source_page} ページ
         </p>
@@ -771,8 +721,7 @@ function Schedule({ data }: { data: Guidance }) {
   return (
     <>
       <ViewHeading
-        label="PLAN YOUR DAY"
-        title="一日の流れを、確認する。"
+        title="スケジュール"
         description="指定企業のタームと自由に見学する時間を確認しましょう。"
       />
       <div className="schedule-toolbar">
@@ -780,9 +729,11 @@ function Schedule({ data }: { data: Guidance }) {
           <Icon name="calendar" />
           {dateLabel(data.event.date)}
         </span>
-        <label>
-          学年
+        <div className="schedule-grade bounded-field">
+          <label htmlFor="schedule-grade">学年</label>
           <DropDown
+            id="schedule-grade"
+            style={selectLayout}
             value={grade}
             onChange={(event) => setGrade(event.target.value)}
             aria-label="スケジュールの学年"
@@ -791,7 +742,7 @@ function Schedule({ data }: { data: Guidance }) {
             <option value="4">本科4年</option>
             <option value="5">専攻科1年</option>
           </DropDown>
-        </label>
+        </div>
       </div>
       <section className="timeline" aria-label="ガイダンススケジュール">
         {data.schedule.map((slot) => (
@@ -893,8 +844,7 @@ function Plan({
   return (
     <>
       <ViewHeading
-        label="YOUR VISIT LIST"
-        title="自分だけの、見学の準備。"
+        title="自分の見学リスト"
         description="指定企業を確認して、気になる企業を見学リストにまとめましょう。"
       />
       <section className="assignment-panel">
@@ -918,9 +868,13 @@ function Plan({
             });
           }}
         >
-          <label>
-            <span>学科</span>
+          <div className="form-field bounded-field">
+            <label className="field-label" htmlFor="student-department">
+              学科
+            </label>
             <DropDown
+              id="student-department"
+              style={selectLayout}
               value={department}
               onChange={(event) => setDepartment(event.target.value)}
               required
@@ -931,10 +885,14 @@ function Plan({
                 <option key={item}>{item}</option>
               ))}
             </DropDown>
-          </label>
-          <label>
-            <span>学年</span>
+          </div>
+          <div className="form-field bounded-field">
+            <label className="field-label" htmlFor="student-grade">
+              学年
+            </label>
             <DropDown
+              id="student-grade"
+              style={selectLayout}
               value={grade}
               onChange={(event) => setGrade(event.target.value)}
               aria-label="学年"
@@ -942,9 +900,11 @@ function Plan({
               <option value="3">本科3年</option>
               <option value="4">本科4年</option>
             </DropDown>
-          </label>
-          <label>
-            <span>出席番号</span>
+          </div>
+          <div className="form-field bounded-field">
+            <label className="field-label" htmlFor="student-number">
+              出席番号
+            </label>
             <TextField
               id="student-number"
               type="number"
@@ -956,7 +916,7 @@ function Plan({
               placeholder="番号"
               required
             />
-          </label>
+          </div>
           <Button type="submit">確認する</Button>
         </form>
         {lookup && (
@@ -976,7 +936,9 @@ function Plan({
                       (item) => item.term === visit.term,
                     );
                     return (
-                      <button
+                      <Button
+                        variant="neutral"
+                        layout="fullWidth"
                         key={visit.term}
                         onClick={() => company && onSelect(company)}
                         disabled={!company}
@@ -990,7 +952,7 @@ function Plan({
                           {company ? `ブース ${company.booth}` : ""}
                           <Icon name="arrow" size={17} />
                         </span>
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -1026,7 +988,7 @@ function Plan({
         <Empty
           icon="bookmark"
           title="気になる企業を保存しましょう"
-          text="企業カードの保存ボタンから、見学候補を追加できます。"
+          text="企業の「気になる企業」にチェックすると、見学候補を追加できます。"
         >
           <Button variant="outlined" onClick={onFind}>
             企業を探す
@@ -1116,21 +1078,20 @@ function Maps({
   return (
     <>
       <ViewHeading
-        label="FIND YOUR WAY"
-        title="会場で、迷わないために。"
+        title="会場マップ"
         description="ブース配置と休憩室の位置を、事前に確認しておきましょう。"
       />
       <div className="map-tabs" aria-label="会場マップの切り替え">
         {images.map((item) => (
-          <button
+          <Button
             key={item.id}
             aria-pressed={selected === item.id}
-            className={selected === item.id ? "active" : ""}
+            variant={selected === item.id ? "lighted" : "neutral"}
             onClick={() => setSelected(item.id)}
           >
             <Icon name="map" size={18} />
             {item.title}
-          </button>
+          </Button>
         ))}
       </div>
       {error && <Message error>{error}</Message>}
@@ -1142,29 +1103,28 @@ function Maps({
               {current.title}
             </span>
             <div>
-              <button
-                className="icon-button"
+              <IconButton
+                variant="neutral"
                 aria-label="マップを縮小"
                 disabled={zoom <= 50}
                 onClick={() => setZoom(Math.max(50, zoom - 25))}
               >
                 <Icon name="minus" size={18} />
-              </button>
-              <button
-                className="zoom-reset"
+              </IconButton>
+              <TextButton
                 onClick={() => setZoom(100)}
                 aria-label="拡大率を100パーセントに戻す"
               >
                 {zoom}%
-              </button>
-              <button
-                className="icon-button"
+              </TextButton>
+              <IconButton
+                variant="neutral"
                 aria-label="マップを拡大"
                 disabled={zoom >= 250}
                 onClick={() => setZoom(Math.min(250, zoom + 25))}
               >
                 <Icon name="plus" size={18} />
-              </button>
+              </IconButton>
             </div>
           </div>
           <div className="map-viewport">
@@ -1218,7 +1178,9 @@ function Maps({
           {documents
             .filter((item) => item.mime_type === "application/pdf")
             .map((item) => (
-              <button
+              <Button
+                variant="neutral"
+                layout="fullWidth"
                 key={item.id}
                 onClick={() => void openDocument(item)}
                 disabled={opening}
@@ -1227,12 +1189,12 @@ function Maps({
                 <span>
                   <b>{item.title}</b>
                   <small>
-                    配布ガイドブック
+                    配布PDF
                     {item.source_page ? ` · ${item.source_page} ページ` : ""}
                   </small>
                 </span>
                 <Icon name="external" size={20} />
-              </button>
+              </Button>
             ))}
         </div>
       </section>

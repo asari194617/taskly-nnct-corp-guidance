@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 // CI provides a disposable MySQL database. This test never contacts production
@@ -27,6 +27,13 @@ func TestMySQLIntegration(t *testing.T) {
 	dsn := os.Getenv("MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("MYSQL_TEST_DSN unset; real MySQL integration runs in CI")
+	}
+	connection, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatal("MYSQL_TEST_DSN has an invalid test database configuration")
+	}
+	if !strings.HasSuffix(connection.DBName, "_test") && !strings.HasSuffix(connection.DBName, "_e2e") {
+		t.Fatal("MYSQL_TEST_DSN must name a disposable database ending in _test or _e2e")
 	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {

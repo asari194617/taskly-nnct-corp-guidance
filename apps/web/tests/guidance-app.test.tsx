@@ -32,7 +32,7 @@ function nav(name: string) {
 }
 async function ready() {
   render(<GuidanceApp />);
-  await screen.findByRole("heading", { name: "新しい可能性を、見つけよう。" });
+  await screen.findByRole("heading", { name: "企業を探す" });
 }
 beforeEach(() => {
   dataset = fixture();
@@ -151,7 +151,7 @@ describe("company discovery and persistent bookmarks", () => {
       screen.getByRole("heading", { name: dataset.companies[1].name }),
     ).toBeInTheDocument();
     await userEvent.clear(search);
-    await userEvent.click(screen.getByRole("button", { name: /午後の部/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /^午後の部$/ }));
     expect(
       screen.getByRole("heading", { name: dataset.companies[2].name }),
     ).toBeInTheDocument();
@@ -169,14 +169,88 @@ describe("company discovery and persistent bookmarks", () => {
       screen.getByRole("button", { name: "条件をリセット" }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(3);
-    await userEvent.click(screen.getByRole("button", { name: /午前の部/ }));
+    const resetIndustry = screen.getByRole("combobox", {
+      name: "業種で絞り込む",
+    });
+    expect(resetIndustry).toHaveValue("");
+    expect(
+      within(resetIndustry.closest("label")!).getByText("すべての業種", {
+        selector: "span",
+      }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: /^午前の部$/ }));
     expect(screen.getAllByRole("article")).toHaveLength(2);
-    await userEvent.click(screen.getByRole("button", { name: /すべて/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /^すべて$/ }));
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "業種で絞り込む" }),
       "建設",
     );
     expect(screen.getAllByRole("article")).toHaveLength(1);
+  });
+  it("supports keyboard-operated native Spindle session radios and interest checkboxes", async () => {
+    await ready();
+    const all = screen.getByRole("radio", { name: /^すべて$/ });
+    const morning = screen.getByRole("radio", { name: /^午前の部$/ });
+    expect(all).toBeChecked();
+    all.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(morning).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(morning).toBeChecked();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    const interest = within(card(dataset.companies[0].name)).getByRole(
+      "checkbox",
+      { name: /見学リストに保存/ },
+    );
+    interest.focus();
+    await userEvent.keyboard(" ");
+    await waitFor(() => expect(interest).toBeChecked());
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/bookmarks/AM-1"),
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+  it("handles long industry and department labels without nested label elements", async () => {
+    const longIndustry =
+      "検証用の非常に長い産業分類・研究開発・ソフトウェア・環境設備・製造サービス".repeat(
+        4,
+      );
+    const longDepartment =
+      "検証用の非常に長い学科名称・複合技術システム工学科".repeat(4);
+    dataset.companies[0].industries.push(longIndustry);
+    dataset.assignments[0].department = longDepartment;
+    await ready();
+    const industry = screen.getByRole("combobox", { name: "業種で絞り込む" });
+    expect(document.querySelector("label label")).toBeNull();
+    expect(industry).toHaveStyle({
+      width: "100%",
+      maxWidth: "100%",
+      minWidth: "0",
+    });
+    await userEvent.selectOptions(industry, longIndustry);
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { name: dataset.companies[0].name }),
+    ).toBeInTheDocument();
+    await userEvent.click(nav("自分の見学リスト"));
+    const department = screen.getByRole("combobox", { name: /^学科$/ });
+    expect(document.querySelector("label label")).toBeNull();
+    expect(department).toHaveStyle({
+      width: "100%",
+      maxWidth: "100%",
+      minWidth: "0",
+    });
+    await userEvent.selectOptions(department, longDepartment);
+    await userEvent.type(screen.getByRole("spinbutton"), "7");
+    await userEvent.click(screen.getByRole("button", { name: "確認する" }));
+    expect(
+      screen.getByRole("button", { name: /ターム 1.*あおばテスト株式会社/ }),
+    ).toBeInTheDocument();
+    await userEvent.click(nav("スケジュール"));
+    expect(document.querySelector("label label")).toBeNull();
+    expect(
+      screen.getByRole("combobox", { name: "スケジュールの学年" }),
+    ).toHaveStyle({ width: "100%", maxWidth: "100%", minWidth: "0" });
   });
   it("loads saved company IDs and persists adding/removing bookmarks", async () => {
     saved.add("AM-1");
@@ -184,20 +258,20 @@ describe("company discovery and persistent bookmarks", () => {
     const first = dataset.companies[0];
     await waitFor(() =>
       expect(
-        within(card(first.name)).getByRole("button", {
+        within(card(first.name)).getByRole("checkbox", {
           name: `${first.name}を見学リストから削除`,
         }),
-      ).toHaveAttribute("aria-pressed", "true"),
+      ).toBeChecked(),
     );
     await userEvent.click(
-      screen.getByRole("button", { name: /^保存した企業$/ }),
+      screen.getByRole("checkbox", { name: /^保存した企業$/ }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(1);
     await userEvent.click(
-      screen.getByRole("button", { name: /^保存した企業$/ }),
+      screen.getByRole("checkbox", { name: /^保存した企業$/ }),
     );
     await userEvent.click(
-      within(card(first.name)).getByRole("button", {
+      within(card(first.name)).getByRole("checkbox", {
         name: `${first.name}を見学リストから削除`,
       }),
     );
@@ -208,7 +282,7 @@ describe("company discovery and persistent bookmarks", () => {
       ),
     );
     await userEvent.click(
-      within(card(first.name)).getByRole("button", {
+      within(card(first.name)).getByRole("checkbox", {
         name: `${first.name}を見学リストに保存`,
       }),
     );
@@ -223,7 +297,7 @@ describe("company discovery and persistent bookmarks", () => {
       screen.getByRole("heading", { name: first.name }),
     ).toBeInTheDocument();
     await userEvent.click(
-      within(card(first.name)).getByRole("button", {
+      within(card(first.name)).getByRole("checkbox", {
         name: `${first.name}を見学リストから削除`,
       }),
     );
@@ -236,53 +310,61 @@ describe("company discovery and persistent bookmarks", () => {
       }),
     );
     await screen.findByRole("heading", {
-      name: "新しい可能性を、見つけよう。",
+      name: "企業を探す",
     });
   });
   it("opens an accessible company detail, saves from it, closes and navigates to its map", async () => {
     await ready();
     const first = dataset.companies[0];
     await userEvent.click(
-      within(card(first.name)).getByRole("button", { name: /詳細を見る/ }),
+      within(card(first.name)).getByRole("button", { name: first.name }),
     );
     let dialog = screen.getByRole("dialog", { name: first.name });
     expect(within(dialog).getByText("会場ブース番号")).toBeInTheDocument();
     await userEvent.click(
-      within(dialog).getByRole("button", { name: "見学リストに保存する" }),
+      within(dialog).getByRole("checkbox", {
+        name: `${first.name}を見学リストに保存`,
+      }),
     );
-    await within(dialog).findByRole("button", { name: /保存済み/ });
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("checkbox", {
+          name: `${first.name}を見学リストから削除`,
+        }),
+      ).toBeChecked(),
+    );
     await userEvent.click(
       within(dialog).getByRole("button", { name: "詳細を閉じる" }),
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.click(
-      within(card(first.name)).getByRole("button", { name: /詳細を見る/ }),
+      within(card(first.name)).getByRole("button", { name: first.name }),
     );
     dialog = screen.getByRole("dialog");
     fireEvent(dialog, new Event("cancel", { bubbles: true }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.click(
-      within(card(first.name)).getByRole("button", { name: /詳細を見る/ }),
+      within(card(first.name)).getByRole("button", { name: first.name }),
     );
     dialog = screen.getByRole("dialog");
     fireEvent.click(dialog);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.click(
-      within(card(first.name)).getByRole("button", { name: /詳細を見る/ }),
+      within(card(first.name)).getByRole("button", { name: first.name }),
     );
     await userEvent.click(
       within(screen.getByRole("dialog")).getByRole("button", {
         name: "マップを確認",
       }),
     );
-    await screen.findByRole("heading", { name: "会場で、迷わないために。" });
+    await screen.findByRole("heading", { name: "会場マップ" });
     await screen.findByRole("img", { name: "テスト会場配置" });
   });
   it("hides company detail when the page becomes hidden", async () => {
     await ready();
     await userEvent.click(
       within(card(dataset.companies[0].name)).getByRole("button", {
-        name: /詳細を見る/,
+        name: dataset.companies[0].name,
       }),
     );
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
@@ -294,7 +376,7 @@ describe("company discovery and persistent bookmarks", () => {
     await ready();
     failures.set("/api/bookmarks/AM-1", 401);
     await userEvent.click(
-      within(card(dataset.companies[0].name)).getByRole("button", {
+      within(card(dataset.companies[0].name)).getByRole("checkbox", {
         name: /見学リストに保存/,
       }),
     );
@@ -318,9 +400,12 @@ describe("company discovery and persistent bookmarks", () => {
         });
       return original(input, init);
     });
-    const button = within(card(dataset.companies[0].name)).getByRole("button", {
-      name: /見学リストに保存/,
-    });
+    const button = within(card(dataset.companies[0].name)).getByRole(
+      "checkbox",
+      {
+        name: /見学リストに保存/,
+      },
+    );
     fireEvent.click(button);
     fireEvent.click(button);
     expect(
@@ -329,23 +414,23 @@ describe("company discovery and persistent bookmarks", () => {
       ),
     ).toHaveLength(1);
     await act(async () => finish());
-    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toBeChecked();
   });
   it("reports a failed bookmark without pretending it was saved", async () => {
     await ready();
     const first = dataset.companies[0];
     failures.set("/api/bookmarks/AM-1", 503);
     await userEvent.click(
-      within(card(first.name)).getByRole("button", {
+      within(card(first.name)).getByRole("checkbox", {
         name: `${first.name}を見学リストに保存`,
       }),
     );
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(
-      within(card(first.name)).getByRole("button", {
+      within(card(first.name)).getByRole("checkbox", {
         name: `${first.name}を見学リストに保存`,
       }),
-    ).toHaveAttribute("aria-pressed", "false");
+    ).not.toBeChecked();
   });
 });
 
@@ -491,10 +576,10 @@ describe("protected maps and documents", () => {
     await userEvent.click(
       within(
         screen.getByRole("navigation", { name: "モバイルナビゲーション" }),
-      ).getByRole("button", { name: /^企業$/ }),
+      ).getByRole("tab", { name: /^企業$/ }),
     );
     await screen.findByRole("heading", {
-      name: "新しい可能性を、見つけよう。",
+      name: "企業を探す",
     });
   });
   it("supports missing dates and unnamed accounts without throwing", async () => {
