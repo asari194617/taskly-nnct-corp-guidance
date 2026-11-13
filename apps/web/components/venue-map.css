@@ -126,9 +126,9 @@
 .venue-map-sheet {
   z-index: 4;
   left: var(--map-edge);
-  top: calc(var(--map-edge) + 184px);
+  top: calc(var(--map-edge) + 124px);
   width: min(388px, calc(100% - var(--map-edge) * 2));
-  max-height: max(32px, calc(100% - var(--map-edge) * 2 - 184px - 248px));
+  max-height: max(32px, calc(100% - var(--map-edge) * 2 - 124px - 248px));
   overflow: auto;
   padding: 16px;
   display: grid;
@@ -273,11 +273,26 @@
   max-width: 100%;
 }
 
+.venue-map-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.venue-map-search-row > .spui-IconButton {
+  flex: none;
+  width: 40px;
+  height: 40px;
+}
 .venue-map-search-input {
   position: relative;
+  flex: 1;
+  min-width: 0;
 }
 .venue-map-search-icon {
   position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
@@ -286,7 +301,20 @@
   pointer-events: none;
 }
 .venue-map-search-input input {
+  display: block;
+  height: 40px;
+  min-height: 40px;
   padding-left: 40px;
+}
+.venue-map-search-actions > .spui-SegmentedControl {
+  flex: 1;
+  min-width: 0;
+}
+.venue-map-search-actions > .spui-TextButton {
+  flex: none;
+  padding: 4px;
+  font-size: 0.8125rem;
+  white-space: nowrap;
 }
 .venue-map-bottom-right {
   position: absolute;
@@ -327,8 +355,6 @@
 }
 /* Keep controls outside the nonmodal company pane without shrinking the map. */
 @media (min-width: 1024px) {
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"]
-    .venue-map-bottom-right,
   .venue-map[data-mode="fullscreen"][data-detail-open="true"] .venue-map-error {
     right: calc(360px + var(--map-edge) * 2);
   }
@@ -379,14 +405,105 @@
     max-height: calc(100% - var(--map-edge) * 2);
   }
   .venue-map[data-mode="fullscreen"] .venue-map-bottom-right {
-    max-width: calc(
-      100% - var(--map-short-sheet-width) - var(--map-edge) * 3 -
-        var(--map-short-pane-space, 0px)
+    max-width: calc(100% - var(--map-short-sheet-width) - var(--map-edge) * 3);
+  }
+}
+
+.venue-map-preview {
+  right: var(--map-edge);
+  bottom: calc(var(--map-edge) + var(--map-controls-height, 200px) + 8px);
+  width: min(360px, calc(100% - var(--map-edge) * 2));
+  max-height: 64px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.venue-map-preview > svg {
+  flex: none;
+}
+.venue-map-preview > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.venue-map-preview strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.venue-map-preview span {
+  color: var(--color-text-medium-emphasis);
+}
+.venue-map-legend {
+  padding: 4px 8px;
+}
+.venue-map-legend > button {
+  padding: 4px;
+  font-size: 0.8125rem;
+}
+.venue-map-legend ul {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.venue-map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.venue-map-legend li > span {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: var(--white-100);
+}
+.venue-map-legend [data-key="selected"] {
+  border: 3px solid var(--focus-blue-100);
+}
+.venue-map-legend [data-key="assigned"] {
+  border: 3px solid var(--primary-green-80);
+}
+.venue-map-legend [data-key="saved"] {
+  border: 2px solid var(--gray-60);
+}
+@media (max-width: 639px) {
+  .venue-map[data-mode="fullscreen"] .venue-map-bottom-right {
+    max-width: calc(100% - 112px);
+  }
+}
+@media (max-width: 1023px) {
+  .venue-map[data-detail-open="true"] .venue-map-preview {
+    bottom: calc(
+      40% + var(--map-edge) + var(--map-controls-height, 200px) + 8px
     );
   }
 }
-@media (max-height: 700px) and (min-width: 1024px) {
-  .venue-map[data-mode="fullscreen"][data-detail-open="true"] {
-    --map-short-pane-space: calc(360px + var(--map-edge));
+@media (max-height: 700px) {
+  .venue-map[data-mode="fullscreen"]:has(> .venue-map-sheet)
+    .venue-map-bottom-left {
+    display: none;
+  }
+}
+
+/* Short landscape screens have room beside the controls, above the sheet. */
+@media (max-height: 700px) and (min-width: 640px) and (max-width: 1023px) {
+  .venue-map[data-detail-open="true"] .venue-map-preview {
+    right: calc(var(--map-controls-width, 300px) + var(--map-edge) * 2);
+    bottom: calc(40% + var(--map-edge));
+    width: min(
+      320px,
+      calc(
+        100% - var(--map-controls-width, 300px) - var(--map-edge) * 3 - 100px
+      )
+    );
   }
 }

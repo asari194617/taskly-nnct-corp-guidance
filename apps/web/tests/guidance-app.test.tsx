@@ -1368,6 +1368,56 @@ describe("company filtering and persistent bookmarks", () => {
     await userEvent.click(nav("気になる"));
     expect(screen.getAllByText(first.name).length).toBeGreaterThan(0);
   });
+  it.each([
+    ["dialog", "/?company=AM-1"],
+    ["region", "/map/?company=AM-1&focus=AM-1&session=AM"],
+  ] as const)(
+    "groups the favorite with the company identity in its %s",
+    async (role, path) => {
+      window.history.replaceState(null, "", path);
+      await ready();
+      const company = dataset.companies[0];
+      const details = screen.getByRole(role, { name: company.name });
+      const identity = within(details).getByRole("group", {
+        name: company.name,
+      });
+      expect(
+        within(identity).getByRole("heading", { name: company.name }),
+      ).toBeInTheDocument();
+      expect(
+        within(identity).getByText(company.industries[0]),
+      ).toBeInTheDocument();
+      expect(
+        within(identity).queryByText("ブース", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(details).getByText("ブース", { exact: true }),
+      ).toBeInTheDocument();
+      await userEvent.click(
+        within(identity).getByRole("button", {
+          name: `${company.name}を気になるに追加`,
+        }),
+      );
+      await waitFor(() => expect(saved.has(company.id)).toBe(true));
+      expect(
+        within(identity).getByRole("button", {
+          name: `${company.name}を気になるから解除`,
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(
+        within(identity).getByRole("button", {
+          name: `${company.name}を気になるから解除`,
+        }),
+      );
+      await waitFor(() => expect(saved.has(company.id)).toBe(false));
+      expect(
+        within(identity).getByRole("button", {
+          name: `${company.name}を気になるに追加`,
+        }),
+      ).toHaveAttribute("aria-pressed", "false");
+    },
+  );
+
   it("saves from a linked detail and closes the modal using its close controls", async () => {
     await ready();
     const first = dataset.companies[0];

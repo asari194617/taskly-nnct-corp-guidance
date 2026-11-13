@@ -108,6 +108,59 @@ async function industries(page: Page) {
   return group;
 }
 
+async function expectCenteredIcon(icon: Locator, input: Locator) {
+  await expect(icon).toBeVisible();
+  const iconBounds = (await icon.boundingBox())!;
+  const inputBounds = (await input.boundingBox())!;
+  expect(
+    Math.abs(
+      iconBounds.y +
+        iconBounds.height / 2 -
+        inputBounds.y -
+        inputBounds.height / 2,
+    ),
+  ).toBeLessThanOrEqual(1);
+  expect(iconBounds.x).toBeGreaterThan(inputBounds.x);
+  expect(iconBounds.x + iconBounds.width).toBeLessThan(
+    inputBounds.x + inputBounds.width,
+  );
+}
+async function expectUnobstructed(control: Locator) {
+  await expect(control).toBeVisible();
+  expect(
+    await control.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return node.contains(
+        document.elementFromPoint(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+        ),
+      );
+    }),
+  ).toBe(true);
+}
+async function expectTextOnlyHover(page: Page, link: Locator) {
+  await link.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  const normal = await link.evaluate((node) => ({
+    color: getComputedStyle(node).color,
+    background: getComputedStyle(node).backgroundColor,
+  }));
+  const before = await link.boundingBox();
+  await link.hover();
+  await expect
+    .poll(() => link.evaluate((node) => getComputedStyle(node).color))
+    .not.toBe(normal.color);
+  expect(
+    await link.evaluate((node) => getComputedStyle(node).backgroundColor),
+  ).toBe(normal.background);
+  expect(normal.background).toBe("rgba(0, 0, 0, 0)");
+  expect(
+    await link.evaluate((node) => getComputedStyle(node).textDecorationLine),
+  ).toBe("none");
+  expect(await link.boundingBox()).toEqual(before);
+}
+
 test("Taskly branding, social metadata and legacy URLs are usable before login", async ({
   page,
 }) => {
@@ -475,6 +528,21 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     ).toBe("rgba(0, 0, 0, 0)");
   }
   await page.emulateMedia({ colorScheme: "light" });
+  const preview = full.getByRole("status", {
+    name: "ポイント中の企業",
+    exact: true,
+  });
+  const selectionURL = page.url();
+  await first.hover();
+  await expect(preview).toContainText("架空あおばソフト");
+  await second.hover();
+  await expect(preview).toContainText("架空いろは機械");
+  await expect(preview).not.toContainText("架空あおばソフト");
+  await expect(first).toHaveAttribute("data-selected", "true");
+  expect(page.url()).toBe(selectionURL);
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 100パーセント");
+  await zoom.hover();
+  await expect(preview).toHaveCount(0);
   const image = full.getByRole("img", { name: "検証1階マップ", exact: true });
   expect(await image.evaluate((node) => getComputedStyle(node).opacity)).toBe(
     "1",
@@ -520,6 +588,15 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   expect(side.x).toBeGreaterThan(1440 / 2);
   expect(side.x + side.width).toBeLessThanOrEqual(1440);
   expect(new URL(page.url()).searchParams.get("company")).toBe("AM-1");
+  const openPanelURL = page.url();
+  await second.hover();
+  await expect(preview).toContainText("架空いろは機械");
+  await expect(panel).toBeVisible();
+  await expect(first).toHaveAttribute("data-selected", "true");
+  expect(page.url()).toBe(openPanelURL);
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
+  await zoom.hover();
+  await expect(preview).toHaveCount(0);
   await full.getByRole("button", { name: "マップを拡大", exact: true }).click();
   await expect(zoom).toHaveAccessibleDescription("現在の倍率 200パーセント");
   await expect(panel).toBeVisible();
@@ -1814,12 +1891,10 @@ test("Interest changes appear before a delayed API response and roll back a fail
   await expect(favorite).toBeEnabled();
   await expect(favorite).toHaveAttribute("aria-pressed", "true");
   await expect(nav(page, "気になる")).toContainText("1");
-  const errorAlert = page
-    .getByRole("alert")
-    .filter({
-      hasText:
-        "情報を取得できませんでした。時間をおいて、もう一度お試しください。",
-    });
+  const errorAlert = page.getByRole("alert").filter({
+    hasText:
+      "情報を取得できませんでした。時間をおいて、もう一度お試しください。",
+  });
   await expect(errorAlert).toBeVisible();
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
@@ -1842,4 +1917,238 @@ test("Interest changes appear before a delayed API response and roll back a fail
   await expect(company).toBeVisible();
   await page.reload();
   await expect(company).toHaveCount(0);
+});
+
+for (const width of [320, 390, 1024, 1440]) {
+  test(`Map controls retain their right-hand position around the company panel at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await login(page, "map", "/map/?session=AM&focus=AM-1");
+    const full = page.locator('.venue-map[data-mode="fullscreen"]');
+    const first = full.getByRole("button", {
+      name: "午前 ブース 1 架空あおばソフト",
+      exact: true,
+    });
+    const controls = [
+      full.getByRole("button", { name: "マップを拡大", exact: true }),
+      full.getByRole("button", { name: "マップの表示をリセット", exact: true }),
+      full.getByRole("button", { name: "マップを縮小", exact: true }),
+      full.getByRole("button", { name: "検証1階マップ", exact: true }),
+      full.getByRole("button", { name: "検証2階マップ", exact: true }),
+    ];
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const input = full.getByRole("searchbox", {
+        name: "マップの企業名",
+        exact: true,
+      });
+      await expectCenteredIcon(
+        full.locator(".venue-map-search-icon svg"),
+        input,
+      );
+      const filter = full.getByRole("button", {
+        name: "絞り込み",
+        exact: true,
+      });
+      await expect(filter).toHaveText("");
+      await expect(filter.locator("svg")).toBeVisible();
+      await expect(filter).toHaveAttribute("aria-expanded", "false");
+      await expect(filter).toHaveAttribute("aria-pressed", "false");
+      await expect(filter).toHaveAccessibleDescription("指定条件0件");
+      const inputBounds = (await input.boundingBox())!;
+      const filterBounds = (await filter.boundingBox())!;
+      expect(
+        Math.abs(
+          filterBounds.y +
+            filterBounds.height / 2 -
+            inputBounds.y -
+            inputBounds.height / 2,
+        ),
+      ).toBeLessThanOrEqual(1);
+      expect(filterBounds.x).toBeGreaterThanOrEqual(
+        inputBounds.x + inputBounds.width,
+      );
+      await filter.click();
+      await expect(filter).toHaveAttribute("aria-expanded", "true");
+      const filters = full.getByRole("region", {
+        name: "マップの絞り込み",
+        exact: true,
+      });
+      await filters
+        .getByRole("checkbox", { name: "気になるのみ", exact: true })
+        .check();
+      await expect(filter).toHaveAttribute("aria-pressed", "true");
+      await expect(filter).toHaveAccessibleDescription("指定条件1件");
+      await filters
+        .getByRole("checkbox", { name: "気になるのみ", exact: true })
+        .uncheck();
+      await filters
+        .getByRole("button", { name: "閉じる", exact: true })
+        .click();
+      const legendToggle = full.getByRole("button", {
+        name: "凡例",
+        exact: true,
+      });
+      await legendToggle.click();
+      const legend = full.getByRole("list", {
+        name: "マップの凡例",
+        exact: true,
+      });
+      await expect(legend).toBeVisible();
+      await expect(legend.getByRole("listitem")).toHaveText([
+        "選択中",
+        "指定企業",
+        "気になる",
+      ]);
+      for (const [key, color] of [
+        ["selected", "rgb(0, 145, 255)"],
+        ["assigned", "rgb(35, 123, 49)"],
+        ["saved", "rgb(104, 110, 115)"],
+      ]) {
+        expect(
+          await legend
+            .locator(`[data-key="${key}"]`)
+            .evaluate((node) => getComputedStyle(node).borderColor),
+        ).toBe(color);
+      }
+      for (const control of controls) await expectUnobstructed(control);
+      await legendToggle.click();
+      const before = await Promise.all(
+        controls.map((control) => control.boundingBox()),
+      );
+      for (const control of controls) await expectUnobstructed(control);
+      const floorsBefore = (await full
+        .locator(".venue-map-floors")
+        .boundingBox())!;
+      expect(floorsBefore.x + floorsBefore.width).toBeGreaterThan(width - 40);
+      // Keyboard selection opens the same panel without depending on an overlaid drawing hit target.
+      await first.focus();
+      await page.keyboard.press("Enter");
+      const panel = page.getByRole("region", {
+        name: "架空あおばソフト",
+        exact: true,
+      });
+      await expect(panel).toBeVisible();
+      const identity = panel.getByRole("group", {
+        name: "架空あおばソフト",
+        exact: true,
+      });
+      await expect(
+        identity.getByRole("button", { name: /^架空あおばソフトを気になる/ }),
+      ).toBeVisible();
+      await expect(
+        panel.locator(".booth-detail").getByRole("button"),
+      ).toHaveCount(0);
+      const panelBounds = (await panel.boundingBox())!;
+      for (let index = 0; index < controls.length; index++) {
+        const bounds = (await controls[index].boundingBox())!;
+        expect(bounds.x).toBeCloseTo(before[index]!.x, 0);
+        if (width >= 1024) expect(bounds.y).toBeCloseTo(before[index]!.y, 0);
+        await expectUnobstructed(controls[index]);
+        const overlaps =
+          bounds.x < panelBounds.x + panelBounds.width &&
+          bounds.x + bounds.width > panelBounds.x &&
+          bounds.y < panelBounds.y + panelBounds.height &&
+          bounds.y + bounds.height > panelBounds.y;
+        expect(overlaps).toBe(false);
+      }
+      await controls[4].click();
+      await expect(
+        full.getByRole("img", { name: "検証2階マップ", exact: true }),
+      ).toBeVisible();
+      await expect(panel).toBeVisible();
+      await controls[3].click();
+      await expect(
+        full.getByRole("img", { name: "検証1階マップ", exact: true }),
+      ).toBeVisible();
+      await controls[0].click();
+      await expect(controls[1]).toHaveAccessibleDescription(
+        "現在の倍率 125パーセント",
+      );
+      await controls[1].click();
+      await expect(controls[1]).toHaveAccessibleDescription(
+        "現在の倍率 100パーセント",
+      );
+      await panel
+        .getByRole("button", { name: "企業情報を閉じる", exact: true })
+        .click();
+      await expect(panel).not.toBeVisible();
+    }
+  });
+}
+
+test("Search controls stay balanced and company links change only text across system themes", async ({
+  page,
+}) => {
+  await login(page, "presentation", "/search/");
+  for (const width of [320, 390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await expectCenteredIcon(
+        page.locator(".company-search-icon svg"),
+        page.getByRole("searchbox", {
+          name: "企業名・業種・ブース番号で検索",
+          exact: true,
+        }),
+      );
+      const options = page
+        .getByRole("group", { name: "参加時間帯", exact: true })
+        .getByRole("radio");
+      await expect(options).toHaveCount(3);
+      const boxes = await options.evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const style = getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          return {
+            width: rect.width,
+            height: rect.height,
+            paddingLeft: parseFloat(style.paddingLeft),
+            paddingRight: parseFloat(style.paddingRight),
+          };
+        }),
+      );
+      for (const box of boxes) {
+        expect(box.width).toBeCloseTo(boxes[0].width, 0);
+        expect(box.height).toBeGreaterThanOrEqual(30);
+        expect(box.paddingLeft).toBeGreaterThanOrEqual(12);
+        expect(box.paddingRight).toBeGreaterThanOrEqual(12);
+      }
+      expect(
+        await page.locator("body").evaluate((node) => node.scrollWidth),
+      ).toBeLessThanOrEqual(width);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 844 });
+  await page.goto("/");
+  const firstCard = page
+    .locator(".company-card")
+    .filter({
+      has: page.getByRole("link", { name: "架空あおばソフト", exact: true }),
+    });
+  const save = firstCard.getByRole("button", {
+    name: /^架空あおばソフトを気になる/,
+  });
+  if ((await save.getAttribute("aria-pressed")) !== "true") await save.click();
+  await expect(save).toHaveAttribute("aria-pressed", "true");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectTextOnlyHover(
+      page,
+      firstCard.getByRole("link", { name: "架空あおばソフト", exact: true }),
+    );
+  }
+  await page.goto("/favorites/");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectTextOnlyHover(
+      page,
+      page.locator(".favorites-panel .company-name-link > a").first(),
+    );
+    await expectTextOnlyHover(
+      page,
+      page.locator(".assignment-panel .company-name-link > a").first(),
+    );
+  }
 });
