@@ -20,7 +20,7 @@ describe("shareable guidance pages", () => {
     expect(readRoute("")).toEqual(defaultRoute);
     expect(routeHref(defaultRoute)).toBe("/");
     expect(readRoute("?view=companies&session=all&saved=0&assigned=0")).toEqual(
-      defaultRoute,
+      { ...defaultRoute, sessionExplicit: true },
     );
   });
 
@@ -32,6 +32,7 @@ describe("shareable guidance pages", () => {
         company: "AM-1",
         focus: "AM-2",
         session: "PM" as const,
+        sessionExplicit: true,
         q: "研究 開発&製造",
         industries: ["機械", "通信・開発"],
         saved: true,
@@ -134,6 +135,26 @@ describe("shareable guidance pages", () => {
     expect(url.searchParams.getAll("industry")).toEqual(["機械", "通信"]);
   });
 
+  it.each(["AM", "PM", "all"] as const)(
+    "keeps an explicit %s choice distinguishable from an automatic default",
+    (session) => {
+      const route = readRoute(`?session=${session}`, "/search/");
+      expect(route).toMatchObject({ session, sessionExplicit: true });
+      expect(routeHref(route)).toBe(`/search/?session=${session}`);
+      expect(
+        readRoute(
+          new URL(routeHref(route), "https://example.invalid").search,
+          "/search/",
+        ),
+      ).toEqual(route);
+    },
+  );
+  it("does not serialize derived automatic sessions into shared URLs", () => {
+    expect(routeHref({ ...defaultRoute, session: "AM" })).toBe("/");
+    expect(routeHref({ ...defaultRoute, session: "PM" })).toBe("/");
+    expect(readRoute("?session=night").sessionExplicit).toBe(false);
+  });
+
   it("does not copy personal roster information or unrelated parameters into shared links", () => {
     const route = readRoute(
       "?roster_number=7&department=Ec4&access_token=private&saved=1",
@@ -145,6 +166,7 @@ describe("shareable guidance pages", () => {
       company: "",
       focus: "",
       session: "all",
+      sessionExplicit: false,
       q: "",
       industries: [],
       saved: false,
