@@ -477,7 +477,7 @@
 }
 @media (max-width: 639px) {
   .venue-map[data-mode="fullscreen"] .venue-map-bottom-right {
-    max-width: calc(100% - 112px);
+    max-width: calc(100% - 8rem);
   }
 }
 @media (max-width: 1023px) {
@@ -498,7 +498,8 @@
 @media (max-height: 700px) and (min-width: 640px) and (max-width: 1023px) {
   .venue-map[data-detail-open="true"] .venue-map-preview {
     right: calc(var(--map-controls-width, 300px) + var(--map-edge) * 2);
-    bottom: calc(40% + var(--map-edge));
+    top: var(--map-edge);
+    bottom: auto;
     width: min(
       320px,
       calc(

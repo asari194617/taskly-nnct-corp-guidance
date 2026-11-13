@@ -1728,6 +1728,13 @@ test("Interests appear first and an unsaved card remains undoable until a real r
       exact: true,
     }),
   ).toHaveAttribute("aria-pressed", "false");
+  // The UI is optimistic; persistence assertions wait for the completed write.
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    }),
+  ).toBeEnabled();
   expect(
     (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
   ).not.toContain("AM-2");
@@ -1743,6 +1750,12 @@ test("Interests appear first and an unsaved card remains undoable until a real r
       exact: true,
     }),
   ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるから解除",
+      exact: true,
+    }),
+  ).toBeEnabled();
   await page.reload();
   await expect(kept).toBeVisible();
   await expect(
@@ -1765,6 +1778,12 @@ test("Interests appear first and an unsaved card remains undoable until a real r
       exact: true,
     }),
   ).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    }),
+  ).toBeEnabled();
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "気になる", exact: true }),
@@ -1975,14 +1994,21 @@ for (const width of [320, 390, 1024, 1440]) {
         name: "マップの絞り込み",
         exact: true,
       });
-      await filters
-        .getByRole("checkbox", { name: "気になるのみ", exact: true })
-        .check();
+      const savedOnly = filters.getByRole("checkbox", {
+        name: "気になるのみ",
+        exact: true,
+      });
+      // Spindle's native input is visually hidden beneath its visible outline.
+      // Click the associated label, as a pointer user does, without forcing a hidden-input click.
+      const savedOnlyLabel = filters
+        .locator("label")
+        .filter({ has: savedOnly });
+      await savedOnlyLabel.click();
+      await expect(savedOnly).toBeChecked();
       await expect(filter).toHaveAttribute("aria-pressed", "true");
       await expect(filter).toHaveAccessibleDescription("指定条件1件");
-      await filters
-        .getByRole("checkbox", { name: "気になるのみ", exact: true })
-        .uncheck();
+      await savedOnlyLabel.click();
+      await expect(savedOnly).not.toBeChecked();
       await filters
         .getByRole("button", { name: "閉じる", exact: true })
         .click();
@@ -2122,11 +2148,9 @@ test("Search controls stay balanced and company links change only text across sy
   }
   await page.setViewportSize({ width: 1440, height: 844 });
   await page.goto("/");
-  const firstCard = page
-    .locator(".company-card")
-    .filter({
-      has: page.getByRole("link", { name: "架空あおばソフト", exact: true }),
-    });
+  const firstCard = page.locator(".company-card").filter({
+    has: page.getByRole("link", { name: "架空あおばソフト", exact: true }),
+  });
   const save = firstCard.getByRole("button", {
     name: /^架空あおばソフトを気になる/,
   });
