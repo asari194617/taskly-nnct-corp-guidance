@@ -9,16 +9,18 @@ import (
 )
 
 type Config struct {
-	UIOrigin      string
-	APIOrigin     string
-	AuthIssuer    string
-	ClientID      string
-	EncryptionKey []byte
-	SecureCookies bool
-	R2Endpoint    string
-	R2Bucket      string
-	R2AccessKeyID string
-	R2SecretKey   string
+	UIOrigin        string
+	APIOrigin       string
+	AuthIssuer      string
+	ClientID        string
+	EncryptionKey   []byte
+	SecureCookies   bool
+	R2Endpoint      string
+	R2Bucket        string
+	R2AccessKeyID   string
+	R2SecretKey     string
+	TasklyAPIOrigin string
+	TasklyEventID   string
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -30,7 +32,8 @@ func ConfigFromEnv() (Config, error) {
 		return Config{}, fmt.Errorf("SESSION_ENCRYPTION_KEY must be base64")
 	}
 	c := Config{UIOrigin: os.Getenv("UI_ORIGIN"), APIOrigin: os.Getenv("API_ORIGIN"), AuthIssuer: os.Getenv("AUTH_ISSUER"), ClientID: os.Getenv("AUTH_CLIENT_ID"), EncryptionKey: key,
-		R2Endpoint: os.Getenv("R2_ENDPOINT"), R2Bucket: os.Getenv("R2_BUCKET"), R2AccessKeyID: os.Getenv("R2_ACCESS_KEY_ID"), R2SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY")}
+		R2Endpoint: os.Getenv("R2_ENDPOINT"), R2Bucket: os.Getenv("R2_BUCKET"), R2AccessKeyID: os.Getenv("R2_ACCESS_KEY_ID"), R2SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
+		TasklyAPIOrigin: os.Getenv("TASKLY_API_ORIGIN"), TasklyEventID: os.Getenv("TASKLY_GUIDANCE_EVENT_ID")}
 	if c.ClientID == "" {
 		c.ClientID = "nnct-corp-guidance-2026"
 	}
@@ -44,7 +47,17 @@ func (c Config) Validate() error {
 	if len(c.EncryptionKey) != 32 {
 		return fmt.Errorf("SESSION_ENCRYPTION_KEY must decode to 32 bytes")
 	}
-	for name, value := range map[string]string{"UI_ORIGIN": c.UIOrigin, "API_ORIGIN": c.APIOrigin, "AUTH_ISSUER": c.AuthIssuer} {
+	origins := map[string]string{"UI_ORIGIN": c.UIOrigin, "API_ORIGIN": c.APIOrigin, "AUTH_ISSUER": c.AuthIssuer}
+	if (c.TasklyAPIOrigin == "") != (c.TasklyEventID == "") {
+		return fmt.Errorf("TASKLY_API_ORIGIN and TASKLY_GUIDANCE_EVENT_ID must be configured together")
+	}
+	if c.TasklyAPIOrigin != "" {
+		origins["TASKLY_API_ORIGIN"] = c.TasklyAPIOrigin
+		if !tasklyEventPattern.MatchString(c.TasklyEventID) {
+			return fmt.Errorf("TASKLY_GUIDANCE_EVENT_ID must be a stable event identifier")
+		}
+	}
+	for name, value := range origins {
 		u, err := url.Parse(value)
 		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 			return fmt.Errorf("%s must be an origin without a trailing slash", name)

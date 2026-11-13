@@ -15,13 +15,15 @@ import (
 )
 
 type Server struct {
-	config    Config
-	store     Store
-	client    *http.Client
-	aead      cipher.AEAD
-	documents *s3.PresignClient
-	flowLimit *flowLimiter
+	config     Config
+	store      Store
+	client     *http.Client
+	aead       cipher.AEAD
+	documents  *s3.PresignClient
+	homeBudget *homeRequestBudget
+	flowLimit  *flowLimiter
 }
+type authenticatedAccessTokenKey struct{}
 type User struct {
 	Sub   string `json:"sub"`
 	Email string `json:"email"`
@@ -40,7 +42,7 @@ func New(c Config, store Store, client *http.Client) (*Server, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c), flowLimit: newFlowLimiter(5, 60)}, nil
+	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c), homeBudget: &homeRequestBudget{}, flowLimit: newFlowLimiter(5, 60)}, nil
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -50,6 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/callback", s.callback)
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("GET /api/me", s.protect(s.me))
+	mux.HandleFunc("GET /api/home", s.protect(s.home))
+	mux.HandleFunc("PUT /api/home/tasks/{key}", s.protect(s.setHomeTask))
 	mux.HandleFunc("GET /api/guidance", s.protect(s.guidance))
 	mux.HandleFunc("GET /api/documents/{id}", s.protect(s.document))
 	mux.HandleFunc("GET /api/documents/{id}/url", s.protect(s.documentURL))
@@ -123,7 +127,7 @@ func (s *Server) protect(next func(http.ResponseWriter, *http.Request, User)) ht
 			failure(w, 401, "authentication_required")
 			return
 		}
-		user, sessionError := s.sessionIdentity(r.Context(), digest(cookie.Value))
+		user, token, sessionError := s.sessionIdentityWithToken(r.Context(), digest(cookie.Value))
 		if sessionError != nil {
 			if sessionError.status == http.StatusUnauthorized {
 				s.clearCookie(w, s.sessionCookieName())
@@ -131,7 +135,7 @@ func (s *Server) protect(next func(http.ResponseWriter, *http.Request, User)) ht
 			failure(w, sessionError.status, sessionError.code)
 			return
 		}
-		next(w, r, user)
+		next(w, r.WithContext(context.WithValue(r.Context(), authenticatedAccessTokenKey{}, token)), user)
 	}
 }
 func (s *Server) me(w http.ResponseWriter, r *http.Request, user User) {

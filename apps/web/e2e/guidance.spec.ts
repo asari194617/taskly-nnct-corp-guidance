@@ -1,11 +1,41 @@
 import { test, expect } from "./fixtures";
-import type { Locator, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { largeFixture } from "../tests/fixtures";
 
 const API = "http://127.0.0.1:3371";
 const ISSUER = "http://127.0.0.1:3372";
 const OBJECTS = "http://127.0.0.1:3373";
 const BUCKET = "synthetic-guidance-documents";
+const TASKLY = "http://127.0.0.1:3374";
+type TasklyFixture = {
+  event_id: string;
+  users: Record<string, number>;
+  sessions: Record<string, string>;
+  bindings: Record<string, number>;
+};
+async function tasklyFixture(request: APIRequestContext): Promise<TasklyFixture> {
+  const response = await request.get(`${TASKLY}/__test/fixture`);
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+async function tasklyOperation(request: APIRequestContext, fixture: TasklyFixture, alias: string, query: string) {
+  const response = await request.post(`${TASKLY}/graphql/`, {
+    headers: { Authorization: `Bearer ${fixture.sessions[alias]}` },
+    data: { query },
+  });
+  expect(response.status()).toBe(200);
+  const body = await response.json();
+  expect(body.errors).toBeUndefined();
+  return body.data;
+}
+async function canonicalCompleted(request: APIRequestContext, fixture: TasklyFixture, alias: string, key: string) {
+  const data = await tasklyOperation(request, fixture, alias,
+    `{ tasks(q:"Synthetic ${key}",limit:50) { items { id is_completed } } }`);
+  const task = data.tasks.items.find((item: { id: number | string }) => String(item.id) === String(fixture.bindings[key]));
+  expect(task).toBeDefined();
+  return task.is_completed as boolean;
+}
+const homeTask = (page: Page, key: string) => page.locator(`.home-task-row[data-task-id="${key}"]`);
 const nav = (page: Page, name: string) =>
   page
     .getByRole("navigation", { name: "メインナビゲーション" })
@@ -48,7 +78,7 @@ async function chooseRoster(page: Page, number: number) {
   await dialog.getByRole("button", { name: "保存する", exact: true }).click();
   await expect(dialog).not.toBeVisible();
 }
-async function login(page: Page, subject: string, path = "/", setup = true) {
+async function login(page: Page, subject: string, path = "/search/", setup = true) {
   await page.goto(path);
   await page.getByRole("button", { name: "Tasklyでログイン" }).click();
   await expect(
@@ -207,7 +237,7 @@ test("Taskly branding, social metadata and legacy URLs are usable before login",
     )
     .toBeGreaterThan(0);
   const site = "https://nnct-corp-guidance-2026.taskly.iy0306.com/";
-  const image = "https://cdn.taskly.iy0306.com/assets/thumbnail-dark.webp";
+  const image = `${site}ogp.jpg`;
   for (const [property, content] of Object.entries({
     "og:type": "website",
     "og:site_name": "Taskly",
@@ -217,7 +247,9 @@ test("Taskly branding, social metadata and legacy URLs are usable before login",
     "og:url": site,
     "og:locale": "ja_JP",
     "og:image": image,
-    "og:image:type": "image/webp",
+    "og:image:type": "image/jpeg",
+    "og:image:width": "1920",
+    "og:image:height": "1080",
   }))
     await expect(page.locator(`meta[property="${property}"]`)).toHaveAttribute(
       "content",
@@ -231,6 +263,10 @@ test("Taskly branding, social metadata and legacy URLs are usable before login",
     "content",
     image,
   );
+  const ogp = await page.request.get("/ogp.jpg");
+  expect(ogp.status()).toBe(200);
+  expect(ogp.headers()["content-type"]).toBe("image/jpeg");
+  expect((await ogp.body()).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
     site,
@@ -408,9 +444,11 @@ test("Search filters and saved companies survive reload through real MySQL", asy
     }),
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("searchbox").fill("");
-  await page.getByLabel("気になるのみ", { exact: true }).locator("..").click();
+  await page.getByRole("checkbox", { name: "気になるのみ", exact: true }).press("Space");
+  await expect(page.getByRole("checkbox", { name: "気になるのみ", exact: true })).toBeChecked();
   await assertCompanyCount(page, 1);
-  await page.getByLabel("気になるのみ", { exact: true }).locator("..").click();
+  await page.getByRole("checkbox", { name: "気になるのみ", exact: true }).press("Space");
+  await expect(page.getByRole("checkbox", { name: "気になるのみ", exact: true })).not.toBeChecked();
   await page.getByRole("radio", { name: "午後の部", exact: true }).click();
   await assertCompanyCount(page, 2);
   group = await industries(page);
@@ -466,15 +504,17 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
       exact: true,
     }),
   ).toHaveAccessibleDescription("現在の倍率 100パーセント");
-  await page.getByRole("link", { name: /一覧/ }).first().click();
-  await assertCompanyCount(page, 4);
+  await page.getByRole("link", { name: "探す", exact: true }).first().click();
+  await assertCompanyCount(page, 2);
+  await expect(page.getByRole("radio", { name: "午前の部", exact: true })).toBeChecked();
   await nav(page, "スケジュール").click();
   await expect(
     page.getByRole("heading", { name: "スケジュール", exact: true }),
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/schedule/");
   await page.goBack();
-  await assertCompanyCount(page, 4);
+  await assertCompanyCount(page, 2);
+  await expect(page.getByRole("radio", { name: "午前の部", exact: true })).toBeChecked();
   await page.goForward();
   await expect(
     page.getByRole("heading", { name: "スケジュール", exact: true }),
@@ -1182,11 +1222,11 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     full.getByRole("img", { name: "検証2階マップ", exact: true }),
   ).toBeVisible();
   await expect(full.locator(".venue-map-booth")).toHaveCount(0);
-  await page.getByRole("link", { name: /一覧/ }).first().click();
+  await page.getByRole("link", { name: "探す", exact: true }).first().click();
   await expect(
-    page.getByRole("heading", { name: "一覧", exact: true }),
+    page.getByRole("heading", { name: "探す", exact: true }),
   ).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe("/");
+  expect(new URL(page.url()).pathname).toBe("/search/");
 });
 
 test("Private R2 presigned PDFs work without cookies and expire independently of login", async ({
@@ -1331,7 +1371,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await login(page, "mobile");
+  await login(page, "mobile", "/");
   const mobile = page.getByRole("navigation", {
     name: "モバイルナビゲーション",
   });
@@ -1339,7 +1379,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
   expect(
     (await page.getByRole("banner").boundingBox())!.height,
   ).toBeLessThanOrEqual(60);
-  const current = mobile.getByRole("link", { name: "一覧", exact: true });
+  const current = mobile.getByRole("link", { name: "ホーム", exact: true });
   await expect(current).toHaveAttribute("aria-current", "page");
   await expect(current.locator("svg")).toHaveAttribute("data-filled", "true");
   expect(
@@ -1371,7 +1411,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
     "fixed",
   );
   for (const [label, path] of Object.entries({
-    一覧: "/",
+    ホーム: "/",
     探す: "/search/",
     予定: "/schedule/",
     マップ: "/map/",
@@ -1396,7 +1436,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
   ).toHaveAttribute("data-filled", "true");
   expect(
     await mobile
-      .getByRole("link", { name: "一覧", exact: true })
+      .getByRole("link", { name: "ホーム", exact: true })
       .locator("svg")
       .getAttribute("data-filled"),
   ).not.toBe("true");
@@ -1419,7 +1459,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
   expect(bounds.y).toBeCloseTo(mapHeader.y + mapHeader.height, 0);
   expect(bounds.y + bounds.height).toBeCloseTo(mapNavigation.y, 0);
   await expect(mobile).toBeVisible();
-  await mobile.getByRole("link", { name: "一覧", exact: true }).click();
+  await mobile.getByRole("link", { name: "ホーム", exact: true }).click();
   await mobile.getByRole("link", { name: "気になる", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "指定企業", exact: true }),
@@ -1514,10 +1554,11 @@ async function renderedTextContrast(text: Locator) {
   return contrastRatio(colors.foreground, colors.background);
 }
 
-test("The directory starts with companies and follows readable system color themes", async ({
+test("The home starts with tasks and explainable recommendations across readable responsive themes", async ({
   page,
 }, info) => {
-  await login(page, "presentation");
+  await login(page, "home", "/", false);
+  await chooseRoster(page, 9);
   for (const viewport of [
     { width: 390, height: 844 },
     { width: 1440, height: 900 },
@@ -1526,46 +1567,221 @@ test("The directory starts with companies and follows readable system color them
     let lightBackground = "";
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
-      await expect(
-        page.getByRole("heading", { name: "一覧", exact: true }),
-      ).toBeVisible();
+      await expect(page.getByRole("heading", { name: "ホーム", level: 1 })).toBeVisible();
+      const tasks = page.getByRole("region", { name: "やること", exact: true });
+      const recommendations = page.getByRole("region", { name: "おすすめ", exact: true });
+      await expect(homeTask(page, "assigned-visit-1").getByRole("checkbox", { name: "架空あおばソフトを見学", exact: true })).toBeVisible();
       await expect(page.getByRole("searchbox")).toHaveCount(0);
       await expect(page.getByRole("combobox")).toHaveCount(0);
-      await assertCompanyCount(page, 4);
-      const card = page.locator(".company-card").first();
-      const bounds = (await card.boundingBox())!;
+      const firstTask = tasks.locator(".home-task-row").first();
+      const bounds = (await firstTask.boundingBox())!;
       expect(bounds.y).toBeLessThan(350);
       expect(bounds.y + bounds.height).toBeLessThan(viewport.height - 70);
+      await expect(recommendations.locator(".home-recommendation")).toHaveCount(2);
+      await expect(recommendations).not.toContainText("架空あおばソフト");
+      await expect(recommendations).not.toContainText("架空みらい建設");
+      await expect(recommendations).toContainText("電子制御に関連する業種");
       const colors = await page.locator("html").evaluate((node) => {
         const style = getComputedStyle(node);
         return { color: style.color, background: style.backgroundColor };
       });
-      expect(
-        contrastRatio(colors.color, colors.background),
-      ).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.color, colors.background)).toBeGreaterThanOrEqual(4.5);
       if (colorScheme === "light") lightBackground = colors.background;
       else expect(colors.background).not.toBe(lightBackground);
-      const surface = await card.evaluate((node) => {
-        const style = getComputedStyle(node);
-        const title = getComputedStyle(node.querySelector("h2 a")!);
-        return { color: title.color, background: style.backgroundColor };
-      });
-      expect(
-        contrastRatio(surface.color, surface.background),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(
-        await page.locator("body").evaluate((node) => node.scrollWidth),
-      ).toBeLessThanOrEqual(viewport.width);
-      const screenshot = info.outputPath(
-        `directory-${viewport.width}-${colorScheme}.png`,
-      );
+      expect(await page.locator("body").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+      const screenshot = info.outputPath(`home-${viewport.width}-${colorScheme}.png`);
       await page.screenshot({ path: screenshot });
-      await info.attach(`Directory ${viewport.width}px ${colorScheme}`, {
-        path: screenshot,
-        contentType: "image/png",
-      });
+      await info.attach(`Home ${viewport.width}px ${colorScheme}`, { path: screenshot, contentType: "image/png" });
     }
   }
+});
+
+test("Home checks and native Taskly GraphQL share completion records and refresh live without navigation", async ({ page, request }) => {
+  await page.clock.install();
+  const fixture = await tasklyFixture(request);
+  const key = "assigned-visit-1";
+  const id = fixture.bindings[key];
+  expect((await tasklyOperation(request, fixture, "home", `mutation { uncompleteTask(id:${id}) }`)).uncompleteTask).toBe(true);
+  await login(page, "home", "/");
+  const checkbox = homeTask(page, key).getByRole("checkbox");
+  await expect(checkbox).not.toBeChecked();
+  await checkbox.press("Space");
+  await expect(checkbox).toBeChecked();
+  await expect(checkbox).toBeEnabled();
+  await expect.poll(() => canonicalCompleted(request, fixture, "home", key)).toBe(true);
+  expect(await canonicalCompleted(request, fixture, "home-other", key)).toBe(false);
+  await checkbox.press("Space");
+  await expect(checkbox).toBeEnabled();
+  await expect.poll(() => canonicalCompleted(request, fixture, "home", key)).toBe(false);
+  let navigations = 0;
+  page.on("framenavigated", frame => { if (frame === page.mainFrame()) navigations++; });
+  expect((await tasklyOperation(request, fixture, "home", `mutation { completeTask(id:${id}) }`)).completeTask).toBe(true);
+  // Only the browser clock advances. The real Go APIs and MySQL stay live;
+  // the dashboard's regular background refresh observes the external write.
+  await page.clock.fastForward(30_001);
+  await expect(checkbox).toBeChecked();
+  expect(navigations).toBe(0);
+  expect(new URL(page.url()).pathname).toBe("/");
+  expect((await tasklyOperation(request, fixture, "home", `mutation { uncompleteTask(id:${id}) }`)).uncompleteTask).toBe(true);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(checkbox).not.toBeChecked();
+  expect(navigations).toBe(0);
+});
+
+test("Home task changes are optimistic and a failed write restores the canonical state", async ({ page, request }) => {
+  const fixture = await tasklyFixture(request);
+  const key = "overall-survey";
+  expect((await tasklyOperation(request, fixture, "home-failure", `mutation { uncompleteTask(id:${fixture.bindings[key]}) }`)).uncompleteTask).toBe(true);
+  await login(page, "home-failure", "/");
+  const checkbox = homeTask(page, key).getByRole("checkbox");
+  await expect(checkbox).not.toBeChecked();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void;
+  const pending = new Promise<void>(resolve => { started = resolve; });
+  await page.route(`${API}/api/home/tasks/${key}`, async route => {
+    if (route.request().method() !== "PUT") return route.continue();
+    started();
+    await gate;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "synthetic-write-failure" }) });
+  });
+  try {
+    await checkbox.press("Space");
+    await pending;
+    await expect(checkbox).toBeChecked();
+    await expect(checkbox).toBeDisabled();
+    expect(await canonicalCompleted(request, fixture, "home-failure", key)).toBe(false);
+  } finally { release(); }
+  await expect(page.getByRole("region", { name: "やること", exact: true }).getByRole("alert")).toContainText("完了状態を更新できませんでした");
+  await expect(checkbox).not.toBeChecked();
+  expect(await canonicalCompleted(request, fixture, "home-failure", key)).toBe(false);
+  await page.unroute(`${API}/api/home/tasks/${key}`);
+  await page.getByRole("button", { name: "再読み込み", exact: true }).click();
+  await expect(checkbox).toBeEnabled();
+  await checkbox.press("Space");
+  await expect(checkbox).toBeEnabled();
+  await expect.poll(() => canonicalCompleted(request, fixture, "home-failure", key)).toBe(true);
+  await checkbox.press("Space");
+  await expect(checkbox).toBeEnabled();
+});
+
+test("Opening survey forms never completes tasks and the signed report link opens physical PDF page25", async ({ page, request, context }) => {
+  const fixture = await tasklyFixture(request);
+  await login(page, "home", "/");
+  let writes = 0;
+  page.on("request", req => { if (req.method() === "PUT" && req.url().includes("/api/home/tasks/")) writes++; });
+  await context.route("https://forms.example.test/**", route => route.fulfill({ contentType: "text/html", body: "<h1>Synthetic survey only</h1>" }));
+  const overall = homeTask(page, "overall-survey");
+  await expect(overall.getByRole("checkbox")).not.toBeChecked();
+  const formOpened = context.waitForEvent("page");
+  await overall.getByRole("link", { name: "回答する", exact: true }).click();
+  const form = await formOpened;
+  await expect(form).toHaveURL("https://forms.example.test/synthetic-overall");
+  await form.close();
+  await expect(overall.getByRole("checkbox")).not.toBeChecked();
+  expect(await canonicalCompleted(request, fixture, "home", "overall-survey")).toBe(false);
+  const surveyToggle = page.getByRole("button", { name: /^見学アンケート/ });
+  await surveyToggle.click();
+  await expect(page.locator("#home-survey-tasks").getByRole("checkbox")).toHaveCount(8);
+  const firstSurvey = homeTask(page, "visit-survey-1");
+  const visitOpened = context.waitForEvent("page");
+  await firstSurvey.getByRole("link", { name: "回答する", exact: true }).click();
+  const visit = await visitOpened;
+  await expect(visit).toHaveURL("https://forms.example.test/synthetic-visit");
+  await visit.close();
+  await expect(firstSurvey.getByRole("checkbox")).not.toBeChecked();
+  expect(await canonicalCompleted(request, fixture, "home", "visit-survey-1")).toBe(false);
+  const sheet = homeTask(page, "sheet-submission");
+  // Headless Chromium downloads inline PDFs while a headed browser opens its
+  // native viewer. Both retain the complete navigation URL, including page25.
+  let documentTarget = "";
+  const observeDocument = (tab: Page) => {
+    tab.on("download", download => { documentTarget = download.url(); });
+    tab.on("framenavigated", frame => {
+      if (frame === tab.mainFrame() && frame.url().startsWith(OBJECTS)) documentTarget = frame.url();
+    });
+  };
+  context.on("page", observeDocument);
+  const documentOpened = context.waitForEvent("page");
+  await sheet.getByRole("button", { name: "資料を見る", exact: true }).click();
+  const document = await documentOpened;
+  await expect.poll(() => documentTarget).toContain("#page=25");
+  context.off("page", observeDocument);
+  const signed = new URL(documentTarget);
+  expect(signed.origin).toBe(OBJECTS);
+  expect(signed.pathname).toBe(`/${BUCKET}/guide.pdf`);
+  expect(signed.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
+  const anonymous = await request.get(signed.href);
+  expect(anonymous.status()).toBe(200);
+  expect(anonymous.headers()["content-type"]).toBe("application/pdf");
+  const content = (await anonymous.body()).toString("latin1");
+  expect(content.match(/\/Type \/Page\b/g)).toHaveLength(26);
+  expect(content).toContain("Synthetic physical page 25");
+  await document.close();
+  await expect(sheet.getByRole("checkbox")).not.toBeChecked();
+  expect(await canonicalCompleted(request, fixture, "home", "sheet-submission")).toBe(false);
+  expect(writes).toBe(0);
+});
+
+test("Home recommendation details, interest toggles and booth links preserve readable deep URLs", async ({ page }) => {
+  await login(page, "home", "/");
+  const preferences = await (await page.request.get(`${API}/api/preferences`)).json();
+  if (preferences.roster_number !== 9) {
+    await accountAction(page, "名簿番号の設定");
+    await chooseRoster(page, 9);
+  }
+  const recommendations = page.getByRole("region", { name: "おすすめ", exact: true });
+  await expect(recommendations.locator(".home-recommendation")).toHaveCount(2);
+  const recommendation = recommendations.locator(".home-recommendation").filter({ hasText: "架空いろは機械" });
+  const favorite = recommendation.getByRole("button", { name: /^架空いろは機械を気になる/ });
+  const previous = await favorite.getAttribute("aria-pressed");
+  await favorite.click();
+  await expect(favorite).toHaveAttribute("aria-pressed", previous === "true" ? "false" : "true");
+  await expect(favorite).toBeEnabled();
+  await expect(recommendations.locator(".home-recommendation")).toHaveCount(2);
+  await recommendation.getByRole("link", { name: "架空いろは機械", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "架空いろは機械", exact: true });
+  await expect(dialog).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/");
+  expect(new URL(page.url()).searchParams.get("company")).toBe("AM-2");
+  await page.reload();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+  const assigned = homeTask(page, "assigned-visit-1");
+  const booth = assigned.getByRole("link", { name: "ブース 1", exact: true });
+  const target = new URL((await booth.getAttribute("href"))!, page.url());
+  expect(target.pathname).toBe("/map/");
+  expect(target.searchParams.get("focus")).toBe("AM-1");
+  expect(target.searchParams.get("session")).toBe("AM");
+  await booth.click();
+  await expect(page.locator('.venue-map-booth[data-selected="true"]')).toHaveAccessibleName("午前 ブース 1 架空あおばソフト");
+  await nav(page, "ホーム").click();
+  await expect(page.getByRole("heading", { name: "ホーム", level: 1 })).toBeVisible();
+  await page.getByRole("region", { name: "おすすめ", exact: true }).getByRole("link", { name: "探す", exact: true }).click();
+  expect(new URL(page.url()).pathname).toBe("/search/");
+  await expect(page.getByRole("searchbox")).toBeVisible();
+  await assertCompanyCount(page, 2);
+  await expect(page.getByRole("radio", { name: "午前の部", exact: true })).toBeChecked();
+});
+
+test("Home API denies anonymous writes, forged origins and Taskly users without task access", async ({ page, request }) => {
+  expect((await request.get(`${API}/api/home`)).status()).toBe(401);
+  expect((await request.put(`${API}/api/home/tasks/overall-survey`, { headers: { Origin: "http://127.0.0.1:3300" }, data: { completed: true } })).status()).toBe(401);
+  await login(page, "home-denied", "/");
+  const denied = await page.request.get(`${API}/api/home`);
+  expect(denied.status()).toBe(403);
+  expect(await denied.json()).toEqual({ error: "taskly_forbidden" });
+  await expect(page.getByRole("region", { name: "やること", exact: true }).getByRole("alert")).toContainText("やることを取得できませんでした");
+  await expect(page.locator(".home-task-row")).toHaveCount(0);
+  const update = await page.request.put(`${API}/api/home/tasks/overall-survey`, { headers: { Origin: "http://127.0.0.1:3300" }, data: { completed: true } });
+  expect(update.status()).toBe(403);
+  expect((await page.request.put(`${API}/api/home/tasks/overall-survey`, { headers: { Origin: "https://untrusted.example.test" }, data: { completed: true } })).status()).toBe(403);
+  // Taskly's native route rejects the same denied identity independently.
+  const fixture = await tasklyFixture(request);
+  const native = await request.post(`${TASKLY}/graphql/`, { headers: { Authorization: `Bearer ${fixture.sessions["home-denied"]}` }, data: { query: `mutation { completeTask(id:${fixture.bindings["overall-survey"]}) }` } });
+  const result = await native.json();
+  expect(result.errors).toBeDefined();
+  expect(result.data?.completeTask).not.toBe(true);
 });
 
 test("Account actions, interest labels and document guidance are available without crowding the header", async ({
@@ -1676,7 +1892,7 @@ test("Account actions, interest labels and document guidance are available witho
   await expect(menu).not.toBeVisible();
   await expect(trigger).toBeFocused();
   await openAccount(page);
-  await page.getByRole("heading", { name: "一覧", exact: true }).click();
+  await page.getByRole("heading", { name: "探す", exact: true }).click();
   await expect(menu).not.toBeVisible();
   await accountAction(page, "名簿番号の設定");
   const rosterSettings = rosterDialog(page);
@@ -1707,7 +1923,7 @@ test("Account actions, interest labels and document guidance are available witho
   await expect(documentLink(page)).toHaveAttribute("aria-current", "page");
   await page.goBack();
   await expect(
-    page.getByRole("heading", { name: "一覧", exact: true }),
+    page.getByRole("heading", { name: "探す", exact: true }),
   ).toBeVisible();
   await nav(page, "気になる").click();
   await expect(
@@ -1918,7 +2134,7 @@ test("A month-long session rotates short-lived access credentials and still revo
     .toBeGreaterThan(2);
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "一覧", exact: true }),
+    page.getByRole("heading", { name: "探す", exact: true }),
   ).toBeVisible();
   await accountAction(page, "ログアウト");
   await expect(
@@ -1974,6 +2190,7 @@ test("A large synthetic catalog renders incrementally on real scrolling without 
   await expect(
     page.getByRole("button", { name: "もっと見る", exact: true }),
   ).toHaveCount(0);
+  await nav(page, "ホーム").click();
   await nav(page, "探す").click();
   await assertCompanyCount(page, 24);
   const search = page.getByRole("searchbox", {
@@ -2012,7 +2229,24 @@ test("Interests appear first and an unsaved card remains undoable until a real r
     .locator(".company-card")
     .filter({ hasText: "架空いろは機械" });
   await expect(kept).toBeVisible();
-  const assigned = page.getByRole("heading", { name: "指定企業", exact: true });
+  const assigned = page.getByRole("heading", { name: "指定企業", exact: true, level: 2 });
+  const assignedSection = page.getByRole("region", { name: "指定企業", exact: true });
+  const interestHeading = page.getByRole("heading", { name: /^気になる \d+$/, level: 2 });
+  expect(await interestHeading.locator("..").evaluate(node => !node.closest(".company-card"))).toBe(true);
+  expect(await assigned.evaluate(node => !node.closest(".assigned-companies"))).toBe(true);
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const frame = await assignedSection.evaluate(node => {
+        const style = getComputedStyle(node);
+        return { background: style.backgroundColor, border: style.borderWidth, shadow: style.boxShadow };
+      });
+      expect(frame).toEqual({ background: "rgba(0, 0, 0, 0)", border: "0px", shadow: "none" });
+      await expect(assignedSection.locator(".assignment-visit")).toHaveCount(4);
+      expect((await assignedSection.boundingBox())!.y).toBeGreaterThan((await assigned.boundingBox())!.y);
+    }
+  }
   expect((await kept.boundingBox())!.y).toBeLessThan(
     (await assigned.boundingBox())!.y,
   );
@@ -2071,7 +2305,7 @@ test("Interests appear first and an unsaved card remains undoable until a real r
       exact: true,
     })
     .click();
-  await nav(page, "一覧").click();
+  await nav(page, "ホーム").click();
   await nav(page, "気になる").click();
   await expect(
     kept.getByRole("button", {
@@ -2536,6 +2770,13 @@ test("Search controls stay balanced and company links change only text across sy
     await page.setViewportSize({ width, height: 844 });
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
+      const searchFrame = await page.locator(".company-search").evaluate(node => {
+        const style = getComputedStyle(node);
+        return { background: style.backgroundColor, border: style.borderWidth, shadow: style.boxShadow, padding: style.padding };
+      });
+      expect(searchFrame).toEqual({ background: "rgba(0, 0, 0, 0)", border: "0px", shadow: "none", padding: "0px" });
+      const inputBorder = await page.getByRole("searchbox").evaluate(node => parseFloat(getComputedStyle(node).borderTopWidth));
+      expect(inputBorder).toBeGreaterThan(0);
       await expectCenteredIcon(
         page.locator(".company-search-icon svg"),
         page.getByRole("searchbox", {
@@ -2571,7 +2812,7 @@ test("Search controls stay balanced and company links change only text across sy
     }
   }
   await page.setViewportSize({ width: 1440, height: 844 });
-  await page.goto("/");
+  await page.goto("/search/");
   const firstCard = page.locator(".company-card").filter({
     has: page.getByRole("link", { name: "架空あおばソフト", exact: true }),
   });
@@ -2596,7 +2837,7 @@ test("Search controls stay balanced and company links change only text across sy
     );
     await expectTextOnlyHover(
       page,
-      page.locator(".assignment-panel .company-name-link > a").first(),
+      page.locator(".assigned-companies .company-name-link > a").first(),
     );
   }
 });
@@ -2694,7 +2935,7 @@ for (const width of [320, 1440]) {
         name: width < 1024 ? "モバイルナビゲーション" : "メインナビゲーション",
         exact: true,
       })
-      .getByRole("link", { name: "一覧", exact: true })
+      .getByRole("link", { name: "探す", exact: true })
       .click();
     await page.getByRole("link", { name: shortName, exact: true }).click();
     const directoryDialog = page.getByRole("dialog", {
@@ -2725,11 +2966,11 @@ test.describe("Mobile navigation pointer feedback", () => {
   test("Footer links stay unpainted during hover, mouse press and touch while retaining selection and keyboard focus", async ({
     page,
   }) => {
-    await login(page, "mobile");
+    await login(page, "mobile", "/");
     const footer = page.getByRole("navigation", {
       name: "モバイルナビゲーション",
     });
-    const list = footer.getByRole("link", { name: "一覧", exact: true });
+    const list = footer.getByRole("link", { name: "ホーム", exact: true });
     const search = footer.getByRole("link", { name: "探す", exact: true });
     const client = await page.context().newCDPSession(page);
     async function expectUnpainted(link: Locator) {

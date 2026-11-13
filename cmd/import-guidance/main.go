@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	guidancedata "github.com/asari194617/taskly-nnct-corp-guidance/internal/guidance"
+
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -29,9 +31,10 @@ type document struct {
 
 type dataset struct {
 	Event struct {
-		Title string `json:"title"`
-		Date  string `json:"date"`
-		Venue string `json:"venue"`
+		Title       string                             `json:"title"`
+		Date        string                             `json:"date"`
+		Venue       string                             `json:"venue"`
+		TaskActions map[string]guidancedata.TaskAction `json:"task_actions,omitempty"`
 	} `json:"event"`
 	Companies []struct {
 		ID      string `json:"id"`
@@ -117,11 +120,13 @@ func validateDataset(payload []byte, directory string) (*dataset, error) {
 		}
 	}
 	documentIDs := map[string]bool{}
+	documentMIMEs := map[string]string{}
 	for _, doc := range data.Documents {
 		if !identifier.MatchString(doc.ID) || documentIDs[doc.ID] || doc.Title == "" || len(doc.Title) > 255 || doc.FileName == "" || len(doc.FileName) > 255 || filepath.Base(doc.FileName) != doc.FileName || strings.ContainsAny(doc.FileName, `/\\`) || doc.FileName == "." || doc.FileName == ".." {
 			return nil, errors.New("invalid or duplicate document")
 		}
 		documentIDs[doc.ID] = true
+		documentMIMEs[doc.ID] = doc.MIMEType
 		if doc.MIMEType != "application/pdf" && doc.MIMEType != "image/png" {
 			return nil, errors.New("unsupported document type")
 		}
@@ -129,6 +134,9 @@ func validateDataset(payload []byte, directory string) (*dataset, error) {
 		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 			return nil, errors.New("document missing, empty, or not a regular file")
 		}
+	}
+	if err := guidancedata.ValidateTaskActions(data.Event.TaskActions, documentMIMEs); err != nil {
+		return nil, err
 	}
 	return &data, nil
 }

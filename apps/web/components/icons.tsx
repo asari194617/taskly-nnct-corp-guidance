@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 export type IconName =
+  | "home"
   | "building"
   | "calendar"
   | "map"
@@ -22,6 +23,7 @@ export type IconName =
   | "fit"
   | "filter";
 const paths: Record<IconName, React.ReactNode> = {
+  home: <path d="m3 10 9-7 9 7v11h-7v-7h-4v7H3V10Z" />,
   building: (
     <>
       <path d="M4 21V7l8-4 8 4v14M9 21v-5h6v5M8 8h1m6 0h1M8 12h1m6 0h1M2 21h20" />
@@ -108,6 +110,13 @@ const paths: Record<IconName, React.ReactNode> = {
   ),
 };
 const filledPaths: Partial<Record<IconName, React.ReactNode>> = {
+  home: (
+    <path
+      fill="currentColor"
+      stroke="none"
+      d="m2 10 10-8 10 8-1 2-1-1v11h-7v-8h-2v8H4V11l-1 1-1-2Z"
+    />
+  ),
   building: (
     <path
       fill="currentColor"

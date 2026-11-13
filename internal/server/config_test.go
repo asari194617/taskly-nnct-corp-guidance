@@ -49,6 +49,8 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestConfigFromEnv(t *testing.T) {
+	t.Setenv("TASKLY_API_ORIGIN", "")
+	t.Setenv("TASKLY_GUIDANCE_EVENT_ID", "")
 	for k, v := range map[string]string{"UI_ORIGIN": "https://ui.example.test", "API_ORIGIN": "https://api.example.test", "AUTH_ISSUER": "https://auth.example.test", "SESSION_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)), "AUTH_CLIENT_ID": "", "DATA_DIR": ""} {
 		t.Setenv(k, v)
 	}
@@ -80,5 +82,35 @@ func TestConfigFromEnv(t *testing.T) {
 	}
 	if c.SecureCookies || c.ClientID != "custom" {
 		t.Fatalf("overrides ignored: %+v", c)
+	}
+	t.Setenv("TASKLY_API_ORIGIN", "https://tasks-api.example.test")
+	t.Setenv("TASKLY_GUIDANCE_EVENT_ID", "synthetic-event")
+	c, err = ConfigFromEnv()
+	if err != nil || c.TasklyAPIOrigin != "https://tasks-api.example.test" || c.TasklyEventID != "synthetic-event" {
+		t.Fatal("Taskly bridge runtime configuration ignored")
+	}
+}
+
+func TestTasklyHomeBridgeConfigurationRequiresBoundEventAndSafeOrigin(t *testing.T) {
+	for _, example := range []struct {
+		origin, event string
+		valid         bool
+	}{
+		{"", "", true},
+		{"https://tasks-api.example.test", "synthetic-event", true},
+		{"http://127.0.0.1:3000", "synthetic-event", true},
+		{"https://tasks-api.example.test", "", false},
+		{"", "synthetic-event", false},
+		{"https://tasks-api.example.test", "../other-event", false},
+		{"http://remote.example.test", "synthetic-event", false},
+		{"https://user:pass@example.test", "synthetic-event", false},
+		{"https://tasks-api.example.test/path", "synthetic-event", false},
+		{"https://tasks-api.example.test?target=other", "synthetic-event", false},
+	} {
+		c := validConfig()
+		c.TasklyAPIOrigin, c.TasklyEventID = example.origin, example.event
+		if (c.Validate() == nil) != example.valid {
+			t.Fatalf("invalid bridge configuration validation for %q", example.origin)
+		}
 	}
 }

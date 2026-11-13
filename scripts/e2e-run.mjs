@@ -6,6 +6,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startServices } from "./e2e-services.mjs";
 import { startObjectStore, syntheticObjectStore } from "./e2e-object-store.mjs";
+import {
+  syntheticGuidanceClientID,
+  syntheticEventID,
+  syntheticTasklyClientID,
+  syntheticTasklyClientSecret,
+} from "./e2e-identities.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), ".."),
   web = resolve(root, "apps/web");
@@ -24,9 +30,20 @@ const host = process.env.E2E_MYSQL_HOST || "127.0.0.1",
   port = Number(process.env.E2E_MYSQL_PORT || 3306),
   user = process.env.E2E_MYSQL_USER || "root",
   password = process.env.E2E_MYSQL_PASSWORD;
+if (host !== "127.0.0.1")
+  throw Error("The two-service E2E stack requires loopback MySQL (127.0.0.1)");
 if (!password)
   throw Error("E2E_MYSQL_PASSWORD required (disposable MySQL only)");
 const dsn = `${user}:${password}@tcp(${host}:${port})/${database}?parseTime=true&charset=utf8mb4&loc=UTC`;
+// The second checkout is pinned by CI to a reviewed immutable Taskly commit.
+// Importing its actual bridge and GraphQL implementation proves both services
+// agree on identity, event binding and the canonical MySQL completion records.
+if (!process.env.E2E_TASKLY_DIR)
+  throw Error("E2E_TASKLY_DIR must point to the reviewed Taskly checkout");
+const tasklyServer = resolve(process.env.E2E_TASKLY_DIR, "apps/server");
+await readFile(resolve(tasklyServer, "cmd/guidance-e2e/main.go"));
+const tasklyDatabase = "taskly_guidance_e2e";
+const tasklyDSN = `${user}:${password}@tcp(${host}:${port})/${tasklyDatabase}?parseTime=true&charset=utf8mb4&loc=UTC`;
 const privateDir = await mkdtemp(resolve(tmpdir(), "guidance-e2e-"));
 const env = {
   ...process.env,
@@ -35,7 +52,7 @@ const env = {
   UI_ORIGIN: "http://127.0.0.1:3300",
   API_ORIGIN: "http://127.0.0.1:3371",
   AUTH_ISSUER: "http://127.0.0.1:3372",
-  AUTH_CLIENT_ID: "synthetic-e2e",
+  AUTH_CLIENT_ID: syntheticGuidanceClientID,
   DATA_DIR: privateDir,
   DOCUMENT_STORAGE: "r2",
   R2_ENDPOINT: "http://127.0.0.1:3373",
@@ -46,6 +63,8 @@ const env = {
   NEXT_PUBLIC_API_URL: "http://127.0.0.1:3371",
   E2E_COVERAGE: "1",
   NEXT_TELEMETRY_DISABLED: "1",
+  TASKLY_API_ORIGIN: "http://127.0.0.1:3374",
+  TASKLY_GUIDANCE_EVENT_ID: syntheticEventID,
 };
 const run = (command, args, cwd = root) =>
   new Promise((ok, fail) => {
@@ -55,9 +74,28 @@ const run = (command, args, cwd = root) =>
       code === 0 ? ok() : fail(Error(`${command} exited ${code}`)),
     );
   });
-let api, stop, objectStore;
+let api, taskly, stop, objectStore;
+async function waitReady(url, service) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      if ((await fetch(url)).ok) return;
+    } catch {}
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  throw Error(`E2E ${service} did not become ready`);
+}
 try {
-  await run(process.execPath, ["--test", "scripts/e2e-object-store.test.mjs"]);
+  // Both harness checks use loopback ports and run before any long-lived stack.
+  await run(process.execPath, ["--test", "--test-concurrency=1", "scripts/e2e-object-store.test.mjs", "scripts/e2e-services.test.mjs"]);
+  const administrator = await mysql.createConnection({ host, port, user, password });
+  try {
+    // Exact synthetic name, never accepted from arbitrary environment input.
+    // Taskly's harness additionally requires an entirely empty *_e2e database.
+    await administrator.query(`DROP DATABASE IF EXISTS ${tasklyDatabase}`);
+    await administrator.query(`CREATE DATABASE ${tasklyDatabase} CHARACTER SET utf8mb4`);
+  } finally {
+    await administrator.end();
+  }
   const db = await mysql.createConnection({
     host,
     port,
@@ -125,11 +163,11 @@ try {
     end: `${i < 4 ? "09" : "13"}:${String((i % 4) * 10 + 5).padStart(2, "0")}`,
     term: i + 1,
     required_grades:
-      i === 0 || i === 4
+      i === 0 || i === 5
         ? [3, 4]
-        : i === 2 || i === 5
+        : i === 1 || i === 4
           ? [3]
-          : i === 3 || i === 7
+          : i === 2 || i === 6
             ? [4]
             : [],
   }));
@@ -169,6 +207,11 @@ try {
       date: "2030-05-14",
       venue: "架空ホール",
       description: "検証専用データ",
+      task_actions: {
+        visit_survey: { url: "https://forms.example.test/synthetic-visit", due_at: "2030-05-15T09:00:00+09:00" },
+        overall_survey: { url: "https://forms.example.test/synthetic-overall", due_at: "2030-05-16T09:00:00+09:00" },
+        sheet_submission: { document_id: "guide", page: 25, due_at: "2030-05-17T09:00:00+09:00" },
+      },
     },
     companies,
     schedule,
@@ -179,9 +222,9 @@ try {
         number: 7,
         visits: [
           { term: 1, company_id: "AM-1" },
-          { term: 4, company_id: "AM-2" },
-          { term: 5, company_id: "PM-1" },
-          { term: 8, company_id: "PM-2" },
+          { term: 3, company_id: "AM-2" },
+          { term: 6, company_id: "PM-1" },
+          { term: 7, company_id: "PM-2" },
         ],
       },
       {
@@ -190,9 +233,20 @@ try {
         number: 8,
         visits: [
           { term: 1, company_id: "AM-2" },
-          { term: 4, company_id: "AM-1" },
-          { term: 5, company_id: "PM-2" },
-          { term: 8, company_id: "PM-1" },
+          { term: 3, company_id: "AM-1" },
+          { term: 6, company_id: "PM-2" },
+          { term: 7, company_id: "PM-1" },
+        ],
+      },
+      {
+        department: "電子制御工学科",
+        grade: 4,
+        number: 9,
+        visits: [
+          { term: 1, company_id: "AM-1" },
+          { term: 3, company_id: "AM-1" },
+          { term: 6, company_id: "PM-1" },
+          { term: 7, company_id: "PM-1" },
         ],
       },
     ],
@@ -265,15 +319,22 @@ try {
     chunk("IDAT", deflateSync(raster)),
     chunk("IEND", Buffer.alloc(0)),
   ]);
-  // A small, valid synthetic PDF lets Chromium exercise native PDF navigation.
-  const stream = "BT /F1 12 Tf 20 100 Td (Synthetic E2E document) Tj ET";
+  // Physical page 25 must exist: testing only a URL fragment against a one-page
+  // PDF would not prove the report sheet can actually be reached.
+  const pageCount = 26;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    `<< /Type /Pages /Kids [${Array.from({ length: pageCount }, (_, i) => `${4 + i * 2} 0 R`).join(" ")}] /Count ${pageCount} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
   ];
+  for (let page = 1; page <= pageCount; page++) {
+    const stream = `BT /F1 12 Tf 20 100 Td (Synthetic physical page ${page}) Tj ET`;
+    const contentID = objects.length + 2;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentID} 0 R >>`,
+      `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+    );
+  }
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
   for (const [index, object] of objects.entries()) {
@@ -302,28 +363,36 @@ try {
   if (process.env.E2E_SKIP_BUILD !== "1")
     await run("npm", ["run", "build"], web);
   await run("go", ["build", "-o", resolve(privateDir, "api"), "./cmd/api"]);
+  await run("go", ["build", "-o", resolve(privateDir, "taskly"), "./cmd/guidance-e2e"], tasklyServer);
   await mkdir(resolve(web, "coverage/e2e/raw"), { recursive: true });
   objectStore = await startObjectStore(privateDir);
   stop = await startServices(resolve(web, "out"));
+  taskly = spawn(resolve(privateDir, "taskly"), [], {
+    cwd: tasklyServer,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      TASKLY_GUIDANCE_E2E: "1",
+      TASKLY_E2E_MYSQL_DSN: tasklyDSN,
+      ADDR: "127.0.0.1:3374",
+      AUTH_CLIENT_ID: syntheticTasklyClientID,
+      AUTH_CLIENT_SECRET: syntheticTasklyClientSecret,
+      NNCT_GUIDANCE_EVENT_ID: syntheticEventID,
+      WEB_PUBLIC_URL: "http://127.0.0.1:3374",
+    },
+    stdio: "inherit",
+  });
+  await waitReady("http://127.0.0.1:3374/__test/ready", "Taskly bridge");
   api = spawn(resolve(privateDir, "api"), [], {
     cwd: root,
     env,
     stdio: "inherit",
   });
-  let ready = false;
-  for (let i = 0; i < 100; i++) {
-    try {
-      if ((await fetch("http://127.0.0.1:3371/readyz")).ok) {
-        ready = true;
-        break;
-      }
-    } catch {}
-    await new Promise((ok) => setTimeout(ok, 100));
-  }
-  if (!ready) throw Error("E2E API did not become ready");
+  await waitReady("http://127.0.0.1:3371/readyz", "guidance API");
   await run("npm", ["run", "test:e2e"], web);
 } finally {
   api?.kill("SIGTERM");
+  taskly?.kill("SIGTERM");
   if (stop) await stop();
   if (objectStore) await objectStore.close();
   await rm(privateDir, { recursive: true, force: true });

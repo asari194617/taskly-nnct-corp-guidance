@@ -8,7 +8,7 @@ it("keeps the guide icon a native link for new-tab gestures while handling an or
     name: "検証ユーザー",
     rosterNumber: 7,
     busy: false,
-    currentView: "companies",
+    currentView: "home",
     onConfigure: vi.fn(),
     onInformation,
     onLogout: vi.fn(),

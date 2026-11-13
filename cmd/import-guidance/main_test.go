@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	guidancedata "github.com/asari194617/taskly-nnct-corp-guidance/internal/guidance"
 )
 
 func fixture(t *testing.T) ([]byte, string) {
@@ -99,6 +100,41 @@ func TestValidateDocumentRejectsSymlinkAndEmpty(t *testing.T) {
 		if _, err := validateDataset(payload, directory); err == nil {
 			t.Fatal("accepted symlink or empty document")
 		}
+	}
+}
+
+func TestImportValidatesTaskActionMetadataWithoutRequiringIt(t *testing.T) {
+	payload, directory := fixture(t)
+	var data dataset
+	if json.Unmarshal(payload, &data) != nil {
+		t.Fatal("invalid synthetic fixture")
+	}
+	data.Event.TaskActions = map[string]guidancedata.TaskAction{
+		"visit_survey":     {URL: "https://forms.example.test/visit", DueAt: "2030-01-02T23:59:59+09:00"},
+		"overall_survey":   {URL: "https://forms.example.test/overall"},
+		"sheet_submission": {DocumentID: "fixture", Page: 2},
+	}
+	encoded, _ := json.Marshal(data)
+	if _, err := validateDataset(encoded, directory); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []guidancedata.TaskAction{{URL: "javascript:alert(1)"}, {URL: "https://forms.example.test", DueAt: "tomorrow"}, {DocumentID: "missing", Page: 1}, {DocumentID: "fixture", Page: 0}} {
+		kind := "visit_survey"
+		if action.DocumentID != "" {
+			kind = "sheet_submission"
+		}
+		current := data.Event.TaskActions[kind]
+		data.Event.TaskActions[kind] = action
+		encoded, _ = json.Marshal(data)
+		if _, err := validateDataset(encoded, directory); err == nil {
+			t.Fatal("invalid task action was imported")
+		}
+		data.Event.TaskActions[kind] = current
+	}
+	delete(data.Event.TaskActions, "overall_survey")
+	encoded, _ = json.Marshal(data)
+	if _, err := validateDataset(encoded, directory); err != nil {
+		t.Fatal("partially extracted actions blocked the whole catalog")
 	}
 }
 

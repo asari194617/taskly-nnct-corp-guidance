@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ import shutil
 import subprocess
 from tempfile import TemporaryDirectory
 import unicodedata
+from urllib.parse import urlsplit
 
 
 def clean(value: str) -> str:
@@ -135,6 +137,85 @@ def notice_sections(notices: list[str]) -> list[dict]:
                 pending.append(line)
     flush()
     return [section for section in sections if section["blocks"]]
+
+
+def task_actions(texts: list[str], event_date: str) -> dict:
+    """Read questionnaire links and submission instructions from the source.
+
+    URLs, dates and prose remain source data in the private JSON. A missing
+    section has no invented fallback, and conflicting links/deadlines fail.
+    PDF page numbers are physical one-based indices; source_page is printed.
+    """
+    actions = {}
+    normalized = [notice_text(text) for text in texts]
+    printed_page = lambda text: next((int(match[1]) for match in re.finditer(
+        r"(?:^|\n)[−-]\s*(\d+)\s*[−-](?=\s*(?:\n|$))", text)), None)
+    labels = {"見学アンケート": "visit_survey", "全体アンケート": "overall_survey"}
+    for text in texts:
+        for section in re.finditer(r"【\s*(見学アンケート|全体アンケート)\s*】(.*?)(?=【|$)", text, re.S):
+            links = re.findall(r"https?://[^\s<>〈〉]+", section[2])
+            if len(links) != 1:
+                raise ValueError("A questionnaire section needs exactly one source URL")
+            url = links[0]
+            parsed = urlsplit(url)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("Questionnaire source URL must be HTTPS without credentials")
+            kind = labels[section[1].strip()]
+            if kind in actions and actions[kind]["url"] != url:
+                raise ValueError("Conflicting questionnaire URLs in source")
+            if kind not in actions:
+                actions[kind] = {"url": url}
+                page = printed_page(text)
+                if page is not None:
+                    actions[kind]["source_page"] = page
+
+    deadlines = set()
+    for text in normalized:
+        for match in re.finditer(r"回答期限は(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(\d{1,2})時(?:(\d{1,2})分)?", text):
+            year = int(match[1]) if match[1] else datetime.fromisoformat(event_date).year
+            month, day, hour = map(int, match.group(2, 3, 4))
+            minute = int(match[5] or 0)
+            if not (0 <= hour <= 24 and 0 <= minute <= 59) or hour == 24 and minute != 0:
+                raise ValueError("Invalid questionnaire deadline in source")
+            deadline = datetime(year, month, day, hour % 24, minute,
+                                tzinfo=timezone(timedelta(hours=9)))
+            if hour == 24:
+                deadline += timedelta(days=1)
+            deadlines.add(deadline.isoformat())
+    if len(deadlines) > 1:
+        raise ValueError("Conflicting questionnaire deadlines in source")
+    if deadlines:
+        for action in actions.values():
+            action["due_at"] = next(iter(deadlines))
+
+    instruction_patterns = {
+        "visit_survey": r"1社聴講終了ごと[^。]*。",
+        "overall_survey": r"キャリアガイダンス終了後は[^。]*全体アンケート[^。]*。",
+    }
+    for kind, pattern in instruction_patterns.items():
+        if kind in actions:
+            instruction = next((match[0] for text in normalized
+                                if (match := re.search(pattern, text))), None)
+            if instruction:
+                actions[kind]["instructions"] = instruction
+
+    for index, text in enumerate(normalized):
+        if "見学企業シート" not in text or "このチェックシートは" not in text:
+            continue
+        instruction = next((match[0] for page in normalized if (match := re.search(
+            r"本科3[^。]*P\d+-\d+[^。]*会場出口[^。]*提出してください。", page))), None)
+        if not instruction:
+            match = re.search(r"このチェックシートは[^。]*提出してください。", text)
+            instruction = match[0] if match else None
+        action = {"document_id": "guidebook", "page": index + 1}
+        page = printed_page(texts[index])
+        if page is not None:
+            action["source_page"] = page
+        if instruction:
+            action["instructions"] = instruction
+        actions["sheet_submission"] = action
+        break
+    return actions
 
 
 def booth_rectangles(page, expected_count: int) -> list[dict]:
@@ -323,6 +404,9 @@ def extract(source: Path, output: Path) -> dict:
         assignments.extend(row for line in text.splitlines() if (row := assignment_row(line, terms, page)) is not None)
     event = {"title": title_match[1], "date": f"{era + 2018:04}-{month:02}-{day:02}",
              "venue": venue_match[1], "description": purpose_match[1]}
+    actions = task_actions(texts, event["date"])
+    if actions:
+        event["task_actions"] = actions
     notices = []
     for text in texts:
         if "【開催趣旨】" in text or "5. 当日までに準備すること" in clean(text):

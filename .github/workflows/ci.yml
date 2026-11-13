@@ -160,13 +160,24 @@ jobs:
     env:
       E2E_MYSQL_PASSWORD: synthetic-ci-only
       E2E_MYSQL_DATABASE: guidance_e2e
+      E2E_TASKLY_DIR: ${{ github.workspace }}/.e2e/taskly
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Checkout reviewed Taskly bridge and native GraphQL implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: asari194617/taskly
+          ref: 22d85b93457a6a6383f18b42c0119f8b8823dec4
+          path: .e2e/taskly
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            .e2e/taskly/apps/server/go.sum
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '26.13.1'

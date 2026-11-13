@@ -2,6 +2,12 @@ import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
+import {
+  syntheticIdentities,
+  syntheticGuidanceClientID,
+  syntheticTasklyClientID,
+  syntheticTasklyClientSecret,
+} from "./e2e-identities.mjs";
 
 // Only synthetic identities and data are accepted. These servers bind loopback
 // and are launched solely by the E2E runner, never by the production image.
@@ -13,7 +19,7 @@ export async function startServices(output) {
     revokedFamilies = new Set(),
     shortAccess = new Map(),
     refreshCounts = new Map();
-  const subjects = ["alice", "bob", "onboarding", "routing", "map", "outage", "mobile", "documents", "presentation", "refresh", "menu"];
+  const subjects = Object.keys(syntheticIdentities);
   let unavailable = false;
   const json = (res, status, body) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -46,7 +52,7 @@ export async function startServices(output) {
       if (url.pathname === "/oauth/authorize") {
         const q = url.searchParams;
         if (
-          q.get("client_id") !== "synthetic-e2e" ||
+          q.get("client_id") !== syntheticGuidanceClientID ||
           q.get("redirect_uri") !== "http://127.0.0.1:3371/auth/callback" ||
           q.get("code_challenge_method") !== "S256" ||
           q.get("scope") !== "taskly:login"
@@ -78,7 +84,7 @@ export async function startServices(output) {
         const q = await form(req);
         if (q.get("grant_type") === "refresh_token") {
           const refresh = refreshTokens.get(q.get("refresh_token"));
-          if (q.get("client_id") !== "synthetic-e2e" || !refresh ||
+          if (q.get("client_id") !== syntheticGuidanceClientID || !refresh ||
               refresh.expiresAt <= Date.now() || revokedFamilies.has(refresh.family))
             return json(res, 400, { error: "invalid_grant" });
           if (refresh.used) {
@@ -105,9 +111,29 @@ export async function startServices(output) {
         if (!access || access.expiresAt <= Date.now() || revokedFamilies.has(access.family))
           return json(res, 401, { error: "invalid_token" });
         return json(res, 200, {
-          sub: access.sub,
+          sub: syntheticIdentities[access.sub],
           email: `${access.sub}@example.test`,
           name: `検証ユーザー ${access.sub}`,
+        });
+      }
+      if (url.pathname === "/oauth/introspect" && req.method === "POST") {
+        const expected = `Basic ${Buffer.from(`${syntheticTasklyClientID}:${syntheticTasklyClientSecret}`).toString("base64")}`;
+        if (req.headers.authorization !== expected)
+          return json(res, 401, { error: "invalid_client" });
+        if (unavailable) return json(res, 503, { error: "synthetic_outage" });
+        const q = await form(req);
+        const access = tokens.get(q.get("token"));
+        if (!access || access.expiresAt <= Date.now() || revokedFamilies.has(access.family))
+          return json(res, 200, { active: false });
+        return json(res, 200, {
+          active: true,
+          sub: syntheticIdentities[access.sub],
+          client_id: syntheticGuidanceClientID,
+          aud: "taskly-api",
+          scope: "taskly:login",
+          iss: "http://127.0.0.1:3372",
+          exp: Math.floor(access.expiresAt / 1000),
+          token_type: "Bearer",
         });
       }
       if (url.pathname === "/oauth/revoke" && req.method === "POST") {
@@ -155,6 +181,7 @@ export async function startServices(output) {
     ".txt": "text/plain",
     ".ico": "image/x-icon",
     ".svg": "image/svg+xml",
+    ".jpg": "image/jpeg",
     ".woff2": "font/woff2",
   };
   const web = createServer(async (req, res) => {

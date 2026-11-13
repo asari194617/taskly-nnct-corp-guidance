@@ -10,6 +10,11 @@ test('private documents and unknown types cannot be uploaded',()=> {
   assert.equal(metadata('_next/static/a.js').CacheControl,'public, max-age=31536000, immutable');
   assert.equal(metadata('index.html').CacheControl,'no-cache');
 });
+test('public JPEG OGP uses its actual MIME without admitting private images or PDFs',()=> {
+  assert.deepEqual(metadata('ogp.jpg'), {ContentType:'image/jpeg', CacheControl:'no-cache'});
+  assert.equal(metadata('ogp.jpg').CacheControl, metadata('logo.png').CacheControl);
+  for(const key of ['private/ogp.jpg','data/ogp.jpg','guidebook.pdf']) assert.throws(()=>metadata(key));
+});
 test('CSP hashes bootstrap bytes and permits only trusted signed document image origins',()=> {
   const script='self.__next_f.push([1,"synthetic"]);';
   const html=secureHTML(`<html><head><script>${script}</script><script src="/app.js"></script></head></html>`,'https://api.example.test');

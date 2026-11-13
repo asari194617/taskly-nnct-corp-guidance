@@ -50,8 +50,7 @@ export type NoticeSection = {
   id: string;
   title: string;
   blocks: (
-    | { type: "paragraph"; text: string }
-    | { type: "list"; items: string[] }
+    { type: "paragraph"; text: string } | { type: "list"; items: string[] }
   )[];
 };
 export type Guidance = {
@@ -62,4 +61,26 @@ export type Guidance = {
   documents: Document[];
   notices: string[];
   notice_sections?: NoticeSection[];
+};
+
+export type HomeTaskKind =
+  "assigned_visit" | "visit_survey" | "overall_survey" | "sheet_submission";
+export type HomeTask = {
+  id: string;
+  kind: HomeTaskKind;
+  title: string;
+  completed: boolean;
+  completion_disabled: boolean;
+  taskly_url: string;
+  company_id?: string;
+  term?: number;
+  url?: string;
+  document_id?: string;
+  page?: number;
+  due_at?: string;
+};
+export type HomeTasksResponse = {
+  tasks: HomeTask[];
+  event_id: string;
+  roster_configured: boolean;
 };
