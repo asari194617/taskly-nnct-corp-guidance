@@ -149,7 +149,16 @@ test('isolated Docker daemon keeps a pre-existing unrelated tag unchanged on rej
       assert.equal(dockerId(sentinel), original, name);
     }
     const accepted = attempt(invalid, sha);
-    assert.equal(accepted.status, 0, accepted.stderr);
+    if (accepted.status !== 0) {
+      const shape = spawnSync('python3', ['-c', `import json,sys,tarfile
+with tarfile.open(sys.argv[1], 'r:gz') as archive:
+ for member in archive:
+  if member.name.startswith('blobs/') and member.isfile() and member.size < 1000000:
+   try: data=json.load(archive.extractfile(member))
+   except (ValueError,UnicodeError): continue
+   if isinstance(data,dict): print(member.name, sorted(data), data.get('mediaType'), data.get('schemaVersion'))`, invalid], { encoding: 'utf8' });
+      assert.equal(accepted.status, 0, `${accepted.stderr}\nArchive metadata shapes:\n${shape.stdout}`);
+    }
     if (!useEntrypoint) {
       const load = spawnSync('docker', ['load', '-i', output], { encoding: 'utf8' });
       assert.equal(load.status, 0, load.stderr);
