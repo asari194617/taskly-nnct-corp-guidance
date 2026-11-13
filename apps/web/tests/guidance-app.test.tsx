@@ -572,7 +572,7 @@ describe("protected maps and documents", () => {
     expect(
       screen.getByRole("heading", { name: "マップを準備しています" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("配布ガイドブック · 6 ページ")).toBeInTheDocument();
+    expect(screen.getByText("配布PDF · 6 ページ")).toBeInTheDocument();
     await userEvent.click(
       within(
         screen.getByRole("navigation", { name: "モバイルナビゲーション" }),
