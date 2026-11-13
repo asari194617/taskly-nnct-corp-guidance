@@ -53,6 +53,16 @@ jobs:
         with:
           node-version: '26.13.1'
       - run: go vet ./...
+      - name: Check API vulnerabilities for the production platform
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p coverage
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          set -o pipefail
+          "$(go env GOPATH)/bin/govulncheck" ./cmd/api | tee coverage/govulncheck.txt
       - name: Test API and require 80% statement coverage
         run: |
           mkdir -p coverage
@@ -73,6 +83,7 @@ jobs:
             integration.json
             coverage/integration.out
             coverage/go.out
+            coverage/govulncheck.txt
           retention-days: 14
           if-no-files-found: ignore
   web:
@@ -182,6 +193,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Require the production builder and CI to use the same Go version
+        run: |
+          declared=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          builder=$(sed -nE 's/^FROM golang:([0-9.]+)-alpine.* AS build$/\1/p' Dockerfile)
+          test -n "$declared" && test "$builder" = "$declared"
       - run: docker build --tag guidance-ci:${{ github.sha }} .
   required-ci:
     if: always()
