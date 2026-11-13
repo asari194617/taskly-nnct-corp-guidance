@@ -503,6 +503,116 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
   ).toBeVisible();
 });
 
+test("Desktop map previews follow the cursor and flip within map edges without moving the map", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, "map", "/map/");
+  const full = page.locator('.venue-map[data-mode="fullscreen"]');
+  const viewport = full.getByRole("region", {
+    name: "操作できる会場マップ",
+    exact: true,
+  });
+  const booth = full.getByRole("button", {
+    name: "午前 ブース 2 架空いろは機械",
+    exact: true,
+  });
+  const preview = full.getByRole("status", {
+    name: "ポイント中の企業",
+    exact: true,
+  });
+  const map = (await full.boundingBox())!;
+  const url = page.url();
+  await booth.hover();
+  await expect(preview).toContainText("架空いろは機械");
+  const box = (await booth.boundingBox())!;
+  const point = { x: box.x + box.width / 2 + 8, y: box.y + box.height / 2 + 8 };
+  const before = await viewport.evaluate((node) => ({
+    left: node.scrollLeft,
+    top: node.scrollTop,
+  }));
+  await page.mouse.move(point.x, point.y);
+  await expect
+    .poll(async () => (await preview.boundingBox())!.y)
+    .toBeCloseTo(point.y + 12, 0);
+  expect(page.url()).toBe(url);
+  expect(
+    await viewport.evaluate((node) => ({
+      left: node.scrollLeft,
+      top: node.scrollTop,
+    })),
+  ).toEqual(before);
+  await expect(booth).toHaveAttribute("aria-pressed", "false");
+  const targets = [
+    { x: map.x + map.width - 4, y: map.y + map.height / 2, edge: "right" },
+    { x: map.x + map.width / 2, y: map.y + map.height - 4, edge: "bottom" },
+  ];
+  for (const target of targets) {
+    // Move the drawing so a real hover can occur beside the viewport edge.
+    await booth.evaluate((node, point) => {
+      const area = node.closest(".venue-map-viewport")!;
+      const box = node.getBoundingClientRect();
+      area.scrollLeft += box.left + box.width / 2 - point.x;
+      area.scrollTop += box.top + box.height / 2 - point.y;
+    }, target);
+    await page.mouse.move(target.x, target.y);
+    await expect(preview).toBeVisible();
+    await expect
+      .poll(async () => {
+        const rect = (await preview.boundingBox())!;
+        return target.edge === "right"
+          ? rect.x + rect.width <= target.x - 11
+          : rect.y + rect.height <= target.y - 11;
+      })
+      .toBe(true);
+    const tooltip = (await preview.boundingBox())!;
+    expect(tooltip.x).toBeGreaterThanOrEqual(map.x + 7);
+    expect(tooltip.y).toBeGreaterThanOrEqual(map.y + 7);
+    expect(tooltip.x + tooltip.width).toBeLessThanOrEqual(
+      map.x + map.width - 7,
+    );
+    expect(tooltip.y + tooltip.height).toBeLessThanOrEqual(
+      map.y + map.height - 7,
+    );
+    expect(
+      await preview.evaluate((node) => getComputedStyle(node).pointerEvents),
+    ).toBe("none");
+  }
+});
+
+test.describe("Touch map preview behavior", () => {
+  test.use({
+    isMobile: true,
+    hasTouch: true,
+    viewport: { width: 390, height: 844 },
+  });
+  test("touch and coarse pointers open company details without a hover preview", async ({
+    page,
+  }) => {
+    await login(page, "map", "/map/?focus=AM-1");
+    const full = page.locator('.venue-map[data-mode="fullscreen"]');
+    const booth = full.getByRole("button", {
+      name: "午前 ブース 1 架空あおばソフト",
+      exact: true,
+    });
+    const preview = full.getByRole("status", {
+      name: "ポイント中の企業",
+      exact: true,
+    });
+    expect(
+      await page.evaluate(
+        () => matchMedia("(hover: hover) and (pointer: fine)").matches,
+      ),
+    ).toBe(false);
+    await booth.hover();
+    await expect(preview).toHaveCount(0);
+    await booth.tap();
+    await expect(full.locator(".map-company-panel")).toBeVisible();
+    await expect(preview).toHaveCount(0);
+    await expect(booth).toHaveAccessibleName("午前 ブース 1 架空あおばソフト");
+  });
+});
+
 test("Fullscreen maps keep blue selection and a non-modal company panel while map controls remain interactive", async ({
   page,
 }) => {
