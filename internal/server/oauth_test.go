@@ -33,6 +33,50 @@ func beginLogin(t *testing.T, s *Server) (*http.Cookie, url.Values) {
 	}
 	return flow, u.Query()
 }
+func TestOAuthRepeatedStartReusesActiveFlowAcrossTabs(t *testing.T) {
+	s, f := testServer(t)
+	flow, first := beginLogin(t, s)
+	repeated := request(s, "GET", "/auth/start", flow, "")
+	requireStatus(t, repeated, 302)
+	redirect, err := url.Parse(repeated.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redirect.Query().Get("state") != first.Get("state") || redirect.Query().Get("code_challenge") != first.Get("code_challenge") {
+		t.Fatal("repeated start changed the active PKCE flow")
+	}
+	if len(f.flows) != 1 {
+		t.Fatalf("repeated browser start saved %d flows", len(f.flows))
+	}
+	// A completed first tab still exchanges its original code and consumes
+	// the one shared flow. A later login starts a fresh flow.
+	s.client.Transport = tokenIdentity(t, s, f)
+	requireStatus(t, request(s, "GET", callbackPath(s, flow.Value), flow, ""), 302)
+	if len(f.flows) != 0 {
+		t.Fatal("completed flow was not consumed")
+	}
+	requireStatus(t, request(s, "GET", "/auth/start", flow, ""), 302)
+	if len(f.flows) != 1 {
+		t.Fatal("re-login did not create a fresh flow")
+	}
+}
+
+func TestOAuthStartLimitsFlowCreationWithoutCookies(t *testing.T) {
+	s, f := testServer(t)
+	s.flowLimit = newFlowLimiter(1, 2)
+	for i := 0; i < 2; i++ {
+		requireStatus(t, request(s, "GET", "/auth/start", nil, ""), 302)
+	}
+	// Spoofing a forwarding header cannot evade the API's global cap.
+	r := httptest.NewRequest("GET", s.config.APIOrigin+"/auth/start", nil)
+	r.Header.Set("X-Forwarded-For", "198.51.100.99")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	requireStatus(t, w, 429)
+	if w.Header().Get("Retry-After") == "" || len(f.flows) != 2 {
+		t.Fatalf("limited request saved a flow or missed Retry-After: flows=%d", len(f.flows))
+	}
+}
 func callbackPath(s *Server, state string) string {
 	q := url.Values{"state": {state}, "iss": {s.config.AuthIssuer}, "code": {"authorization-code"}}
 	return "/auth/callback?" + q.Encode()

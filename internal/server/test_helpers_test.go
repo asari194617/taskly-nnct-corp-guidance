@@ -37,6 +37,18 @@ func (f *fakeStore) SaveFlow(_ context.Context, key string, value []byte, _ time
 	f.flows[key] = value
 	return nil
 }
+func (f *fakeStore) Flow(_ context.Context, key string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errorFlow != nil {
+		return nil, f.errorFlow
+	}
+	v, ok := f.flows[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return v, nil
+}
 func (f *fakeStore) ConsumeFlow(_ context.Context, key string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

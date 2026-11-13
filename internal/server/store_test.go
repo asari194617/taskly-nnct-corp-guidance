@@ -62,6 +62,15 @@ func TestSQLStoreReads(t *testing.T) {
 	ctx := context.Background()
 	expiry := time.Now().UTC()
 	failure := errors.New("query failed")
+	m.ExpectQuery("SELECT verifier_ciphertext FROM guidance_oauth_flows").WithArgs("state").WillReturnRows(sqlmock.NewRows([]string{"verifier_ciphertext"}).AddRow([]byte("encrypted")))
+	flow, err := s.Flow(ctx, "state")
+	if err != nil || string(flow) != "encrypted" {
+		t.Fatalf("flow: %q %v", flow, err)
+	}
+	m.ExpectQuery("SELECT verifier_ciphertext FROM guidance_oauth_flows").WithArgs("missing").WillReturnError(sql.ErrNoRows)
+	if _, err := s.Flow(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("missing flow not mapped")
+	}
 	m.ExpectQuery("SELECT access_ciphertext,expires_at FROM guidance_sessions").WithArgs("hash").WillReturnRows(sqlmock.NewRows([]string{"access_ciphertext", "expires_at"}).AddRow([]byte("ciphertext"), expiry))
 	token, actual, err := s.Session(ctx, "hash")
 	if err != nil || string(token) != "ciphertext" || !actual.Equal(expiry) {
