@@ -51,6 +51,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/me", s.protect(s.me))
 	mux.HandleFunc("GET /api/guidance", s.protect(s.guidance))
 	mux.HandleFunc("GET /api/documents/{id}", s.protect(s.document))
+	mux.HandleFunc("GET /api/documents/{id}/url", s.protect(s.documentURL))
+	mux.HandleFunc("GET /documents/{id}", s.signedDocument)
+	mux.HandleFunc("GET /api/preferences", s.protect(s.preferences))
+	mux.HandleFunc("PUT /api/preferences", s.protect(s.setPreferences))
 	mux.HandleFunc("GET /api/bookmarks", s.protect(s.bookmarks))
 	mux.HandleFunc("PUT /api/bookmarks/{companyID}", s.protect(s.addBookmark))
 	mux.HandleFunc("DELETE /api/bookmarks/{companyID}", s.protect(s.removeBookmark))
@@ -163,6 +167,10 @@ func (s *Server) guidance(w http.ResponseWriter, r *http.Request, _ User) {
 var documentIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func (s *Server) document(w http.ResponseWriter, r *http.Request, _ User) {
+	s.serveDocument(w, r)
+}
+
+func (s *Server) serveDocument(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !documentIDPattern.MatchString(id) {
 		failure(w, 404, "document_not_found")

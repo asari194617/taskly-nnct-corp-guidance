@@ -22,6 +22,18 @@ export type Assignment = {
   number: number;
   visits: { term: number; company_id: string }[];
 };
+export type BoothBounds = {
+  booth: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+export type Preferences = {
+  roster_number: number | null;
+  department: string;
+  grade: number;
+};
 export type Document = {
   id: string;
   title: string;
@@ -30,6 +42,17 @@ export type Document = {
   file_name: string;
   source_page: number;
   url: string;
+  booths?: BoothBounds[];
+  image_width?: number;
+  image_height?: number;
+};
+export type NoticeSection = {
+  id: string;
+  title: string;
+  blocks: (
+    | { type: "paragraph"; text: string }
+    | { type: "list"; items: string[] }
+  )[];
 };
 export type Guidance = {
   event: { title: string; date: string; venue: string; description: string };
@@ -38,4 +61,5 @@ export type Guidance = {
   assignments: Assignment[];
   documents: Document[];
   notices: string[];
+  notice_sections?: NoticeSection[];
 };

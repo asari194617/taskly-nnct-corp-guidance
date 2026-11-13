@@ -63,6 +63,7 @@ try {
     ).split(";"))
       if (statement.trim()) await db.query(statement);
     for (const table of [
+      "guidance_preferences",
       "guidance_bookmarks",
       "guidance_sessions",
       "guidance_oauth_flows",
@@ -132,6 +133,10 @@ try {
       mime_type: "image/png",
       file_name: "floor-a.png",
       source_page: 4,
+      booths: [
+        { booth: 1, x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+        { booth: 2, x: 0.55, y: 0.1, width: 0.2, height: 0.2 },
+      ],
     },
     {
       id: "floor-b",
@@ -161,7 +166,7 @@ try {
     schedule,
     assignments: [
       {
-        department: "架空工学科",
+        department: "電子制御工学科",
         grade: 4,
         number: 7,
         visits: [
@@ -172,32 +177,59 @@ try {
         ],
       },
       {
-        department:
-          "架空の先端情報技術・環境計測・複合材料・機械設計・電気制御・通信技術・社会基盤・応用科学・生産技術・共同研究・技術開発・総合システム工学科",
+        department: "電子制御工学科",
         grade: 4,
         number: 8,
         visits: [
-          { term: 1, company_id: "AM-1" },
-          { term: 4, company_id: "AM-2" },
-          { term: 5, company_id: "PM-1" },
-          { term: 8, company_id: "PM-2" },
+          { term: 1, company_id: "AM-2" },
+          { term: 4, company_id: "AM-1" },
+          { term: 5, company_id: "PM-2" },
+          { term: 8, company_id: "PM-1" },
         ],
       },
     ],
     documents,
     notices: ["検証用の案内です。実際の配布資料ではありません。"],
+    notice_sections: [
+      { id: "preparation", title: "見学前の準備", blocks: [
+        { type: "paragraph", text: "検証用の持ち物案内です。" },
+        { type: "list", items: ["検証用の筆記具", "検証用の名札"] },
+      ] },
+      { id: "questions", title: "質問するとき", blocks: [
+        { type: "paragraph", text: "検証用の質問を整理しましょう。" },
+      ] },
+    ],
   };
   const pixel = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iB2kAAAAASUVORK5CYII=",
     "base64",
   );
+  // A small, valid synthetic PDF lets Chromium exercise native PDF navigation.
+  const stream = "BT /F1 12 Tf 20 100 Td (Synthetic E2E document) Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const crossReference = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${crossReference}\n%%EOF\n`;
   await Promise.all([
     writeFile(resolve(privateDir, "guidance.json"), JSON.stringify(dataset)),
     writeFile(resolve(privateDir, "floor-a.png"), pixel),
     writeFile(resolve(privateDir, "floor-b.png"), pixel),
     writeFile(
       resolve(privateDir, "guide.pdf"),
-      "%PDF-1.4\n% Synthetic E2E document\n%%EOF\n",
+      pdf,
     ),
   ]);
   await run("go", [

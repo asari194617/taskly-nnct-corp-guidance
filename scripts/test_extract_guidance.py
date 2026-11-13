@@ -4,7 +4,53 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from extract_guidance import assignment_row, company_rows, extract, schedule_rows, validate
+from extract_guidance import (
+    assignment_row, booth_rectangles, company_rows, extract, extract_map_booths,
+    notice_sections, notice_text, recognize_booth_candidates, resolve_booth_numbers, schedule_rows, validate,
+)
+
+
+class SyntheticMapPage:
+    mediabox = SimpleNamespace(width=100, height=200)
+
+    def __init__(self, rectangles=None, rotation=0):
+        self.rectangles = rectangles if rectangles is not None else [
+            (20, 40, -10, -20), (40, 60, -10, -20), (.1, .1, .1, .1),
+            (50, 70, 30, 40),
+        ]
+        self.rotation = rotation
+
+    def get(self, key, default):
+        return self.rotation
+
+    def extract_text(self, visitor_operand_before):
+        visitor_operand_before(b"q", [], [1, 0, 0, 1, 0, 0], None)
+        for rectangle in self.rectangles:
+            visitor_operand_before(b"re", rectangle, [1, 0, 0, 1, 0, 0], None)
+
+
+class SyntheticImage:
+    def __init__(self, width=100, height=200):
+        self.width, self.height = width, height
+        self.loaded = False
+
+    def load(self):
+        self.loaded = True
+
+    def crop(self, box):
+        return SyntheticImage(box[2] - box[0], box[3] - box[1])
+
+    def convert(self, mode):
+        return self
+
+    def resize(self, size):
+        return SyntheticImage(*size)
+
+    def paste(self, image, position):
+        pass
+
+    def save(self, path):
+        path.write_bytes(b"synthetic OCR image")
 
 
 class ExtractionTests(unittest.TestCase):
@@ -33,6 +79,35 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(rows[0]["term"], 1)
         self.assertEqual(rows[0]["required_grades"], [3])
 
+    def test_notice_text_joins_japanese_wraps_and_preserves_english_and_urls(self):
+        self.assertEqual(notice_text("架空の資 料を確認し\nてください。 ４ 年生"), "架空の資料を確認してください。4年生")
+        self.assertEqual(notice_text("Taskly Example ( https://example.test/path )"),
+                         "Taskly Example (https://example.test/path)")
+        self.assertEqual(notice_text("９： ３０ ～ １０： ００"), "9:30 ~ 10:00")
+
+    def test_notice_sections_preserve_headings_lists_notes_and_page_continuations(self):
+        result = notice_sections([
+            "架空資料のページ見出し\n【説明】\n　説明を折り\n返して記載。\n次の段落。\n"
+            "【一覧】\n1. 一覧\n1） 集合\n３ 年生 ８：００ 架空教室\n４ 年生 ８：１０ 架空教室\n"
+            "※注意を折り\n返す。\n2. 準備\n・ 持ち物を準備し\n　 当日持参してください。",
+            "・ 別の持ち物。\nまた、確認してください。\n▶ 選択肢Ａ\n▶ 選択肢Ｂ\n"
+            "〈例. 架空学年〉\n説明文。\n\n（注）追記。\n− 2 −",
+        ])
+        self.assertEqual([section["title"] for section in result], ["説明", "集合", "準備"])
+        self.assertEqual(result[0]["blocks"], [
+            {"type": "paragraph", "text": "説明を折り返して記載。"},
+            {"type": "paragraph", "text": "次の段落。"},
+        ])
+        self.assertEqual(result[1]["blocks"][0], {"type": "list", "items": [
+            "3年生8:00架空教室", "4年生8:10架空教室"]})
+        self.assertEqual(result[1]["blocks"][1], {"type": "paragraph", "text": "※注意を折り返す。"})
+        self.assertEqual(result[2]["blocks"][0], {"type": "list", "items": [
+            "持ち物を準備し当日持参してください。", "別の持ち物。"]})
+        self.assertEqual(result[2]["blocks"][1], {"type": "paragraph", "text": "また、確認してください。"})
+        self.assertEqual(result[2]["blocks"][2], {"type": "list", "items": ["選択肢A", "選択肢B"]})
+        self.assertEqual(result[2]["blocks"][-1], {"type": "paragraph", "text": "(注)追記。"})
+        self.assertEqual(notice_sections(["見出しがないページ\n本文"]), [])
+
     def test_invalid_and_duplicate_company_references_rejected(self):
         dataset = {
             "companies": [{"id": "AM-1", "session": "AM", "booth": 1}, {"id": "PM-1", "session": "PM", "booth": 1}],
@@ -52,7 +127,7 @@ class ExtractionTests(unittest.TestCase):
         # verifies our parsing/output contract using entirely synthetic data.
         texts = [
             "令和 12 年度\n架空ガイダンス\n学 科\n開催日:令和 12 年 1 月 2 日\n開催場所:架空会場 主催:架空学校",
-            "【開催趣旨】架空の説明。【次】参加企業:2社\n架空会社A AM 1 情報処理\n架空会社B PM 1 機械",
+            "【開催趣旨】\n架空の説明。\n【次】\n参加企業:2社\n架空会社A AM 1 情報処理\n架空会社B PM 1 機械",
             "ガイダンススケジュール\n時　　間 内　　容\n" + "\n".join(f"{9 + term}:00 ～ {9 + term}:20 {term}ターム（3年指定）" for term in range(1, 9)),
             "名簿 番号\n①ターム ③ターム ⑤ターム ⑥ターム\n架空学科 3年生 1 架空会社A 1 架空会社A 1 架空会社B 1 架空会社B 1",
             "−1−\nブース配置図(架空階)",
@@ -67,6 +142,8 @@ class ExtractionTests(unittest.TestCase):
                 stream.write(b"%PDF- synthetic")
 
         class Image:
+            width, height = 600, 400
+
             def save(self, path):
                 path.write_bytes(b"synthetic PNG")
 
@@ -76,7 +153,10 @@ class ExtractionTests(unittest.TestCase):
             "pypdf": SimpleNamespace(PdfReader=lambda path: fake_reader, PdfWriter=Writer),
             "pypdfium2": SimpleNamespace(PdfDocument=lambda path: fake_pdf),
         }
-        with TemporaryDirectory() as directory, patch.dict("sys.modules", modules):
+        with TemporaryDirectory() as directory, patch.dict("sys.modules", modules), patch(
+            "extract_guidance.extract_map_booths",
+            return_value=[{"booth": 1, "x": .1, "y": .2, "width": .1, "height": .1}],
+        ):
             source = Path(directory) / "source.pdf"
             source.write_bytes(b"%PDF- synthetic")
             output = Path(directory) / "private"
@@ -85,6 +165,12 @@ class ExtractionTests(unittest.TestCase):
             self.assertEqual(len(result["companies"]), 2)
             self.assertEqual(len(result["assignments"]), 1)
             self.assertEqual(len(result["documents"]), 5)
+            self.assertEqual(result["notice_sections"][0]["title"], "開催趣旨")
+            self.assertEqual(result["documents"][0]["booths"][0]["booth"], 1)
+            self.assertEqual(result["documents"][0]["image_width"], 600)
+            self.assertEqual(result["documents"][0]["image_height"], 400)
+            self.assertEqual(result["documents"][2]["image_width"], 600)
+            self.assertNotIn("image_width", result["documents"][1])
             self.assertEqual((output / "guidance.json").stat().st_mode & 0o777, 0o600)
             self.assertEqual(output.stat().st_mode & 0o777, 0o700)
             self.assertEqual((output / "guidebook.pdf").read_bytes(), source.read_bytes())
@@ -92,6 +178,60 @@ class ExtractionTests(unittest.TestCase):
     def test_private_output_rejects_repository_directory(self):
         with self.assertRaisesRegex(ValueError, "outside"):
             extract(Path("absent.pdf"), Path(__file__).resolve().parents[1] / "private")
+
+    def test_map_cell_rectangles_are_rotated_and_normalized_from_vectors(self):
+        boxes = booth_rectangles(SyntheticMapPage(), 2)
+        self.assertEqual(boxes[0], {"x": .1, "y": .1, "width": .1, "height": .1})
+        self.assertEqual(boxes[1], {"x": .2, "y": .3, "width": .1, "height": .1})
+        with self.assertRaisesRegex(ValueError, "rotation"):
+            booth_rectangles(SyntheticMapPage(rotation=90), 2)
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            booth_rectangles(SyntheticMapPage(), 0)
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            booth_rectangles(SyntheticMapPage(), 3)
+
+    def test_ocr_candidates_resolve_only_unique_complete_number_assignment(self):
+        self.assertEqual(resolve_booth_numbers([{1, 2}, {2}], {1, 2}), [1, 2])
+        self.assertEqual(resolve_booth_numbers([{1, 9}, {2}], {1, 2}), [1, 2])
+        invalid = [
+            ([], set()),
+            ([{1}], {1, 2}),
+            ([set(), {2}], {1, 2}),
+            ([{1, 2}, {1, 2}], {1, 2}),
+            ([{1}, {1}], {1, 2}),
+            ([{1}, {1}, {2, 3}], {1, 2, 3}),
+        ]
+        for candidates, expected in invalid:
+            with self.subTest(candidates=candidates), self.assertRaises(ValueError):
+                resolve_booth_numbers(candidates, expected)
+
+    def test_cell_ocr_uses_two_crops_and_never_accepts_non_numeric_output(self):
+        with patch("extract_guidance.subprocess.run", side_effect=[
+            SimpleNamespace(stdout="2\n"), SimpleNamespace(stdout="not a number"),
+        ]) as run:
+            candidates = recognize_booth_candidates(
+                SyntheticImage(), {"x": .1, "y": .1, "width": .2, "height": .2})
+        self.assertEqual(candidates, {2})
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.kwargs["env"]["OMP_THREAD_LIMIT"], "1")
+        self.assertEqual(run.call_args.kwargs["timeout"], 15)
+
+    def test_map_extraction_validates_image_bounds_and_missing_ocr(self):
+        image = SyntheticImage()
+        with patch("extract_guidance.shutil.which", return_value=None):
+            with self.assertRaisesRegex(ValueError, "Tesseract"):
+                extract_map_booths(None, image, {1, 2})
+        boxes = [{"x": .1, "y": .1, "width": .1, "height": .1},
+                 {"x": .2, "y": .3, "width": .1, "height": .1}]
+        with patch("extract_guidance.shutil.which", return_value="synthetic-tesseract"), patch(
+            "extract_guidance.booth_rectangles", return_value=boxes
+        ), patch("extract_guidance.recognize_booth_candidates", side_effect=lambda image, box: {1 if box["x"] == .1 else 2}):
+            result = extract_map_booths(None, image, {1, 2})
+            self.assertEqual([booth["booth"] for booth in result], [1, 2])
+            self.assertTrue(image.loaded)
+            boxes[1]["width"] = 1
+            with self.assertRaisesRegex(ValueError, "outside"):
+                extract_map_booths(None, image, {1, 2})
 
 
 if __name__ == "__main__":
