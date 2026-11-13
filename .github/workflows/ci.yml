@@ -35,7 +35,7 @@ jobs:
         env:
           MYSQL_DATABASE: guidance_test
           MYSQL_ROOT_PASSWORD: synthetic-ci-only
-        ports: [3306:3306]
+        ports: ['3306:3306']
         options: >-
           --health-cmd="mysqladmin ping -h localhost --silent"
           --health-interval=5s --health-timeout=3s --health-retries=30
@@ -126,7 +126,7 @@ jobs:
           python -m coverage json -o python-coverage.json
           python -m coverage report --fail-under=80
           python -c 'import json; d=json.load(open("python-coverage.json")); json.dump({"percent": d["totals"]["percent_covered"]}, open("extractor.json", "w"))'
-      - run: node --test .github/scripts/coverage-summary.test.mjs deploy/r2/*.test.mjs
+      - run: node --test .github/scripts/coverage-summary.test.mjs deploy/*.test.mjs deploy/r2/*.test.mjs
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -142,12 +142,13 @@ jobs:
         env:
           MYSQL_DATABASE: guidance_e2e
           MYSQL_ROOT_PASSWORD: synthetic-ci-only
-        ports: [3306:3306]
+        ports: ['3306:3306']
         options: >-
           --health-cmd="mysqladmin ping -h localhost --silent"
           --health-interval=5s --health-timeout=3s --health-retries=30
     env:
-      MYSQL_DSN: root:synthetic-ci-only@tcp(127.0.0.1:3306)/guidance_e2e?parseTime=true&charset=utf8mb4&loc=UTC
+      E2E_MYSQL_PASSWORD: synthetic-ci-only
+      E2E_MYSQL_DATABASE: guidance_e2e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -161,7 +162,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm --prefix apps/web ci
-      - run: npm --prefix apps/web exec playwright install --with-deps chromium
+      - run: npm --prefix apps/web exec -- playwright install --with-deps chromium
       - run: node scripts/e2e-run.mjs
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -170,6 +171,9 @@ jobs:
           path: |
             e2e.json
             apps/web/coverage/e2e/coverage-summary.json
+            apps/web/coverage/e2e/results.json
+            apps/web/coverage/e2e/playwright-report/
+            apps/web/test-results/
           retention-days: 14
           if-no-files-found: ignore
   production-build:

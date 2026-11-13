@@ -30,10 +30,10 @@ go vet ./...
 npm --prefix apps/web run typecheck
 npm --prefix apps/web run test:coverage
 npm --prefix apps/web run build
-node --test .github/scripts/coverage-summary.test.mjs deploy/r2/*.test.mjs
+node --test .github/scripts/coverage-summary.test.mjs deploy/*.test.mjs deploy/r2/*.test.mjs
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 実 MySQL テストは使い捨ての専用 DB を用意し、`MYSQL_TEST_DSN` を渡して `go test -race -run '^TestMySQLIntegration$' ./internal/server` を実行します。テストはスキーマを準備し、架空データを書き込みます。稼働データを含む DB の DSN を使わないでください。
 
-ブラウザー E2E は `MYSQL_DSN` に別の使い捨て DB を指定し、Chromium をインストールしてから `node scripts/e2e-run.mjs` を実行します。スクリプトが架空データの取り込み、ローカル OAuth サーバー、Go API、Next.js 静的本番ビルドの配信を準備します。詳細な出力先はスクリプトと `apps/web/tests` を参照してください。
+ブラウザー E2E は `E2E_MYSQL_PASSWORD` と `E2E_MYSQL_DATABASE` に別の使い捨て DB の接続先を指定し、Chromium をインストールしてから `node scripts/e2e-run.mjs` を実行します。スクリプトが架空データの取り込み、ローカル OAuth サーバー、Go API、Next.js 静的本番ビルドの配信を準備します。詳細な出力先はスクリプトと `apps/web/tests` を参照してください。

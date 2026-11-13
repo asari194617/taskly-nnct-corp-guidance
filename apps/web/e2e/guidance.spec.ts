@@ -22,12 +22,12 @@ test('OAuth PKCE login, company filters, details and server-persisted bookmarks'
   await expect(page.getByRole('button',{name:'架空あおばソフトを見学リストから削除',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'保存した企業',exact:true}).click();
   await expect(page.locator('.company-card')).toHaveCount(1);
-  await page.getByRole('button',{name:/架空あおばソフト 情報処理 ブース/}).click();
+  await page.locator('.company-card-main').filter({hasText:'架空あおばソフト'}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('heading',{name:'架空あおばソフト',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'詳細を閉じる'}).click();
   await page.getByRole('button',{name:'保存した企業',exact:true}).click();
-  await page.getByRole('button',{name:/午後の部2/}).click();
+  await page.getByRole('button',{name:/^午後の部/}).click();
   await expect(page.locator('.company-card')).toHaveCount(2);
   await page.getByLabel('業種で絞り込む').selectOption('建設');
   await expect(page.locator('.company-card')).toHaveCount(1);
@@ -70,12 +70,13 @@ test('Schedule, student assignment lookup, private maps, zoom and original PDF',
   await expect(page.getByRole('status')).toContainText('指定企業の登録が見つかりません');
 });
 
-test('Saved companies are isolated by identity; logout closes protected resources',async({page,request})=>{
+test('Saved companies are isolated by identity; logout closes protected resources',async({page})=>{
   await login(page,'alice');
   await expect(page.getByRole('button',{name:'架空あおばソフトを見学リストから削除',exact:true})).toBeVisible();
+  expect((await page.request.get('http://127.0.0.1:3371/api/documents/floor-a')).status()).toBe(200);
   await page.getByRole('button',{name:'ログアウト',exact:true}).click();
   await expect(page.getByRole('button',{name:'Tasklyでログイン'})).toBeVisible();
-  const protectedResponse=await request.get('http://127.0.0.1:3371/api/documents/floor-a');
+  const protectedResponse=await page.request.get('http://127.0.0.1:3371/api/documents/floor-a');
   expect(protectedResponse.status()).toBe(401);
   await login(page,'bob');
   await page.getByRole('button',{name:'保存した企業',exact:true}).click();

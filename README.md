@@ -83,6 +83,6 @@ go vet ./...
 npm --prefix apps/web run typecheck
 npm --prefix apps/web run test:coverage
 npm --prefix apps/web run build
-node --test .github/scripts/coverage-summary.test.mjs deploy/r2/*.test.mjs
+node --test .github/scripts/coverage-summary.test.mjs deploy/*.test.mjs deploy/r2/*.test.mjs
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```

@@ -19,8 +19,9 @@ export default async function reportBrowserCoverage() {
   for(const entry of merged.result) {
     const path=new URL(entry.url).pathname;
     const script=resolve(root,`.${path}`);
-    const map=JSON.parse(await readFile(script+'.map','utf8'));
-    const converter=v8toIstanbul(script,0,{source:sources.get(entry.url),sourceMap:{sourcemap:map}});
+    // Next's Turbopack hashes the map independently from the JS filename.
+    // v8-to-istanbul resolves its sourceMappingURL relative to this disk path.
+    const converter=v8toIstanbul(script,0,{source:sources.get(entry.url)});
     await converter.load(); converter.applyCoverage(entry.functions);
     for(const [name,data] of Object.entries(converter.toIstanbul())) {
       const match=name.replaceAll('\\','/').match(/\/(components\/(?:guidance-app|icons)\.tsx|lib\/api\.ts)$/);
