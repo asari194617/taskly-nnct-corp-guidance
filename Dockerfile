@@ -1,4 +1,5 @@
 FROM golang:1.27.4-alpine3.24 AS build
+ENV GOTOOLCHAIN=local
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
