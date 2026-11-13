@@ -81,6 +81,15 @@ describe("authentication and failure handling", () => {
       "ログイン状態を確認しています",
     );
     await screen.findByRole("button", { name: "Tasklyでログイン" });
+    const brand = screen.getByRole("link", {
+      name: "Taskly 企業ガイダンス ホーム",
+    });
+    expect(within(brand).getByRole("img", { name: "Taskly" })).toHaveAttribute(
+      "src",
+      "/taskly-logo.svg",
+    );
+    expect(within(brand).getByText("企業ガイダンス")).toBeInTheDocument();
+    expect(screen.queryByText("企業との出会いを、もっと身近に。")).not.toBeInTheDocument();
     expect(
       screen.queryByText(dataset.companies[0].name),
     ).not.toBeInTheDocument();
@@ -302,7 +311,7 @@ describe("company discovery and persistent bookmarks", () => {
       }),
     );
     await screen.findByRole("heading", {
-      name: "気になる企業を保存しましょう",
+      name: "保存した企業はありません",
     });
     await userEvent.click(
       within(screen.getByRole("main")).getByRole("button", {

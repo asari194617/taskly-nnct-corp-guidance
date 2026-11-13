@@ -16,6 +16,39 @@ const nav = (page: Page, name: string) =>
     .getByRole("navigation", { name: "メインナビゲーション" })
     .getByRole("button", { name, exact: false });
 
+test("Taskly logo, social metadata and icons match the shared brand", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Tasklyでログイン" })).toBeVisible();
+  const brand = page.getByRole("link", { name: "Taskly 企業ガイダンス ホーム" });
+  const logo = brand.getByRole("img", { name: "Taskly", exact: true });
+  await expect(logo).toHaveAttribute("src", "/taskly-logo.svg");
+  await expect.poll(() => logo.evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  const site = "https://nnct-corp-guidance-2026.taskly.iy0306.com/";
+  const image = "https://cdn.taskly.iy0306.com/assets/thumbnail-dark.webp";
+  for (const [property, content] of Object.entries({
+    "og:type": "website",
+    "og:site_name": "Taskly",
+    "og:title": "企業ガイダンス | Taskly",
+    "og:description": "企業情報、見学スケジュール、指定企業、会場マップを確認できます。",
+    "og:url": site,
+    "og:locale": "ja_JP",
+    "og:image": image,
+    "og:image:type": "image/webp",
+  })) await expect(page.locator(`meta[property="${property}"]`)).toHaveAttribute("content", content);
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute("content", "summary_large_image");
+  await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute("content", image);
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", site);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "https://cdn.taskly.iy0306.com/assets/favicon.webp");
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", "https://cdn.taskly.iy0306.com/assets/apple-touch-icon.png");
+  await expect(page.locator("body")).not.toContainText("企業との出会いを、もっと身近に。");
+  await page.setViewportSize({ width: 320, height: 844 });
+  const logoBox = (await logo.boundingBox())!;
+  const labelBox = (await brand.getByText("企業ガイダンス", { exact: true }).boundingBox())!;
+  expect(logoBox.x + logoBox.width).toBeLessThan(labelBox.x);
+  expect(Math.abs(logoBox.y + logoBox.height / 2 - labelBox.y - labelBox.height / 2)).toBeLessThan(3);
+  expect(await page.locator("body").evaluate((body) => body.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
 async function verifyLongIndustryFits(page: Page) {
   const select = page.getByLabel("業種で絞り込む");
   const longIndustry = (await select.locator("option").allTextContents()).find(

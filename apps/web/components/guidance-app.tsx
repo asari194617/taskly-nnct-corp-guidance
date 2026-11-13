@@ -31,12 +31,14 @@ const navigation: { id: View; title: string; short: string; icon: IconName }[] =
 function Brand() {
   return (
     <a className="brand" href="/" aria-label="Taskly 企業ガイダンス ホーム">
-      <span className="brand-mark">
-        <Icon name="grid" size={22} />
-      </span>
-      <span>
-        taskly<span className="brand-caption">企業ガイダンス</span>
-      </span>
+      <img
+        className="brand-logo"
+        src="/taskly-logo.svg"
+        width={558}
+        height={160}
+        alt="Taskly"
+      />
+      <span className="brand-caption">企業ガイダンス</span>
     </a>
   );
 }
@@ -205,10 +207,6 @@ export default function GuidanceApp() {
       <header className="topbar">
         <Brand />
         <div className="header-right">
-          <span className="connection">
-            <span />
-            学生向けガイダンス
-          </span>
           {ready && (
             <>
               <span className="user-name">
@@ -233,7 +231,7 @@ export default function GuidanceApp() {
             <p className="welcome-lead">
               企業情報・見学スケジュール・会場マップを確認できます。
             </p>
-            <p>気になる企業をチェックして、当日の見学を準備しましょう。</p>
+            <p>企業をチェックすると見学リストに保存できます。</p>
             <div className="welcome-action">
               {status === "loading" ? (
                 <div className="loading-line" role="status">
@@ -372,7 +370,6 @@ export default function GuidanceApp() {
       {!ready && (
         <footer className="welcome-footer">
           <span>Taskly · 企業ガイダンス</span>
-          <span>企業との出会いを、もっと身近に。</span>
         </footer>
       )}
     </>
@@ -442,7 +439,7 @@ function Companies({
     <>
       <ViewHeading
         title="企業を探す"
-        description="気になる企業を探して、当日の見学を準備しましょう。"
+        description="企業名・業種・参加時間帯で検索できます。"
       />
       <div className="event-banner">
         <div>
@@ -722,7 +719,7 @@ function Schedule({ data }: { data: Guidance }) {
     <>
       <ViewHeading
         title="スケジュール"
-        description="指定企業のタームと自由に見学する時間を確認しましょう。"
+        description="指定企業のタームと自由見学の時間を確認できます。"
       />
       <div className="schedule-toolbar">
         <span>
@@ -845,7 +842,7 @@ function Plan({
     <>
       <ViewHeading
         title="自分の見学リスト"
-        description="指定企業を確認して、気になる企業を見学リストにまとめましょう。"
+        description="指定企業と保存した企業を確認できます。"
       />
       <section className="assignment-panel">
         <div className="panel-title">
@@ -987,7 +984,7 @@ function Plan({
       ) : (
         <Empty
           icon="bookmark"
-          title="気になる企業を保存しましょう"
+          title="保存した企業はありません"
           text="企業の「気になる企業」にチェックすると、見学候補を追加できます。"
         >
           <Button variant="outlined" onClick={onFind}>
@@ -1079,7 +1076,7 @@ function Maps({
     <>
       <ViewHeading
         title="会場マップ"
-        description="ブース配置と休憩室の位置を、事前に確認しておきましょう。"
+        description="ブース配置と休憩室の位置を確認できます。"
       />
       <div className="map-tabs" aria-label="会場マップの切り替え">
         {images.map((item) => (

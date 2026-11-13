@@ -106,33 +106,26 @@ h2 {
   gap: var(--spacing-relative-spacing-lv6);
   text-decoration: none;
   color: var(--color-text-high-emphasis);
-  font-size: 1.5rem;
-  font-weight: bold;
+  font-size: 1rem;
   line-height: 1.3;
 }
-.brand-mark {
-  color: var(--color-object-accent-primary);
-  display: flex;
-  align-items: center;
+.brand-logo {
+  display: block;
+  height: 1.5rem;
+  width: auto;
+  flex: none;
 }
 .brand-caption {
-  display: block;
-  margin-top: var(--spacing-relative-spacing-lv2);
-  font-size: 0.8125rem;
-  font-weight: normal;
-  color: var(--color-text-medium-emphasis);
+  white-space: nowrap;
 }
 .header-right {
   display: flex;
   align-items: center;
   gap: var(--spacing-relative-spacing-lv10);
 }
-.connection,
 .user-name {
   font-size: 0.875rem;
   color: var(--color-text-medium-emphasis);
-}
-.user-name {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -821,13 +814,6 @@ h2 {
     padding: var(--spacing-relative-spacing-lv8);
     min-height: 72px;
   }
-  .brand {
-    font-size: 1.25rem;
-  }
-  .brand-caption {
-    font-size: 0.8125rem;
-  }
-  .connection,
   .user-name {
     display: none;
   }
@@ -843,9 +829,6 @@ h2 {
   }
   .welcome-footer {
     padding: var(--spacing-relative-spacing-lv8);
-  }
-  .welcome-footer > span:last-child {
-    display: none;
   }
   .app-layout {
     display: block;
