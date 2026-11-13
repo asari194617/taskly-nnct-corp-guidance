@@ -543,6 +543,15 @@ test("Desktop map previews follow the cursor and flip within map edges without m
     })),
   ).toEqual(before);
   await expect(booth).toHaveAttribute("aria-pressed", "false");
+  // The square drawing's booths are near its top. Zooming creates enough
+  // real drag range to bring one beneath the bottom-edge cursor at scrollTop 0.
+  for (let step = 0; step < 3; step++)
+    await full
+      .getByRole("button", { name: "マップを拡大", exact: true })
+      .click();
+  await expect(
+    full.getByRole("button", { name: "マップの表示をリセット", exact: true }),
+  ).toHaveAccessibleDescription("現在の倍率 175パーセント");
   // Stay clear of native scrollbar gutters while remaining close enough to
   // the edge that a 360px tooltip must flip to the other side of the cursor.
   const targets = [
@@ -550,6 +559,7 @@ test("Desktop map previews follow the cursor and flip within map edges without m
     { x: map.x + map.width * 0.55, y: map.y + map.height - 24, edge: "bottom" },
   ];
   for (const target of targets) {
+    await booth.scrollIntoViewIfNeeded();
     const source = (await booth.boundingBox())!;
     await page.mouse.move(
       source.x + source.width / 2,
@@ -586,12 +596,34 @@ test("Desktop map previews follow the cursor and flip within map edges without m
     await expect
       .poll(async () => {
         const rect = (await preview.boundingBox())!;
-        return target.edge === "right"
-          ? Math.abs(rect.x + rect.width - (pointer.x - 12)) <= 1
-          : Math.abs(rect.y + rect.height - (pointer.y - 12)) <= 1;
+        let left = pointer.x + 12;
+        let top = pointer.y + 12;
+        if (left + rect.width > map.x + map.width - 8)
+          left = pointer.x - rect.width - 12;
+        if (top + rect.height > map.y + map.height - 8)
+          top = pointer.y - rect.height - 12;
+        left = Math.max(
+          map.x + 8,
+          Math.min(left, map.x + map.width - rect.width - 8),
+        );
+        top = Math.max(
+          map.y + 8,
+          Math.min(top, map.y + map.height - rect.height - 8),
+        );
+        return Math.abs(rect.x - left) <= 1 && Math.abs(rect.y - top) <= 1;
       })
       .toBe(true);
     const tooltip = (await preview.boundingBox())!;
+    // Confirm the setup really requires an edge flip, rather than testing a
+    // clamped pointer that remained far from the intended viewport edge.
+    if (target.edge === "right")
+      expect(pointer.x + 12 + tooltip.width).toBeGreaterThan(
+        map.x + map.width - 8,
+      );
+    else
+      expect(pointer.y + 12 + tooltip.height).toBeGreaterThan(
+        map.y + map.height - 8,
+      );
     expect(tooltip.x).toBeGreaterThanOrEqual(map.x + 7);
     expect(tooltip.y).toBeGreaterThanOrEqual(map.y + 7);
     expect(tooltip.x + tooltip.width).toBeLessThanOrEqual(
@@ -613,7 +645,7 @@ test("Desktop map previews follow the cursor and flip within map edges without m
     await expect(booth).toHaveAttribute("aria-pressed", "false");
     await expect(
       full.getByRole("button", { name: "マップの表示をリセット", exact: true }),
-    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
+    ).toHaveAccessibleDescription("現在の倍率 175パーセント");
   }
 });
 
