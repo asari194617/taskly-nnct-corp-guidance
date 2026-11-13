@@ -1,0 +1,254 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  metadata:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            require('node:fs').writeFileSync('pr.json', JSON.stringify({
+              number: context.payload.pull_request.number,
+              sha: context.payload.pull_request.head.sha,
+              repository: context.payload.pull_request.head.repo.full_name,
+            }));
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-pr
+          path: pr.json
+          retention-days: 14
+  api:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: guidance_test
+          MYSQL_ROOT_PASSWORD: synthetic-ci-only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    env:
+      MYSQL_TEST_DSN: root:synthetic-ci-only@tcp(127.0.0.1:3306)/guidance_test?parseTime=true&charset=utf8mb4&loc=UTC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+      - run: go vet ./...
+      - name: Test API and require 80% statement coverage
+        run: |
+          mkdir -p coverage
+          go test -race -coverprofile=coverage/go.out ./...
+          node .github/scripts/coverage-summary.mjs go-profile coverage/go.out api.json 80
+          node .github/scripts/coverage-summary.mjs go-profile coverage/go.out importer.json 80 '/cmd/import-guidance/'
+      - name: Measure real MySQL integration execution
+        run: |
+          go test -race -run '^TestMySQLIntegration$' -coverprofile=coverage/integration.out ./internal/server
+          node .github/scripts/coverage-summary.mjs go-profile coverage/integration.out integration.json 0
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-api
+          path: |
+            api.json
+            importer.json
+            integration.json
+            coverage/integration.out
+            coverage/go.out
+          retention-days: 14
+          if-no-files-found: ignore
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    env:
+      NEXT_PUBLIC_API_URL: https://api.nnct-corp-guidance-2026.taskly.iy0306.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Test Web and require 80% line coverage
+        run: |
+          npm run test:coverage
+          node ../../.github/scripts/coverage-summary.mjs istanbul coverage/coverage-summary.json ../../web.json 80
+      - run: npm run build
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-web
+          path: |
+            web.json
+            apps/web/coverage/lcov.info
+          retention-days: 14
+          if-no-files-found: ignore
+  data-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+      - run: python -m pip install -r scripts/requirements-data.txt coverage
+      - name: Test importer/extractor with synthetic fixtures
+        run: |
+          python -m coverage run --source=scripts --omit='scripts/test_*' -m unittest discover -s scripts -p 'test_*.py'
+          python -m coverage json -o python-coverage.json
+          python -m coverage report --fail-under=80
+          python -c 'import json; d=json.load(open("python-coverage.json")); json.dump({"percent": d["totals"]["percent_covered"]}, open("extractor.json", "w"))'
+      - run: node --test .github/scripts/coverage-summary.test.mjs deploy/*.test.mjs deploy/r2/*.test.mjs
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-extractor
+          path: extractor.json
+          retention-days: 14
+          if-no-files-found: ignore
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: guidance_e2e
+          MYSQL_ROOT_PASSWORD: synthetic-ci-only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    env:
+      E2E_MYSQL_PASSWORD: synthetic-ci-only
+      E2E_MYSQL_DATABASE: guidance_e2e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm --prefix apps/web ci
+      - run: npm --prefix apps/web exec -- playwright install --with-deps chromium
+      - run: node scripts/e2e-run.mjs
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-e2e
+          path: |
+            e2e.json
+            apps/web/coverage/e2e/coverage-summary.json
+            apps/web/coverage/e2e/results.json
+            apps/web/coverage/e2e/playwright-report/
+            apps/web/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+  production-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: docker build --tag guidance-ci:${{ github.sha }} .
+  required-ci:
+    if: always()
+    needs: [api, web, data-tools, e2e, production-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every test and production build
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          test "$RESULTS" = 'success,success,success,success,success'
+  coverage-comment:
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [metadata, api, web, data-tools, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      # This privileged workflow never checks out or executes the PR's code.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        continue-on-error: true
+        with:
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          pattern: coverage-*
+          merge-multiple: true
+          path: reports
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('node:fs');
+            const sourcePR = context.payload.pull_request;
+            const run = {head_repository:sourcePR.head.repo, pull_requests:[{number:sourcePR.number}],
+              head_branch:sourcePR.head.ref, html_url:`${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`};
+            const {owner, repo} = context.repo;
+            const read = name => {
+              const file = `reports/${name}.json`;
+              if (fs.statSync(file).size > 4096) throw new Error('Oversized report');
+              return JSON.parse(fs.readFileSync(file, 'utf8'));
+            };
+            let metadata;
+            try { metadata = read('pr'); } catch { core.warning('PR metadata unavailable'); return; }
+            if (!Number.isSafeInteger(metadata.number) || metadata.number < 1 ||
+                !/^[0-9a-f]{40}$/.test(metadata.sha) || typeof metadata.repository !== 'string') return;
+            if (run.head_repository?.full_name !== metadata.repository ||
+                (run.pull_requests.length && !run.pull_requests.some(p => p.number === metadata.number))) return;
+            const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
+            if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
+                pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
+            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['PDF extractor (Python statements)', 'extractor'], ['Browser E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
+              let value = 'Unavailable (test/setup failed)';
+              try {
+                const {percent} = read(id);
+                if (typeof percent === 'number' && Number.isFinite(percent) && percent >= 0 && percent <= 100)
+                  value = `${percent.toFixed(1)}% ${['e2e','integration'].includes(id) ? '' : percent >= 80 ? '✅' : '❌'}`;
+              } catch {}
+              return `| ${name} | ${value} | ${['e2e','integration'].includes(id) ? 'Measured' : '80%'} |`;
+            });
+            const marker = '<!-- nnct-guidance-coverage -->';
+            const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
+              '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
+              'Go application, importer, Web unit tests and PDF extraction require 80%. Integration and browser execution are reported separately.',
+              `[CI run](${run.html_url})`].join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments,
+              {owner,repo,issue_number:metadata.number,per_page:100});
+            const previous = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (previous) await github.rest.issues.updateComment({owner,repo,comment_id:previous.id,body});
+            else await github.rest.issues.createComment({owner,repo,issue_number:metadata.number,body});
+            await core.summary.addRaw(body).write();

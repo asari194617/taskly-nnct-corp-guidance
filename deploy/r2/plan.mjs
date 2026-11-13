@@ -1,0 +1,38 @@
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+import { createHash } from 'node:crypto';
+const types = { '.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.txt':'text/plain; charset=utf-8','.svg':'image/svg+xml','.ico':'image/x-icon','.woff':'font/woff','.woff2':'font/woff2','.png':'image/png' };
+export function metadata(key) {
+  const extension = key.slice(key.lastIndexOf('.'));
+  if (!(extension in types) || /(^|\/)(data|private|\.env)(\/|\.|$)/i.test(key)) throw new Error(`Disallowed deployment asset: ${key}`);
+  return {ContentType:types[extension], CacheControl:key.startsWith('_next/static/') ? 'public, max-age=31536000, immutable' : 'no-cache'};
+}
+export async function files(root, directory=root) {
+  const output=[];
+  for(const entry of await readdir(directory,{withFileTypes:true})) {
+    const path=join(directory,entry.name);
+    if(entry.isSymbolicLink()) throw new Error('Deployment symlinks are forbidden');
+    if(entry.isDirectory()) output.push(...await files(root,path));
+    else if(entry.isFile()) { const key=relative(root,path).replaceAll('\\','/'); metadata(key); output.push(key); }
+  }
+  return output.sort((a,b)=>Number(a.endsWith('.html'))-Number(b.endsWith('.html')) || a.localeCompare(b));
+}
+export function secureHTML(html, apiOrigin) {
+  const api=new URL(apiOrigin);
+  if(api.protocol!=='https:' || api.pathname!=='/' || api.search || api.hash) throw new Error('HTTPS API origin required');
+  const hashes=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    .filter(([,attrs,body])=>! /\bsrc\s*=/i.test(attrs) && body.length)
+    .map(([, ,body])=>`'sha256-${createHash('sha256').update(body).digest('base64')}'`);
+  const policy=`default-src 'none'; script-src 'self' ${[...new Set(hashes)].join(' ')}; style-src 'self' 'unsafe-inline'; connect-src ${api.origin}; img-src 'self' blob:; font-src 'self'; frame-src 'self' blob:; object-src blob:; base-uri 'none'; form-action 'self' ${api.origin}`;
+  return html.replace(/<head>/i,`<head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer">`);
+}
+export async function prepare(root,apiOrigin) {
+  const keys=await files(root);
+  if(!keys.includes('index.html')) throw new Error('Static index.html missing');
+  for(const key of keys.filter(k=>k.endsWith('.html'))) {
+    const path=join(root,key);
+    const html=await readFile(path,'utf8');
+    if(!html.includes('http-equiv="Content-Security-Policy"')) await writeFile(path,secureHTML(html,apiOrigin));
+  }
+  return keys;
+}

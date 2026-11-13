@@ -1,0 +1,14 @@
+.git
+.github
+.env*
+data
+private
+apps
+node_modules
+coverage
+*.pdf
+*.csv
+*.tsv
+*.dump
+*.out
+__pycache__
