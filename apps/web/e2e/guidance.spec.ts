@@ -86,7 +86,10 @@ async function verifyLongIndustryFits(page: Page) {
   );
   // OR matching must not duplicate a company matching both selected industries.
   await assertCompanyCount(page, 1);
-  await group.getByRole("button", { name: "業種を解除", exact: true }).click();
+  await page
+    .locator(".industry-options")
+    .getByRole("button", { name: "業種を解除", exact: true })
+    .click();
   await assertCompanyCount(page, 4);
 }
 async function industryChip(input: Locator, selected: boolean) {
@@ -297,7 +300,10 @@ test("Search filters and saved companies survive reload through real MySQL", asy
   await expect(
     group.getByRole("button", { name: "機械", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await group.getByRole("button", { name: "業種を解除", exact: true }).click();
+  await page
+    .locator(".industry-options")
+    .getByRole("button", { name: "業種を解除", exact: true })
+    .click();
   await page.getByRole("searchbox").fill("あおば");
   await assertCompanyCount(page, 1);
   await expect
@@ -1149,6 +1155,47 @@ function contrastRatio(foreground: string, background: string) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+async function renderedTextContrast(text: Locator) {
+  const colors = await text.evaluate((node) => {
+    // Normalize computed CSS colors (including color(srgb ...)) using Canvas's
+    // color parser. These are style colors, not sampled screenshot pixels.
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    const rgba = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const values = context.getImageData(0, 0, 1, 1).data;
+      return [values[0], values[1], values[2], values[3] / 255];
+    };
+    const ancestors: Element[] = [];
+    for (
+      let current: Element | null = node;
+      current;
+      current = current.parentElement
+    )
+      ancestors.unshift(current);
+    let background = [255, 255, 255];
+    for (const ancestor of ancestors) {
+      const layer = rgba(getComputedStyle(ancestor).backgroundColor);
+      background = background.map(
+        (channel, index) => layer[index] * layer[3] + channel * (1 - layer[3]),
+      );
+    }
+    const foreground = rgba(getComputedStyle(node).color);
+    const visibleForeground = background.map(
+      (channel, index) =>
+        foreground[index] * foreground[3] + channel * (1 - foreground[3]),
+    );
+    return {
+      foreground: `rgb(${visibleForeground.join(", ")})`,
+      background: `rgb(${background.join(", ")})`,
+    };
+  });
+  return contrastRatio(colors.foreground, colors.background);
+}
+
 test("The directory starts with companies and follows readable system color themes", async ({
   page,
 }, info) => {
@@ -1767,7 +1814,22 @@ test("Interest changes appear before a delayed API response and roll back a fail
   await expect(favorite).toBeEnabled();
   await expect(favorite).toHaveAttribute("aria-pressed", "true");
   await expect(nav(page, "気になる")).toContainText("1");
-  await expect(page.getByRole("alert")).toBeVisible();
+  const errorAlert = page
+    .getByRole("alert")
+    .filter({
+      hasText:
+        "情報を取得できませんでした。時間をおいて、もう一度お試しください。",
+    });
+  await expect(errorAlert).toBeVisible();
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    expect(
+      await renderedTextContrast(
+        errorAlert.locator(".spui-InlineNotification-text"),
+      ),
+    ).toBeGreaterThanOrEqual(4.5);
+  }
+  await page.emulateMedia({ colorScheme: "light" });
   expect(
     (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
   ).toContain("AM-2");

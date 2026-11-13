@@ -317,6 +317,8 @@ h2 {
 }
 .search-field > .spui-TextField {
   display: block;
+  height: 48px;
+  min-height: 48px;
   padding-left: 44px;
 }
 .company-search-icon {
@@ -984,6 +986,15 @@ h2 {
 .notice-sections ul {
   margin: 0;
   padding-left: 1.5em;
+}
+@media (prefers-color-scheme: light) {
+  .spui-InlineNotification--error {
+    background-color: color-mix(
+      in srgb,
+      var(--caution-red-100) 5%,
+      var(--white-100)
+    );
+  }
 }
 @media (max-width: 1023px) {
   .mobile-navigation ul {
