@@ -380,9 +380,10 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
   ).toBeVisible();
 });
 
-test("Fullscreen maps preserve zoom when selecting companies and offer embedded detail maps", async ({
+test("Fullscreen maps keep blue selection and a non-modal company panel while map controls remain interactive", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, "map", "/map/?session=AM&focus=AM-1");
   const full = page.locator('.venue-map[data-mode="fullscreen"]');
   const viewport = full.getByRole("region", {
@@ -397,85 +398,309 @@ test("Fullscreen maps preserve zoom when selecting companies and offer embedded 
     name: "午前 ブース 1 架空あおばソフト",
     exact: true,
   });
+  const second = full.getByRole("button", {
+    name: "午前 ブース 2 架空いろは機械",
+    exact: true,
+  });
   await expect(first).toHaveAttribute("data-selected", "true");
   await expect(zoom).toHaveText("100%");
+  await expect(first).toHaveAttribute("data-assigned", "true");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await first.hover();
+    const selectedStyle = await first.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        border: style.borderColor,
+        outline: style.outlineColor,
+        shadow: style.boxShadow,
+        background: style.backgroundColor,
+      };
+    });
+    expect(selectedStyle.border).toBe("rgb(0, 145, 255)");
+    expect(selectedStyle.outline).toBe("rgb(0, 145, 255)");
+    expect(selectedStyle.shadow).toContain("rgb(0, 145, 255)");
+    expect(selectedStyle.background).toBe("rgba(0, 0, 0, 0)");
+    await second.hover();
+    expect(
+      await second.evaluate((node) => getComputedStyle(node).backgroundColor),
+    ).toBe("rgba(0, 0, 0, 0)");
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  const image = full.getByRole("img", { name: "検証1階マップ", exact: true });
+  expect(await image.evaluate((node) => getComputedStyle(node).opacity)).toBe(
+    "1",
+  );
+  await expect(full.locator(".venue-map-search-icon svg")).toBeVisible();
+  await expect(
+    full.getByRole("searchbox", { name: "マップの企業名", exact: true }),
+  ).toBeVisible();
+  const zoomInBounds = (await full
+    .getByRole("button", { name: "マップを拡大", exact: true })
+    .boundingBox())!;
+  expect(zoomInBounds.width).toBeLessThanOrEqual(40);
+  expect(zoomInBounds.height).toBeLessThanOrEqual(40);
   const area = (await viewport.boundingBox())!;
   expect(area.x).toBe(0);
-  expect(area.y).toBe(0);
+  const header = page.getByRole("banner");
+  await expect(header).toBeVisible();
+  await expect(nav(page, "マップ")).toHaveAttribute("aria-current", "page");
+  const headerBounds = (await header.boundingBox())!;
+  expect(area.y).toBeCloseTo(headerBounds.y + headerBounds.height, 0);
   expect(area.width).toBe(page.viewportSize()!.width);
-  expect(area.height).toBe(page.viewportSize()!.height);
+  expect(area.y + area.height).toBeCloseTo(page.viewportSize()!.height, 0);
   for (let step = 0; step < 3; step++)
     await full
       .getByRole("button", { name: "マップを拡大", exact: true })
       .click();
   await expect(zoom).toHaveText("175%");
   await first.click();
-  const dialog = page.getByRole("dialog", {
+  let panel = page.getByRole("region", {
     name: "架空あおばソフト",
     exact: true,
   });
-  await expect(dialog).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe("/map/");
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(first).toBeFocused();
+  const side = (await panel.boundingBox())!;
+  expect(side.x).toBeGreaterThan(1440 / 2);
+  expect(side.x + side.width).toBeLessThanOrEqual(1440);
   expect(new URL(page.url()).searchParams.get("company")).toBe("AM-1");
+  await full.getByRole("button", { name: "マップを拡大", exact: true }).click();
+  await expect(zoom).toHaveText("200%");
+  await expect(panel).toBeVisible();
+  await full.getByRole("button", { name: "マップを縮小", exact: true }).click();
+  await openAccount(page);
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeVisible();
+  await second.focus();
+  await page.keyboard.press("Enter");
+  panel = page.getByRole("region", { name: "架空いろは機械", exact: true });
+  await expect(panel).toBeVisible();
   await expect(
-    dialog.getByRole("button", { name: "詳細を閉じる", exact: true }),
-  ).toHaveCount(0);
-  const embedded = dialog.locator('.venue-map[data-mode="embedded"]');
-  await expect(embedded).toHaveCount(0);
-  await dialog.locator("summary").filter({ hasText: "会場マップ" }).click();
-  await expect(embedded).toBeVisible();
-  await expect(
-    embedded.getByRole("button", {
-      name: "午前 ブース 1 架空あおばソフト",
-      exact: true,
-    }),
-  ).toHaveAttribute("data-selected", "true");
-  const mapLink = dialog.getByRole("link", {
-    name: "マップページを開く",
-    exact: true,
-  });
-  await expect(mapLink).toHaveAttribute("href", /^\/map\/\?/);
-  await embedded
-    .getByRole("button", {
-      name: "午前 ブース 2 架空いろは機械",
-      exact: true,
-    })
-    .click();
-  const updatedDialog = page.getByRole("dialog", {
-    name: "架空いろは機械",
-    exact: true,
-  });
-  await expect(updatedDialog).toBeVisible();
+    panel.getByRole("heading", { name: "架空いろは機械", exact: true }),
+  ).toBeFocused();
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    expect(
+      await first.evaluate((node) => getComputedStyle(node).boxShadow),
+    ).toContain("rgb(35, 123, 49)");
+    expect(
+      await second.evaluate((node) => getComputedStyle(node).outlineColor),
+    ).toBe("rgb(0, 145, 255)");
+  }
+  await page.emulateMedia({ colorScheme: "light" });
   expect(new URL(page.url()).searchParams.get("focus")).toBe("AM-2");
-  expect(new URL(page.url()).searchParams.get("session")).toBe("AM");
-  await updatedDialog
+  await expect(zoom).toHaveText("175%");
+  await panel
+    .getByRole("heading", { name: "架空いろは機械", exact: true })
+    .focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).not.toBeVisible();
+  await expect(second).toBeFocused();
+  await first.focus();
+  await page.keyboard.press("Enter");
+  panel = page.getByRole("region", { name: "架空あおばソフト", exact: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const bottom = (await panel.boundingBox())!;
+  expect(bottom.x).toBeGreaterThanOrEqual(0);
+  expect(bottom.x + bottom.width).toBeLessThanOrEqual(390);
+  expect(bottom.y).toBeGreaterThan(844 * 0.4);
+  const mobileNavigation = page.getByRole("navigation", {
+    name: "モバイルナビゲーション",
+  });
+  await expect(mobileNavigation).toBeVisible();
+  await expect(
+    mobileNavigation.getByRole("link", { name: "マップ", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  const navigationBounds = (await mobileNavigation.boundingBox())!;
+  const mobileMap = (await viewport.boundingBox())!;
+  const mobileHeader = (await header.boundingBox())!;
+  expect(mobileMap.y).toBeCloseTo(mobileHeader.y + mobileHeader.height, 0);
+  expect(mobileMap.y + mobileMap.height).toBeCloseTo(navigationBounds.y, 0);
+  expect(bottom.y + bottom.height).toBeLessThanOrEqual(navigationBounds.y);
+  expect(bottom.y + bottom.height).toBeGreaterThan(navigationBounds.y - 20);
+  await full.getByRole("button", { name: "マップを拡大", exact: true }).click();
+  await expect(zoom).toHaveText("200%");
+  await expect(panel).toBeVisible();
+  await full.getByRole("button", { name: "マップを縮小", exact: true }).click();
+  await page.setViewportSize({ width: 844, height: 390 });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const mapBounds = (await viewport.boundingBox())!;
+    const landscapeHeader = (await header.boundingBox())!;
+    const landscapeNav = (await mobileNavigation.boundingBox())!;
+    const landscapePanel = (await panel.boundingBox())!;
+    expect(mapBounds.y).toBeCloseTo(
+      landscapeHeader.y + landscapeHeader.height,
+      0,
+    );
+    expect(mapBounds.y + mapBounds.height).toBeCloseTo(landscapeNav.y, 0);
+    expect(landscapePanel.y).toBeGreaterThanOrEqual(mapBounds.y);
+    expect(landscapePanel.y + landscapePanel.height).toBeLessThanOrEqual(
+      landscapeNav.y,
+    );
+    for (const name of [
+      "マップを拡大",
+      "拡大率を100パーセントに戻す",
+      "マップを縮小",
+      "検証1階マップ",
+      "検証2階マップ",
+    ]) {
+      const control = full.getByRole("button", { name, exact: true });
+      const bounds = (await control.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(mapBounds.x);
+      expect(bounds.y).toBeGreaterThanOrEqual(mapBounds.y);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(
+        mapBounds.x + mapBounds.width,
+      );
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(landscapePanel.y);
+      expect(
+        await control.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return node.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          );
+        }),
+      ).toBe(true);
+    }
+    await full
+      .getByRole("button", { name: "マップを拡大", exact: true })
+      .click();
+    await expect(zoom).toHaveText("200%");
+    await full
+      .getByRole("button", { name: "マップを縮小", exact: true })
+      .click();
+    await expect(zoom).toHaveText("175%");
+    await expect(panel).toBeVisible();
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await panel
+    .getByRole("button", { name: "企業情報を閉じる", exact: true })
+    .click();
+  await page.setViewportSize({ width: 320, height: 900 });
+  expect(new URL(page.url()).searchParams.get("focus")).toBe("AM-1");
+  expect(new URL(page.url()).searchParams.has("company")).toBe(false);
+  for (const name of ["検証2階マップ", "検証1階マップ"]) {
+    const floor = full.getByRole("button", { name, exact: true });
+    expect(
+      await floor.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return node.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        );
+      }),
+    ).toBe(true);
+    await floor.click();
+    await expect(full.getByRole("img", { name, exact: true })).toBeVisible();
+  }
+  await page.setViewportSize({ width: 844, height: 390 });
+  await full.getByRole("button", { name: /^表示中の一覧/ }).click();
+  const landscapeResults = full.getByRole("region", {
+    name: "表示中の一覧",
+    exact: true,
+  });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const sheetBounds = (await landscapeResults.boundingBox())!;
+    const mapBounds = (await viewport.boundingBox())!;
+    expect(sheetBounds.y).toBeGreaterThanOrEqual(mapBounds.y);
+    expect(sheetBounds.y + sheetBounds.height).toBeLessThanOrEqual(
+      mapBounds.y + mapBounds.height,
+    );
+    for (const control of [
+      landscapeResults.getByRole("button", {
+        name: "企業詳細 架空あおばソフト",
+        exact: true,
+      }),
+      landscapeResults.getByRole("button", { name: "閉じる", exact: true }),
+    ]) {
+      await expect(control).toBeVisible();
+      const bounds = (await control.boundingBox())!;
+      expect(bounds.y).toBeGreaterThanOrEqual(sheetBounds.y);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
+        sheetBounds.y + sheetBounds.height,
+      );
+      expect(
+        await control.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return node.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          );
+        }),
+      ).toBe(true);
+    }
+    await test.info().attach(`landscape-map-results-${colorScheme}`, {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await full
+    .getByRole("button", { name: "検証2階マップ", exact: true })
+    .click();
+  await expect(
+    full.getByRole("img", { name: "検証2階マップ", exact: true }),
+  ).toBeVisible();
+  await expect(landscapeResults).toBeVisible();
+  await full
+    .getByRole("button", { name: "検証1階マップ", exact: true })
+    .click();
+  await landscapeResults
     .getByRole("button", { name: "閉じる", exact: true })
     .click();
-  await expect(dialog).not.toBeVisible();
-  await expect(updatedDialog).not.toBeVisible();
-  await expect(
-    full.getByRole("button", {
-      name: "午前 ブース 2 架空いろは機械",
-      exact: true,
-    }),
-  ).toHaveAttribute("data-selected", "true");
-  await expect(first).toHaveAttribute("aria-pressed", "false");
+  await expect(landscapeResults).not.toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(zoom).toHaveText("175%");
   await full.getByRole("button", { name: /^表示中の一覧/ }).click();
   const results = full.getByRole("region", {
     name: "表示中の一覧",
     exact: true,
   });
+  await expect(results).toBeVisible();
+  const floorControls = full.locator(".venue-map-floors");
+  const floorsBounds = (await floorControls.boundingBox())!;
+  const resultBounds = (await results.boundingBox())!;
+  const intersects =
+    floorsBounds.x < resultBounds.x + resultBounds.width &&
+    floorsBounds.x + floorsBounds.width > resultBounds.x &&
+    floorsBounds.y < resultBounds.y + resultBounds.height &&
+    floorsBounds.y + floorsBounds.height > resultBounds.y;
+  expect(intersects).toBe(false);
+  expect(floorsBounds.x + floorsBounds.width).toBeGreaterThan(1440 - 40);
+  expect(
+    await floorControls
+      .getByRole("button")
+      .first()
+      .evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return node.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        );
+      }),
+  ).toBe(true);
   await results
     .getByRole("button", { name: "企業詳細 架空いろは機械", exact: true })
     .click();
-  const secondDialog = page.getByRole("dialog", {
+  const secondDialog = page.getByRole("region", {
     name: "架空いろは機械",
     exact: true,
   });
   await expect(secondDialog).toBeVisible();
   await secondDialog
-    .getByRole("button", { name: "閉じる", exact: true })
+    .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
   await expect(zoom).toHaveText("175%");
   await full.getByRole("button", { name: "絞り込み", exact: true }).click();
@@ -489,10 +714,7 @@ test("Fullscreen maps preserve zoom when selecting companies and offer embedded 
     true,
   );
   await expect(first).toBeEnabled();
-  const second = full.getByRole("button", {
-    name: "午前 ブース 2 架空いろは機械",
-    exact: true,
-  });
+
   await expect(second).toBeEnabled();
   await checkbox(
     industry.getByRole("checkbox", { name: "情報処理", exact: true }),
@@ -508,10 +730,10 @@ test("Fullscreen maps preserve zoom when selecting companies and offer embedded 
   await expect(first).toHaveAttribute("data-match", "false");
   await second.click();
   await expect(
-    page.getByRole("dialog", { name: "架空いろは機械", exact: true }),
+    page.getByRole("region", { name: "架空いろは機械", exact: true }),
   ).toBeVisible();
   await secondDialog
-    .getByRole("button", { name: "閉じる", exact: true })
+    .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
   await expect(zoom).toHaveText("175%");
   await page.getByLabel("マップの企業名", { exact: true }).fill("");
@@ -521,8 +743,8 @@ test("Fullscreen maps preserve zoom when selecting companies and offer embedded 
     .getByRole("button", { name: "午後 ブース 1 架空みらい建設", exact: true })
     .click();
   await page
-    .getByRole("dialog", { name: "架空みらい建設", exact: true })
-    .getByRole("button", { name: "閉じる", exact: true })
+    .getByRole("region", { name: "架空みらい建設", exact: true })
+    .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
   await expect(zoom).toHaveText("175%");
   const booth = full.getByRole("button", {
@@ -820,8 +1042,12 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
     .getByRole("region", { name: "操作できる会場マップ", exact: true });
   const bounds = (await canvas.boundingBox())!;
   expect(bounds.width).toBe(320);
-  expect(bounds.height).toBe(844);
-  await page.getByRole("link", { name: /一覧/ }).first().click();
+  const mapHeader = (await page.getByRole("banner").boundingBox())!;
+  const mapNavigation = (await mobile.boundingBox())!;
+  expect(bounds.y).toBeCloseTo(mapHeader.y + mapHeader.height, 0);
+  expect(bounds.y + bounds.height).toBeCloseTo(mapNavigation.y, 0);
+  await expect(mobile).toBeVisible();
+  await mobile.getByRole("link", { name: "一覧", exact: true }).click();
   await mobile.getByRole("link", { name: "気になる", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "指定企業", exact: true }),
@@ -1193,4 +1419,128 @@ test("A large synthetic catalog renders incrementally on real scrolling without 
   ).toHaveCount(0);
   await search.fill("");
   await assertCompanyCount(page, 24);
+});
+
+test("Interests appear first and an unsaved card remains undoable until a real reload", async ({
+  page,
+}) => {
+  await login(page, "bob");
+  for (const id of ["AM-1", "AM-2", "PM-1", "PM-2"])
+    expect(
+      (
+        await page.request.delete(`${API}/api/bookmarks/${id}`, {
+          headers: { Origin: "http://127.0.0.1:3300" },
+        })
+      ).status(),
+    ).toBe(204);
+  await page.reload();
+  await page
+    .getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    })
+    .click();
+  await nav(page, "気になる").click();
+  const kept = page
+    .locator(".company-card")
+    .filter({ hasText: "架空いろは機械" });
+  await expect(kept).toBeVisible();
+  const assigned = page.getByRole("heading", { name: "指定企業", exact: true });
+  expect((await kept.boundingBox())!.y).toBeLessThan(
+    (await assigned.boundingBox())!.y,
+  );
+  await kept
+    .getByRole("button", {
+      name: "架空いろは機械を気になるから解除",
+      exact: true,
+    })
+    .click();
+  await expect(kept).toBeVisible();
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "false");
+  expect(
+    (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
+  ).not.toContain("AM-2");
+  await kept
+    .getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    })
+    .click();
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるから解除",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(kept).toBeVisible();
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるから解除",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await kept
+    .getByRole("button", {
+      name: "架空いろは機械を気になるから解除",
+      exact: true,
+    })
+    .click();
+  await nav(page, "一覧").click();
+  await nav(page, "気になる").click();
+  await expect(
+    kept.getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "気になる", exact: true }),
+  ).toBeVisible();
+  await expect(kept).toHaveCount(0);
+});
+
+test("Logout and another account do not inherit retained interest cards", async ({
+  page,
+}) => {
+  await login(page, "bob");
+  const add = page.getByRole("button", {
+    name: "架空いろは機械を気になるに追加",
+    exact: true,
+  });
+  if (!(await add.count()))
+    await page
+      .getByRole("button", {
+        name: "架空いろは機械を気になるから解除",
+        exact: true,
+      })
+      .click();
+  await add.click();
+  await nav(page, "気になる").click();
+  const kept = page
+    .locator(".company-card")
+    .filter({ hasText: "架空いろは機械" });
+  await kept
+    .getByRole("button", {
+      name: "架空いろは機械を気になるから解除",
+      exact: true,
+    })
+    .click();
+  await expect(kept).toBeVisible();
+  await accountAction(page, "ログアウト");
+  await expect(
+    page.getByRole("button", { name: "Tasklyでログイン", exact: true }),
+  ).toBeVisible();
+  await expect(kept).toHaveCount(0);
+  await login(page, "alice", "/favorites/");
+  expect(
+    (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
+  ).not.toContain("AM-2");
+  await expect(kept).toHaveCount(0);
 });

@@ -16,6 +16,7 @@ let dataset: Guidance;
 let saved: Set<string>;
 let rosterNumber: number | null;
 let userName: string;
+let userSub: string;
 let failures: Map<string, number | Error>;
 let fetchMock: ReturnType<typeof vi.fn>;
 const preferences = () => ({
@@ -46,8 +47,9 @@ function companyLink(name: string) {
   return within(card(name)).getByRole("link", { name });
 }
 async function ready() {
-  render(<GuidanceApp />);
+  const mounted = render(<GuidanceApp />);
   await screen.findByRole("button", { name: "ユーザーメニュー" });
+  return mounted;
 }
 async function openAccount() {
   if (!screen.queryByRole("menu", { name: "ユーザーメニュー" })) {
@@ -99,6 +101,7 @@ beforeEach(() => {
   saved = new Set();
   rosterNumber = 7;
   userName = "テストユーザー";
+  userSub = "test-user";
   failures = new Map();
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
@@ -109,7 +112,7 @@ beforeEach(() => {
     if (path === "/api/me")
       return json({
         user: {
-          sub: "test-user",
+          sub: userSub,
           email: "test@example.invalid",
           name: userName,
         },
@@ -670,7 +673,7 @@ describe("shareable routes and venue navigation", () => {
     expect(locationURL().searchParams.get("company")).toBe("PM-1");
     expect(locationURL().hash).toBe("#booth");
     expect(
-      screen.getByRole("dialog", { name: dataset.companies[2].name }),
+      screen.getByRole("region", { name: dataset.companies[2].name }),
     ).toBeInTheDocument();
     expect(window.sessionStorage.getItem("guidance-return-route")).toBeNull();
   });
@@ -773,11 +776,13 @@ describe("shareable routes and venue navigation", () => {
     );
     await userEvent.click(second);
     expect(
-      screen.getByRole("dialog", { name: dataset.companies[1].name }),
+      screen.getByRole("region", { name: dataset.companies[1].name }),
     ).toBeInTheDocument();
     expect(locationURL().searchParams.get("company")).toBe("AM-2");
     expect(locationURL().searchParams.get("focus")).toBe("AM-2");
-    await userEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "企業情報を閉じる" }),
+    );
     await userEvent.click(screen.getByRole("radio", { name: "午後の部" }));
     expect(locationURL().searchParams.get("session")).toBe("PM");
     expect(locationURL().searchParams.has("focus")).toBe(false);
@@ -854,39 +859,123 @@ describe("shareable routes and venue navigation", () => {
     expect(locationURL().searchParams.has("company")).toBe(false);
   });
 
-  it("keeps a company chosen inside the detail map selected after its dialog closes", async () => {
+  it("keeps normal header and mobile navigation available on the map", async () => {
+    window.history.replaceState(null, "", "/map/?session=AM");
+    await ready();
+    const header = screen.getByRole("banner");
+    expect(
+      within(header).getByRole("link", {
+        name: "Taskly 企業ガイダンス ホーム",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(header).getByRole("navigation", { name: "メインナビゲーション" }),
+    ).toBeInTheDocument();
+    expect(
+      within(header).getByRole("button", { name: "ユーザーメニュー" }),
+    ).toBeInTheDocument();
+    const mobile = screen.getByRole("navigation", {
+      name: "モバイルナビゲーション",
+    });
+    expect(
+      within(mobile).getByRole("link", { name: "マップ" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(mobile)
+        .getByRole("link", { name: "マップ" })
+        .querySelector("svg[data-filled=true]"),
+    ).not.toBeNull();
+    expect(document.querySelector(".venue-map-navigation")).toBeNull();
+    const search = await screen.findByRole("searchbox", {
+      name: "マップの企業名",
+    });
+    expect(
+      search
+        .closest(".venue-map-search-input")
+        ?.querySelector(".venue-map-search-icon[aria-hidden=true] svg"),
+    ).not.toBeNull();
+  });
+  it("keeps the map interactive while a non-modal company panel changes its selection", async () => {
     window.history.replaceState(
       null,
       "",
       "/map/?company=AM-1&focus=AM-1&session=AM",
     );
     await ready();
-    const first = dataset.companies[0];
-    const second = dataset.companies[1];
-    const initial = await screen.findByRole("dialog", { name: first.name });
-    await expandDetailMap(initial);
-    await userEvent.click(
-      await within(initial).findByRole("button", {
-        name: `午前 ブース 2 ${second.name}`,
-      }),
-    );
-    const updated = await screen.findByRole("dialog", { name: second.name });
+    const first = dataset.companies[0],
+      second = dataset.companies[1];
+    const panel = await screen.findByRole("region", { name: first.name });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(panel).not.toHaveAttribute("aria-modal");
+    const zoom = screen.getByRole("button", {
+      name: "拡大率を100パーセントに戻す",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
+    expect(zoom).toHaveTextContent("125%");
+    const secondBooth = screen.getByRole("button", {
+      name: `午前 ブース 2 ${second.name}`,
+    });
+    await userEvent.click(secondBooth);
+    const updated = screen.getByRole("region", { name: second.name });
+    expect(updated).toBe(panel);
     expect(locationURL().searchParams.get("company")).toBe(second.id);
     expect(locationURL().searchParams.get("focus")).toBe(second.id);
-    expect(locationURL().searchParams.get("session")).toBe(second.session);
+    expect(zoom).toHaveTextContent("125%");
     await userEvent.click(
-      within(updated).getByRole("button", { name: "閉じる" }),
+      within(updated).getByRole("button", { name: "企業情報を閉じる" }),
     );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: second.name }),
+    ).not.toBeInTheDocument();
     expect(locationURL().searchParams.has("company")).toBe(false);
     expect(locationURL().searchParams.get("focus")).toBe(second.id);
-    const main = within(screen.getByRole("main"));
+    expect(secondBooth).toHaveAttribute("data-selected", "true");
     expect(
-      main.getByRole("button", { name: `午前 ブース 2 ${second.name}` }),
-    ).toHaveAttribute("data-selected", "true");
-    expect(
-      main.getByRole("button", { name: `午前 ブース 1 ${first.name}` }),
+      screen.getByRole("button", { name: `午前 ブース 1 ${first.name}` }),
     ).toHaveAttribute("aria-pressed", "false");
+  });
+  it("closes only the panel's Escape context and restores the keyboard map trigger", async () => {
+    window.history.replaceState(null, "", "/map/?session=AM");
+    await ready();
+    const company = dataset.companies[0];
+    const booth = await screen.findByRole("button", {
+      name: `午前 ブース 1 ${company.name}`,
+    });
+    booth.focus();
+    await userEvent.keyboard("{Enter}");
+    const panel = screen.getByRole("region", { name: company.name });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const zoom = screen.getByRole("button", { name: "マップを拡大" });
+    fireEvent.keyDown(zoom, { key: "Escape" });
+    expect(panel).toBeInTheDocument();
+    within(panel).getByRole("heading", { name: company.name }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("region", { name: company.name }),
+    ).not.toBeInTheDocument();
+    expect(booth).toHaveFocus();
+  });
+  it("returns to the map viewport when its original booth has been filtered out", async () => {
+    window.history.replaceState(null, "", "/map/?session=AM");
+    await ready();
+    const company = dataset.companies[0];
+    const booth = await screen.findByRole("button", {
+      name: `午前 ブース 1 ${company.name}`,
+    });
+    booth.focus();
+    await userEvent.keyboard("{Enter}");
+    const panel = screen.getByRole("region", { name: company.name });
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "マップの企業名" }),
+      dataset.companies[1].name,
+    );
+    expect(booth).toBeDisabled();
+    await userEvent.click(
+      within(panel).getByRole("button", { name: "企業情報を閉じる" }),
+    );
+    expect(
+      screen.getByRole("region", { name: "操作できる会場マップ" }),
+    ).toHaveFocus();
   });
   it("returns to sign-in if opening the embedded map finds an expired login", async () => {
     await ready();
@@ -1255,11 +1344,11 @@ describe("company filtering and persistent bookmarks", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
   });
-  it("keeps a failed favorite change visible inside the fullscreen map's company dialog", async () => {
+  it("keeps a failed favorite change visible inside the fullscreen map's company panel", async () => {
     window.history.replaceState(null, "", "/map/?company=AM-1&session=AM");
     await ready();
     const company = dataset.companies[0];
-    const dialog = screen.getByRole("dialog", { name: company.name });
+    const dialog = screen.getByRole("region", { name: company.name });
     failures.set("/api/bookmarks/AM-1", 503);
     await userEvent.click(
       within(dialog).getByRole("button", {
@@ -1354,7 +1443,12 @@ describe("incremental catalog integration", () => {
     );
     await waitFor(() => expect(saved.has(dataset.companies[0].id)).toBe(false));
     expect(screen.getAllByRole("article")).toHaveLength(48);
-    expect(screen.getByRole("status")).toHaveTextContent("48 / 124社");
+    expect(screen.getByRole("status")).toHaveTextContent("48 / 125社");
+    expect(
+      within(card(name)).getByRole("button", {
+        name: `${name}を気になるに追加`,
+      }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 
   it("preserves revealed cards around details and starts a fresh page for new search or industry conditions", async () => {
@@ -1394,5 +1488,154 @@ describe("incremental catalog integration", () => {
         .closest("label")!,
     );
     expect(screen.getAllByRole("article")).toHaveLength(24);
+  });
+});
+
+describe("retained interest cards", () => {
+  it("shows interests before assigned companies and keeps an unsaved card until actual reload", async () => {
+    saved.add("AM-1");
+    window.history.replaceState(null, "", "/favorites/");
+    const mounted = await ready();
+    const company = dataset.companies[0];
+    const originalCard = card(company.name);
+    const assigned = screen.getByRole("heading", { name: "指定企業" });
+    expect(
+      originalCard.compareDocumentPosition(assigned) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await userEvent.click(
+      within(originalCard).getByRole("button", {
+        name: `${company.name}を気になるから解除`,
+      }),
+    );
+    await waitFor(() => expect(saved.has(company.id)).toBe(false));
+    expect(card(company.name)).toBe(originalCard);
+    expect(
+      within(originalCard).getByRole("button", {
+        name: `${company.name}を気になるに追加`,
+      }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector(".saved-count")).toBeNull();
+    await userEvent.click(nav("一覧"));
+    await userEvent.click(nav("気になる"));
+    expect(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるに追加`,
+      }),
+    ).toHaveAttribute("aria-pressed", "false");
+    mounted.unmount();
+    await ready();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(saved.has(company.id)).toBe(false);
+  });
+  it("can undo an unsave and persists the restored interest across reload", async () => {
+    saved.add("AM-1");
+    window.history.replaceState(null, "", "/favorites/");
+    const mounted = await ready();
+    const company = dataset.companies[0];
+    await userEvent.click(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるから解除`,
+      }),
+    );
+    await userEvent.click(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるに追加`,
+      }),
+    );
+    await waitFor(() => expect(saved.has(company.id)).toBe(true));
+    mounted.unmount();
+    await ready();
+    expect(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるから解除`,
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+  it("does not retain another account's unsaved cards after logout and a new identity loads", async () => {
+    saved.add("AM-1");
+    window.history.replaceState(null, "", "/favorites/");
+    const mounted = await ready();
+    const company = dataset.companies[0];
+    await userEvent.click(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるから解除`,
+      }),
+    );
+    expect(card(company.name)).toBeInTheDocument();
+    await accountAction("ログアウト");
+    await screen.findByRole("button", { name: "Tasklyでログイン" });
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    userSub = "different-user";
+    userName = "別の検証ユーザー";
+    saved = new Set();
+    mounted.unmount();
+    await ready();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  });
+  it("keeps a failed unsave selected instead of presenting it as removed", async () => {
+    saved.add("AM-1");
+    window.history.replaceState(null, "", "/favorites/");
+    await ready();
+    const company = dataset.companies[0];
+    failures.set("DELETE /api/bookmarks/AM-1", 503);
+    await userEvent.click(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるから解除`,
+      }),
+    );
+    await screen.findByRole("alert");
+    expect(saved.has(company.id)).toBe(true);
+    expect(
+      within(card(company.name)).getByRole("button", {
+        name: `${company.name}を気になるから解除`,
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+  it.each([204, 503])(
+    "ignores a late bookmark response (%s) after logout",
+    async (status) => {
+      await ready();
+      const original = fetchMock.getMockImplementation()! as (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => Promise<Response>;
+      let finish!: () => void;
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/api/bookmarks/AM-1"))
+          return new Promise<Response>((resolve) => {
+            finish = () => resolve(new Response(null, { status }));
+          });
+        return original(input, init);
+      });
+      fireEvent.click(
+        within(card(dataset.companies[0].name)).getByRole("button", {
+          name: /気になるに追加/,
+        }),
+      );
+      await accountAction("ログアウト");
+      await screen.findByRole("button", { name: "Tasklyでログイン" });
+      await act(async () => finish());
+      expect(
+        screen.getByRole("button", { name: "Tasklyでログイン" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("article")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+  it("does not retain a favorite whose initial save failed", async () => {
+    await ready();
+    failures.set("PUT /api/bookmarks/AM-1", 503);
+    await userEvent.click(
+      within(card(dataset.companies[0].name)).getByRole("button", {
+        name: /気になるに追加/,
+      }),
+    );
+    await screen.findByRole("alert");
+    await userEvent.click(nav("気になる"));
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "気になる 0" }),
+    ).toBeInTheDocument();
   });
 });

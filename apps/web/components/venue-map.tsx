@@ -46,8 +46,8 @@ type Props = {
   search?: string;
   industries?: string[];
   mode?: "fullscreen" | "embedded";
-  navigation?: ReactNode;
-  topRight?: ReactNode;
+  detailPanelOpen?: boolean;
+  detailPanel?: ReactNode;
   onlySaved?: boolean;
   onlyAssigned?: boolean;
   onFiltersChange?: (patch: Partial<Filters>) => void;
@@ -91,8 +91,8 @@ export default function VenueMap({
   search,
   industries: chosenIndustries,
   mode = "fullscreen",
-  navigation,
-  topRight,
+  detailPanelOpen = false,
+  detailPanel,
   onlySaved,
   onlyAssigned,
   onFiltersChange,
@@ -108,6 +108,7 @@ export default function VenueMap({
   const [resultsOpen, setResultsOpen] = useState(false);
   const componentId = useId();
   const embedded = mode === "embedded";
+  const panelOpen = detailPanelOpen && !embedded;
   const [localFilters, setLocalFilters] = useState<Filters>({
     q: "",
     industries: [],
@@ -458,32 +459,94 @@ export default function VenueMap({
     const element = viewport.current,
       target = highlighted.current;
     if (!url || !element || !target || !element.clientWidth) return;
-    const bounds = element.getBoundingClientRect(),
-      selectedBounds = target.getBoundingClientRect();
-    const padding = 16;
-    if (selectedBounds.right <= bounds.left)
-      element.scrollLeft -= bounds.left + padding - selectedBounds.left;
-    else if (selectedBounds.left >= bounds.right)
-      element.scrollLeft += selectedBounds.right - bounds.right + padding;
-    if (selectedBounds.bottom <= bounds.top)
-      element.scrollTop -= bounds.top + padding - selectedBounds.top;
-    else if (selectedBounds.top >= bounds.bottom)
-      element.scrollTop += selectedBounds.bottom - bounds.bottom + padding;
-  }, [url, selectedCompanyId, session, imageSize]);
+    const root = element.closest(".venue-map");
+    const overlays = Array.from(
+      root?.querySelectorAll<HTMLElement>(
+        ".venue-map-floating, .map-company-panel",
+      ) ?? [],
+    );
+    const reveal = () => {
+      const bounds = element.getBoundingClientRect();
+      const selected = target.getBoundingClientRect();
+      const padding = 16;
+      const revealOffscreen = () => {
+        // A highly zoomed booth may not fit anywhere; preserve its useful edge.
+        if (selected.right <= bounds.left)
+          element.scrollLeft -= bounds.left + padding - selected.left;
+        else if (selected.left >= bounds.right)
+          element.scrollLeft += selected.right - bounds.right + padding;
+        if (selected.bottom <= bounds.top)
+          element.scrollTop -= bounds.top + padding - selected.top;
+        else if (selected.top >= bounds.bottom)
+          element.scrollTop += selected.bottom - bounds.bottom + padding;
+      };
+      const obstacles = overlays
+        .map((overlay) => overlay.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      const intersects = (left: number, top: number, obstacle: DOMRect) =>
+        left + selected.width > obstacle.left &&
+        left < obstacle.right &&
+        top + selected.height > obstacle.top &&
+        top < obstacle.bottom;
+      const minX = bounds.left + padding;
+      const maxX = bounds.right - selected.width - padding;
+      const minY = bounds.top + padding;
+      const maxY = bounds.bottom - selected.height - padding;
+      if (minX > maxX || minY > maxY) {
+        revealOffscreen();
+        return;
+      }
+      const clamp = (value: number, min: number, max: number) =>
+        Math.max(min, Math.min(max, value));
+      const xs = [selected.left, minX, maxX];
+      const ys = [selected.top, minY, maxY];
+      for (const rect of obstacles) {
+        xs.push(rect.left - selected.width - padding, rect.right + padding);
+        ys.push(rect.top - selected.height - padding, rect.bottom + padding);
+      }
+      let best: { left: number; top: number; distance: number } | undefined;
+      for (const x of xs) {
+        const left = clamp(x, minX, maxX);
+        for (const y of ys) {
+          const top = clamp(y, minY, maxY);
+          if (obstacles.some((rect) => intersects(left, top, rect))) continue;
+          const distance =
+            (left - selected.left) ** 2 + (top - selected.top) ** 2;
+          if (!best || distance < best.distance) best = { left, top, distance };
+        }
+      }
+      // Find the nearest free rectangle against every visible overlay together,
+      // rather than moving a booth out of one control and underneath another.
+      if (best) {
+        element.scrollLeft -= best.left - selected.left;
+        element.scrollTop -= best.top - selected.top;
+      } else revealOffscreen();
+    };
+    reveal();
+    if (overlays.length && typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(reveal);
+      overlays.forEach((overlay) => observer.observe(overlay));
+      return () => observer.disconnect();
+    }
+  }, [
+    url,
+    selectedCompanyId,
+    session,
+    imageSize,
+    panelOpen,
+    viewportSize,
+    filtersOpen,
+    resultsOpen,
+  ]);
 
   return (
     <section
       className="venue-map"
       data-mode={mode}
+      data-detail-open={panelOpen ? "true" : undefined}
       aria-label={embedded ? "企業のブース位置" : "会場マップ"}
     >
       {!embedded && <h1 className="sr-only">会場マップ</h1>}
-      {!embedded && (navigation || topRight) && (
-        <div className="venue-map-navigation">
-          <div>{navigation}</div>
-          <div>{topRight}</div>
-        </div>
-      )}
       {current ? (
         <>
           {!embedded && (
@@ -491,14 +554,19 @@ export default function VenueMap({
               <label className="sr-only" htmlFor={`${componentId}-search`}>
                 マップの企業名
               </label>
-              <TextField
-                id={`${componentId}-search`}
-                aria-label="マップの企業名"
-                type="search"
-                placeholder="名前・ブース番号"
-                value={filters.q}
-                onChange={(event) => changeFilters({ q: event.target.value })}
-              />
+              <div className="venue-map-search-input">
+                <span className="venue-map-search-icon" aria-hidden="true">
+                  <Icon name="search" size={20} />
+                </span>
+                <TextField
+                  id={`${componentId}-search`}
+                  aria-label="マップの企業名"
+                  type="search"
+                  placeholder="名前・ブース番号"
+                  value={filters.q}
+                  onChange={(event) => changeFilters({ q: event.target.value })}
+                />
+              </div>
               {booths.length > 0 && (
                 <div className="venue-map-search-actions">
                   <SegmentedControl
@@ -635,34 +703,36 @@ export default function VenueMap({
               )}
             </section>
           )}
-          <div
-            className="venue-map-zoom venue-map-floating"
-            aria-label="マップの拡大縮小"
-          >
-            <IconButton
-              variant="neutral"
-              aria-label="マップを拡大"
-              disabled={zoom >= 800}
-              onClick={() => changeZoom(zoom + 25)}
+          <div className="venue-map-bottom-right">
+            <div
+              className="venue-map-zoom venue-map-floating"
+              aria-label="マップの拡大縮小"
             >
-              <Icon name="plus" size={18} />
-            </IconButton>
-            <TextButton
-              aria-label="拡大率を100パーセントに戻す"
-              onClick={resetView}
-            >
-              {zoom}%
-            </TextButton>
-            <IconButton
-              variant="neutral"
-              aria-label="マップを縮小"
-              disabled={zoom <= 50}
-              onClick={() => changeZoom(zoom - 25)}
-            >
-              <Icon name="minus" size={18} />
-            </IconButton>
-          </div>
-          <div className="venue-map-bottom-left">
+              <IconButton
+                variant="neutral"
+                size="small"
+                aria-label="マップを拡大"
+                disabled={zoom >= 800}
+                onClick={() => changeZoom(zoom + 25)}
+              >
+                <Icon name="plus" size={18} />
+              </IconButton>
+              <TextButton
+                aria-label="拡大率を100パーセントに戻す"
+                onClick={resetView}
+              >
+                {zoom}%
+              </TextButton>
+              <IconButton
+                variant="neutral"
+                size="small"
+                aria-label="マップを縮小"
+                disabled={zoom <= 50}
+                onClick={() => changeZoom(zoom - 25)}
+              >
+                <Icon name="minus" size={18} />
+              </IconButton>
+            </div>
             {!embedded && (
               <div
                 className="venue-map-floors venue-map-floating"
@@ -681,7 +751,10 @@ export default function VenueMap({
                 ))}
               </div>
             )}
-            {selected &&
+          </div>
+          <div className="venue-map-bottom-left">
+            {!panelOpen &&
+              selected &&
               selected.session === session &&
               matchedIds.has(selected.id) &&
               booths.length > 0 && (
@@ -872,6 +945,7 @@ export default function VenueMap({
           </InlineNotification.Frame>
         </div>
       )}
+      {!embedded && detailPanel}
       <p id={`${componentId}-keyboard-help`} className="sr-only">
         矢印キーで移動、プラス・マイナスキーで拡大縮小、0キーで全体表示。ブースでは左右キーで移動し、Enterキーで詳細を開けます。ドラッグで移動、2本指で拡大縮小できます。
       </p>

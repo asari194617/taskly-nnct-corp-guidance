@@ -29,6 +29,11 @@ import { Icon, type IconName } from "./icons";
 import VenueMap from "./venue-map";
 import HeaderActions from "./header-actions";
 import IncrementalCompanyList from "./incremental-company-list";
+import {
+  CompanyDetailContent,
+  FavoriteButton,
+  MapCompanyPanel,
+} from "./company-details";
 
 const EC4 = { department: "電子制御工学科", grade: 4 };
 const returnKey = "guidance-return-route";
@@ -120,9 +125,32 @@ export default function GuidanceApp({
   });
   const routeRef = useRef(route);
   const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [retainedFavoriteIDs, setRetainedFavoriteIDs] = useState<Set<string>>(
+    new Set(),
+  );
+  const authGeneration = useRef(0);
   const [busy, setBusy] = useState(false);
   const [settingNumber, setSettingNumber] = useState(false);
   const bookmarkRequests = useRef(new Set<string>());
+  const mapReturnFocus = useRef<HTMLElement | null>(null);
+  const mapInteraction = useRef<"pointer" | "keyboard">("keyboard");
+  const panelKeyboardFocus = useRef(true);
+  const returnMapFocus = useCallback(() => {
+    const previous = mapReturnFocus.current;
+    if (
+      previous?.isConnected &&
+      !previous.matches(":disabled") &&
+      !previous.closest("[hidden], [inert]")
+    ) {
+      previous.focus({ preventScroll: true });
+      if (document.activeElement === previous) return;
+    }
+    document
+      .querySelector<HTMLElement>(
+        '.venue-map[data-mode="fullscreen"] .venue-map-viewport',
+      )
+      ?.focus({ preventScroll: true });
+  }, []);
   const changeRoute = useCallback(
     (patch: Partial<RouteState>, replace = false) => {
       const next = { ...routeRef.current, ...patch };
@@ -188,15 +216,20 @@ export default function GuidanceApp({
     document.title = `${title} | 企業ガイダンス | Taskly`;
   }, [route.view]);
   const expireSession = useCallback(() => {
+    authGeneration.current++;
     setData(null);
     setUser(null);
     setPreferences(null);
     setSaved(new Set());
+    setRetainedFavoriteIDs(new Set());
     setSettingNumber(false);
     setError("ログインの有効期限が切れました。もう一度ログインしてください。");
     setStatus("signed-out");
   }, []);
   const load = useCallback(async () => {
+    const generation = ++authGeneration.current;
+    setSaved(new Set());
+    setRetainedFavoriteIDs(new Set());
     setStatus("loading");
     setError("");
     try {
@@ -206,13 +239,16 @@ export default function GuidanceApp({
         api<{ company_ids: string[] }>("/api/bookmarks"),
         api<Preferences>("/api/preferences"),
       ]);
+      if (generation !== authGeneration.current) return;
       setSaved(new Set(bookmarks.company_ids));
+      setRetainedFavoriteIDs(new Set(bookmarks.company_ids));
       setUser(identity.user);
       setData(guidance);
       setPreferences(profile);
       setSettingNumber(profile.roster_number === null);
       setStatus("ready");
     } catch (cause) {
+      if (generation !== authGeneration.current) return;
       setData(null);
       setUser(null);
       setPreferences(null);
@@ -232,14 +268,19 @@ export default function GuidanceApp({
     void load();
   }, [load]);
   async function toggleSave(company: Company) {
-    if (bookmarkRequests.current.has(company.id)) return;
-    bookmarkRequests.current.add(company.id);
+    const generation = authGeneration.current;
+    const requestKey = `${generation}:${company.id}`;
+    if (bookmarkRequests.current.has(requestKey)) return;
+    bookmarkRequests.current.add(requestKey);
     const wasSaved = saved.has(company.id);
     setError("");
     try {
       await api<void>(`/api/bookmarks/${encodeURIComponent(company.id)}`, {
         method: wasSaved ? "DELETE" : "PUT",
       });
+      if (generation !== authGeneration.current) return;
+      if (!wasSaved)
+        setRetainedFavoriteIDs((previous) => new Set(previous).add(company.id));
       setSaved((previous) => {
         const next = new Set(previous);
         if (wasSaved) next.delete(company.id);
@@ -247,6 +288,7 @@ export default function GuidanceApp({
         return next;
       });
     } catch (cause) {
+      if (generation !== authGeneration.current) return;
       if (cause instanceof APIError && cause.status === 401) expireSession();
       else
         setError(
@@ -255,7 +297,7 @@ export default function GuidanceApp({
             : "気になるを更新できませんでした。もう一度お試しください。",
         );
     } finally {
-      bookmarkRequests.current.delete(company.id);
+      bookmarkRequests.current.delete(requestKey);
     }
   }
   async function logout() {
@@ -269,10 +311,12 @@ export default function GuidanceApp({
       });
       if (!response.ok)
         throw new Error("ログアウトできませんでした。もう一度お試しください。");
+      authGeneration.current++;
       setData(null);
       setUser(null);
       setPreferences(null);
       setSaved(new Set());
+      setRetainedFavoriteIDs(new Set());
       setSettingNumber(false);
       setStatus("signed-out");
     } catch (cause) {
@@ -371,30 +415,28 @@ export default function GuidanceApp({
       <a className="skip-link" href="#main">
         本文へ移動
       </a>
-      {(!ready || route.view !== "map") && (
-        <header className="topbar">
-          <div className="header-brand">
-            <Brand />
-          </div>
-          {ready && menu(false)}
-          <div className="header-right">
-            {ready && (
-              <HeaderActions
-                name={user.name}
-                rosterNumber={preferences.roster_number}
-                busy={busy}
-                currentView={route.view}
-                onConfigure={() => setSettingNumber(true)}
-                onInformation={() => {
-                  changeRoute({ ...defaultRoute, view: "info" });
-                  window.scrollTo({ top: 0, behavior: "instant" });
-                }}
-                onLogout={() => void logout()}
-              />
-            )}
-          </div>
-        </header>
-      )}
+      <header className="topbar">
+        <div className="header-brand">
+          <Brand />
+        </div>
+        {ready && menu(false)}
+        <div className="header-right">
+          {ready && (
+            <HeaderActions
+              name={user.name}
+              rosterNumber={preferences.roster_number}
+              busy={busy}
+              currentView={route.view}
+              onConfigure={() => setSettingNumber(true)}
+              onInformation={() => {
+                changeRoute({ ...defaultRoute, view: "info" });
+                window.scrollTo({ top: 0, behavior: "instant" });
+              }}
+              onLogout={() => void logout()}
+            />
+          )}
+        </div>
+      </header>
       {!ready ? (
         <main id="main" className="welcome-main">
           <section className="welcome-content" aria-labelledby="welcome-title">
@@ -438,6 +480,12 @@ export default function GuidanceApp({
           <main
             id="main"
             className={route.view === "map" ? "map-main" : "main-content"}
+            onPointerDownCapture={() => {
+              if (route.view === "map") mapInteraction.current = "pointer";
+            }}
+            onKeyDownCapture={() => {
+              if (route.view === "map") mapInteraction.current = "keyboard";
+            }}
           >
             {error && !selected && (
               <div className="top-error">
@@ -479,41 +527,22 @@ export default function GuidanceApp({
                 search={route.q}
                 industries={route.industries}
                 mode="fullscreen"
-                navigation={
-                  <div className="map-page-navigation">
-                    <TextLink
-                      href="/"
-                      icon={<Icon name="arrow" />}
-                      onClick={(event) =>
-                        intercept(event, () => navigate("companies"))
+                detailPanelOpen={Boolean(selected && !settingNumber)}
+                detailPanel={
+                  selected && !settingNumber ? (
+                    <MapCompanyPanel
+                      company={selected}
+                      saved={saved.has(selected.id)}
+                      assigned={assignedIDs.has(selected.id)}
+                      onSave={() => toggleSave(selected)}
+                      notification={
+                        error ? <Message error>{error}</Message> : undefined
                       }
-                    >
-                      一覧
-                    </TextLink>
-                    <TextLink
-                      href="/search/"
-                      icon={<Icon name="search" />}
-                      onClick={(event) =>
-                        intercept(event, () => navigate("search"))
-                      }
-                    >
-                      探す
-                    </TextLink>
-                  </div>
-                }
-                topRight={
-                  <HeaderActions
-                    name={user.name}
-                    rosterNumber={preferences.roster_number}
-                    busy={busy}
-                    currentView={route.view}
-                    onConfigure={() => setSettingNumber(true)}
-                    onInformation={() => {
-                      changeRoute({ ...defaultRoute, view: "info" });
-                      window.scrollTo({ top: 0, behavior: "instant" });
-                    }}
-                    onLogout={() => void logout()}
-                  />
+                      focusOnOpen={panelKeyboardFocus.current}
+                      onClose={closeCompany}
+                      returnFocus={returnMapFocus}
+                    />
+                  ) : undefined
                 }
                 onlySaved={route.saved}
                 onlyAssigned={route.assigned}
@@ -527,6 +556,11 @@ export default function GuidanceApp({
                 savedCompanyIds={saved}
                 assignedCompanyIds={assignedIDs}
                 onSelectCompany={(company) => {
+                  const active = document.activeElement;
+                  if (active instanceof HTMLElement && active !== document.body)
+                    mapReturnFocus.current = active;
+                  panelKeyboardFocus.current =
+                    mapInteraction.current === "keyboard";
                   changeRoute({ company: company.id, focus: company.id });
                 }}
                 onSessionChange={(session) =>
@@ -539,6 +573,7 @@ export default function GuidanceApp({
               <Plan
                 data={data}
                 saved={saved}
+                retainedFavoriteIDs={retainedFavoriteIDs}
                 assignment={assignment}
                 assignedIDs={assignedIDs}
                 rosterNumber={preferences.roster_number}
@@ -556,7 +591,7 @@ export default function GuidanceApp({
               <Information data={data} onExpired={expireSession} />
             )}
           </main>
-          {route.view !== "map" && menu(true)}
+          {menu(true)}
         </>
       )}
       {ready && settingNumber && (
@@ -570,7 +605,7 @@ export default function GuidanceApp({
           }}
         />
       )}
-      {ready && selected && !settingNumber && (
+      {ready && selected && !settingNumber && route.view !== "map" && (
         <CompanyDialog
           company={selected}
           error={error}
@@ -943,33 +978,6 @@ function Empty({ title, children }: { title: string; children?: ReactNode }) {
     </div>
   );
 }
-function FavoriteButton({
-  company,
-  saved,
-  onToggle,
-}: {
-  company: Company;
-  saved: boolean;
-  onToggle: () => Promise<void>;
-}) {
-  const [pending, setPending] = useState(false);
-  return (
-    <Button
-      size="small"
-      variant={saved ? "lighted" : "outlined"}
-      icon={<Icon name={saved ? "check" : "plus"} size={18} />}
-      aria-pressed={saved}
-      aria-label={`${company.name}を${saved ? "気になるから解除" : "気になるに追加"}`}
-      disabled={pending}
-      onClick={() => {
-        setPending(true);
-        void onToggle().finally(() => setPending(false));
-      }}
-    >
-      気になる
-    </Button>
-  );
-}
 function CompanyDialog({
   company,
   error,
@@ -1028,27 +1036,14 @@ function CompanyDialog({
       aria-labelledby="company-dialog-title"
     >
       <div className="dialog-inner">
-        <div className="dialog-top">
-          <span className="session-badge">
-            {sessionLabel(company.session)}の部{" "}
-            {assigned && <span className="assignment-badge">指定</span>}
-          </span>
-        </div>
-        <h2 id="company-dialog-title">{company.name}</h2>
-        {error && <Message error>{error}</Message>}
-        <div className="industry-tags">
-          {company.industries.map((value) => (
-            <span key={value}>{value}</span>
-          ))}
-        </div>
-        <div className="booth-detail">
-          <Icon name="location" size={27} />
-          <div>
-            <span>ブース</span>
-            <strong>{company.booth}</strong>
-          </div>
-          <FavoriteButton company={company} saved={saved} onToggle={onSave} />
-        </div>
+        <CompanyDetailContent
+          company={company}
+          saved={saved}
+          assigned={assigned}
+          onSave={onSave}
+          titleId="company-dialog-title"
+          notification={error ? <Message error>{error}</Message> : undefined}
+        />
         <details
           className="company-map-accordion"
           onToggle={(event) => setMapOpen(event.currentTarget.open)}
@@ -1255,6 +1250,7 @@ function Information({
 function Plan({
   data,
   saved,
+  retainedFavoriteIDs,
   assignment,
   assignedIDs,
   rosterNumber,
@@ -1266,6 +1262,7 @@ function Plan({
 }: {
   data: Guidance;
   saved: Set<string>;
+  retainedFavoriteIDs: Set<string>;
   assignment?: Assignment;
   assignedIDs: Set<string>;
   rosterNumber: number | null;
@@ -1275,7 +1272,12 @@ function Plan({
   onConfigure: () => void;
   onFind: () => void;
 }) {
-  const companies = data.companies.filter((company) => saved.has(company.id));
+  const companies = data.companies.filter((company) =>
+    retainedFavoriteIDs.has(company.id),
+  );
+  const savedCount = data.companies.filter((company) =>
+    saved.has(company.id),
+  ).length;
   return (
     <>
       <div className="view-heading">
@@ -1289,6 +1291,34 @@ function Plan({
           {rosterNumber === null ? "名簿番号を設定" : `Ec4 · ${rosterNumber}番`}
         </TextButton>
       </div>
+      <section className="favorites-panel" aria-labelledby="favorites-title">
+        <div className="section-heading">
+          <h2 id="favorites-title">
+            気になる <span>{savedCount}</span>
+          </h2>
+        </div>
+        {companies.length ? (
+          <IncrementalCompanyList companies={companies} resetKey="favorites">
+            {(company) => (
+              <CompanyCard
+                key={company.id}
+                company={company}
+                saved={saved.has(company.id)}
+                assigned={assignedIDs.has(company.id)}
+                route={route}
+                onSave={() => onSave(company)}
+                onSelect={() => onSelect(company)}
+              />
+            )}
+          </IncrementalCompanyList>
+        ) : (
+          <Empty title="まだ追加されていません">
+            <Button variant="outlined" onClick={onFind}>
+              探す
+            </Button>
+          </Empty>
+        )}
+      </section>
       <section className="assignment-panel">
         <h2>指定企業</h2>
         {assignment ? (
@@ -1327,32 +1357,6 @@ function Plan({
           </Message>
         )}
       </section>
-      <div className="section-heading">
-        <h2>
-          気になる <span>{companies.length}</span>
-        </h2>
-      </div>
-      {companies.length ? (
-        <IncrementalCompanyList companies={companies} resetKey="favorites">
-          {(company) => (
-            <CompanyCard
-              key={company.id}
-              company={company}
-              saved
-              assigned={assignedIDs.has(company.id)}
-              route={route}
-              onSave={() => onSave(company)}
-              onSelect={() => onSelect(company)}
-            />
-          )}
-        </IncrementalCompanyList>
-      ) : (
-        <Empty title="まだ追加されていません">
-          <Button variant="outlined" onClick={onFind}>
-            探す
-          </Button>
-        </Empty>
-      )}
     </>
   );
 }

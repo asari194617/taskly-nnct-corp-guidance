@@ -172,6 +172,351 @@ describe("interactive private venue map", () => {
     expect(options.onSelectCompany).toHaveBeenLastCalledWith(companies[2]);
   });
 
+  it("hosts a nonmodal company pane while preserving selected and assigned state and zoom", async () => {
+    const options = props();
+    const panel = (
+      <section className="map-company-panel" aria-label="検証企業情報">
+        <button>企業情報を閉じる</button>
+      </section>
+    );
+    const view = render(
+      <VenueMap
+        {...options}
+        selectedCompanyId="AM-1"
+        assignedCompanyIds={new Set(["AM-1"])}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
+    const zoom = screen.getByRole("button", {
+      name: "拡大率を100パーセントに戻す",
+    });
+    expect(zoom).toHaveTextContent("125%");
+    view.rerender(
+      <VenueMap
+        {...options}
+        selectedCompanyId="AM-1"
+        assignedCompanyIds={new Set(["AM-1"])}
+        detailPanelOpen
+        detailPanel={panel}
+      />,
+    );
+    const map = screen.getByRole("region", { name: "会場マップ" });
+    expect(map).toHaveAttribute("data-detail-open", "true");
+    expect(
+      screen.getByRole("region", { name: "検証企業情報" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const selected = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    expect(selected).toHaveAttribute("data-selected", "true");
+    expect(selected).toHaveAttribute("data-assigned", "true");
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(zoom).toHaveTextContent("125%");
+    await userEvent.click(
+      screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
+    );
+    expect(options.onSelectCompany).toHaveBeenCalledWith(companies[1]);
+    view.rerender(<VenueMap {...options} selectedCompanyId="AM-1" />);
+    expect(map).not.toHaveAttribute("data-detail-open");
+    expect(screen.getByRole("status")).toHaveTextContent("ブース 1");
+    expect(zoom).toHaveTextContent("125%");
+  });
+
+  it("keeps embedded maps independent from fullscreen company-pane controls", async () => {
+    render(
+      <VenueMap
+        {...props()}
+        mode="embedded"
+        selectedCompanyId="AM-1"
+        detailPanelOpen
+        detailPanel={<section aria-label="表示しない情報" />}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    expect(
+      screen.getByRole("region", { name: "企業のブース位置" }),
+    ).not.toHaveAttribute("data-detail-open");
+    expect(
+      screen.queryByRole("region", { name: "表示しない情報" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("ブース 1");
+  });
+
+  it.each(["right", "bottom"] as const)(
+    "reveals a booth behind the actual %s pane without changing zoom",
+    async (position) => {
+      vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1200);
+      vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(800);
+      const rectangle = (
+        left: number,
+        top: number,
+        width: number,
+        height: number,
+      ) => ({
+        x: left,
+        y: top,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        width,
+        height,
+        toJSON: () => ({}),
+      });
+      let selectedBounds =
+        position === "right"
+          ? rectangle(900, 150, 20, 20)
+          : rectangle(200, 700, 20, 20);
+      let panelBounds =
+        position === "right"
+          ? rectangle(824, 72, 360, 528)
+          : rectangle(0, 480, 1200, 320);
+      let panelResize: () => void = () => {};
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(private callback: () => void) {}
+          observe(element: Element) {
+            if (element.classList.contains("map-company-panel"))
+              panelResize = this.callback;
+          }
+          disconnect() {}
+        },
+      );
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+        function (this: Element) {
+          if (this.classList.contains("venue-map-viewport"))
+            return rectangle(0, 0, 1200, 800);
+          if (this.classList.contains("map-company-panel")) return panelBounds;
+          if (this.classList.contains("venue-map-booth")) return selectedBounds;
+          return rectangle(0, 0, 0, 0);
+        },
+      );
+      const options = props(),
+        docs = [{ ...documents[0], image_width: 1000, image_height: 1000 }];
+      const view = render(
+        <VenueMap {...options} documents={docs} selectedCompanyId="AM-1" />,
+      );
+      await screen.findByRole("img", { name: "検証1階マップ" });
+      const area = screen.getByRole("region", { name: "操作できる会場マップ" });
+      const before = { left: area.scrollLeft, top: area.scrollTop };
+      view.rerender(
+        <VenueMap
+          {...options}
+          documents={docs}
+          selectedCompanyId="AM-1"
+          detailPanelOpen
+          detailPanel={
+            <section className="map-company-panel" aria-label="検証企業情報" />
+          }
+        />,
+      );
+      expect(area.scrollLeft).toBe(
+        before.left + (position === "right" ? 112 : 0),
+      );
+      expect(area.scrollTop).toBe(
+        before.top + (position === "bottom" ? 256 : 0),
+      );
+      const revealed = { left: area.scrollLeft, top: area.scrollTop };
+      selectedBounds =
+        position === "right"
+          ? rectangle(788, 150, 20, 20)
+          : rectangle(200, 444, 20, 20);
+      act(() => panelResize());
+      expect(area.scrollLeft).toBe(revealed.left);
+      expect(area.scrollTop).toBe(revealed.top);
+      // A pure resize that still leaves the booth visible must not move the map.
+      panelBounds =
+        position === "right"
+          ? rectangle(850, 72, 300, 528)
+          : rectangle(0, 500, 1200, 300);
+      act(() => panelResize());
+      expect(area.scrollLeft).toBe(revealed.left);
+      expect(area.scrollTop).toBe(revealed.top);
+      expect(
+        screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+      ).toHaveTextContent("100%");
+    },
+  );
+
+  it("reveals a selected booth clear of both right controls and the company pane", async () => {
+    const rectangle = (
+      left: number,
+      top: number,
+      width: number,
+      height: number,
+    ) => ({
+      x: left,
+      y: top,
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      toJSON: () => ({}),
+    });
+    let area: HTMLElement | null = null;
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(775);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        if (this.classList.contains("venue-map-viewport"))
+          return rectangle(0, 0, 320, 775);
+        if (this.classList.contains("map-company-panel"))
+          return rectangle(0, 465, 320, 310);
+        if (this.classList.contains("venue-map-bottom-right"))
+          return rectangle(160, 300, 148, 174);
+        if (this.classList.contains("venue-map-zoom"))
+          return rectangle(264, 300, 44, 120);
+        if (this.classList.contains("venue-map-floors"))
+          return rectangle(160, 430, 148, 44);
+        if (this.classList.contains("venue-map-booth"))
+          return rectangle(
+            200 - ((area?.scrollLeft ?? 100) - 100),
+            450 - ((area?.scrollTop ?? 100) - 100),
+            20,
+            20,
+          );
+        return rectangle(0, 0, 0, 0);
+      },
+    );
+    const options = props();
+    const view = render(
+      <VenueMap
+        {...options}
+        documents={[{ ...documents[0], image_width: 1000, image_height: 1000 }]}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    area = screen.getByRole("region", { name: "操作できる会場マップ" });
+    area.scrollTop = 100;
+    area.scrollLeft = 100;
+    view.rerender(
+      <VenueMap
+        {...options}
+        documents={[{ ...documents[0], image_width: 1000, image_height: 1000 }]}
+        selectedCompanyId="AM-1"
+        detailPanelOpen
+        detailPanel={
+          <section className="map-company-panel" aria-label="検証企業情報" />
+        }
+      />,
+    );
+    const selected = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    const revealed = selected.getBoundingClientRect();
+    expect(revealed.left).toBeGreaterThanOrEqual(16);
+    expect(revealed.right).toBeLessThanOrEqual(304);
+    expect(revealed.top).toBeGreaterThanOrEqual(16);
+    expect(revealed.bottom).toBeLessThanOrEqual(759);
+    for (const obstruction of document.querySelectorAll(
+      ".map-company-panel, .venue-map-zoom, .venue-map-floors",
+    )) {
+      const rect = obstruction.getBoundingClientRect();
+      expect(
+        revealed.right > rect.left &&
+          revealed.left < rect.right &&
+          revealed.bottom > rect.top &&
+          revealed.top < rect.bottom,
+      ).toBe(false);
+    }
+    expect(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    ).toHaveTextContent("100%");
+  });
+
+  it.each([false, true])(
+    "reveals a short-landscape focus clear of search and controls (pane: %s)",
+    async (panelOpen) => {
+      const rectangle = (
+        left: number,
+        top: number,
+        width: number,
+        height: number,
+      ) => ({
+        x: left,
+        y: top,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        width,
+        height,
+        toJSON: () => ({}),
+      });
+      let area: HTMLElement | null = null;
+      vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(844);
+      vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(265);
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+        function (this: Element) {
+          if (this.classList.contains("venue-map-viewport"))
+            return rectangle(0, 0, 844, 265);
+          if (this.classList.contains("venue-map-search-panel"))
+            return rectangle(16, 16, 388, 169);
+          if (this.classList.contains("map-company-panel"))
+            return rectangle(0, 159, 844, 106);
+          if (this.classList.contains("venue-map-zoom"))
+            return rectangle(650, 50, 178, 36);
+          if (this.classList.contains("venue-map-floors"))
+            return rectangle(650, 100, 178, 44);
+          if (this.classList.contains("venue-map-booth"))
+            return rectangle(
+              262 - ((area?.scrollLeft ?? 100) - 100),
+              26 - ((area?.scrollTop ?? 100) - 100),
+              80,
+              53,
+            );
+          return rectangle(0, 0, 0, 0);
+        },
+      );
+      const options = props();
+      const docs = [{ ...documents[0], image_width: 1000, image_height: 1000 }];
+      const view = render(<VenueMap {...options} documents={docs} />);
+      await screen.findByRole("img", { name: "検証1階マップ" });
+      area = screen.getByRole("region", { name: "操作できる会場マップ" });
+      area.scrollLeft = 100;
+      area.scrollTop = 100;
+      view.rerender(
+        <VenueMap
+          {...options}
+          documents={docs}
+          selectedCompanyId="AM-1"
+          detailPanelOpen={panelOpen}
+          detailPanel={
+            panelOpen ? <section className="map-company-panel" /> : undefined
+          }
+        />,
+      );
+      const selected = screen
+        .getByRole("button", { name: "午前 ブース 1 架空あおば" })
+        .getBoundingClientRect();
+      expect(selected.left).toBeGreaterThanOrEqual(16);
+      expect(selected.top).toBeGreaterThanOrEqual(16);
+      expect(selected.right).toBeLessThanOrEqual(828);
+      expect(selected.bottom).toBeLessThanOrEqual(249);
+      for (const obstruction of document.querySelectorAll(
+        ".venue-map-floating, .map-company-panel",
+      )) {
+        const rect = obstruction.getBoundingClientRect();
+        if (rect.width && rect.height)
+          expect(
+            selected.right > rect.left &&
+              selected.left < rect.right &&
+              selected.bottom > rect.top &&
+              selected.top < rect.bottom,
+          ).toBe(false);
+      }
+      expect(
+        screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+      ).toHaveTextContent("100%");
+    },
+  );
+
   it("supports zoom boundaries and resets the view to the selected company's floor", async () => {
     const options = props();
     const view = render(<VenueMap {...options} />);
@@ -273,23 +618,19 @@ describe("interactive private venue map", () => {
 
   it("provides a fullscreen canvas or compact embedded map without duplicate page controls", async () => {
     const options = props();
-    const view = render(
-      <VenueMap
-        {...options}
-        navigation={<a href="/">一覧</a>}
-        topRight={<button>アカウント</button>}
-      />,
-    );
+    const view = render(<VenueMap {...options} />);
     await screen.findByRole("img", { name: "検証1階マップ" });
     expect(screen.getByRole("region", { name: "会場マップ" })).toHaveAttribute(
       "data-mode",
       "fullscreen",
     );
     expect(document.body).toHaveStyle({ overflow: "hidden" });
-    expect(screen.getByRole("link", { name: "一覧" })).toHaveAttribute(
-      "href",
-      "/",
-    );
+    expect(
+      screen.queryByRole("link", { name: "一覧" }),
+    ).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".venue-map-search-icon svg"),
+    ).toBeInTheDocument();
     view.unmount();
     expect(document.body.style.overflow).toBe("");
     render(<VenueMap {...options} mode="embedded" selectedCompanyId="AM-1" />);
@@ -544,6 +885,18 @@ describe("interactive private venue map", () => {
             bottom: 70,
             width: 20,
             height: 20,
+            toJSON: () => ({}),
+          };
+        if (!this.classList.contains("venue-map-booth"))
+          return {
+            x: 0,
+            y: 0,
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 0,
+            height: 0,
             toJSON: () => ({}),
           };
         return {

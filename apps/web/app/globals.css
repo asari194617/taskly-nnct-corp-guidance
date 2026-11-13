@@ -5,6 +5,8 @@
 /* Spindle components supply the base styles and semantic tokens. Links and
    text buttons omit underlines while keeping their keyboard focus outlines. */
 :root {
+  --app-header-height: 64px;
+  --app-bottom-nav-height: 0px;
   font-family: var(--font-font-family-basic-version-2), sans-serif;
   font-size: 16px;
   line-height: 1.6;
@@ -473,6 +475,61 @@ h2 {
   font-size: 1.5rem;
   overflow-wrap: anywhere;
 }
+.company-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-relative-spacing-lv6);
+}
+.company-detail-heading > h2 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.map-company-panel {
+  position: absolute;
+  z-index: 4;
+  top: var(--map-edge, 16px);
+  right: var(--map-edge, 16px);
+  width: 360px;
+  max-height: calc(100% - var(--map-edge, 16px) - var(--map-edge, 16px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-border-low-emphasis);
+  border-radius: 16px;
+  background: var(--color-surface-primary);
+  color: var(--color-text-high-emphasis);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 18%);
+}
+.map-company-panel-inner {
+  padding: var(--spacing-relative-spacing-lv8);
+}
+.map-company-panel h2 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+  text-align: left;
+}
+.map-company-panel .company-detail-heading > .spui-IconButton {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+.favorites-panel > .section-heading {
+  margin-top: 0;
+}
+@media (max-width: 1023px) {
+  .map-company-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    height: 40%;
+    max-height: 40%;
+    border-radius: 16px 16px 0 0;
+    border-bottom: 0;
+  }
+}
 .booth-detail {
   display: flex;
   align-items: center;
@@ -701,6 +758,10 @@ h2 {
   }
 }
 @media (max-width: 1023px) {
+  :root {
+    --app-header-height: 60px;
+    --app-bottom-nav-height: calc(65px + env(safe-area-inset-bottom));
+  }
   .topbar {
     min-height: 60px;
     padding-block: 6px;
@@ -987,28 +1048,12 @@ h2 {
   min-width: 120px;
 }
 .map-main {
+  position: fixed;
+  inset: var(--app-header-height) 0 var(--app-bottom-nav-height);
+  overflow: hidden;
   margin: 0;
   padding: 0;
   max-width: none;
-}
-.map-page-navigation {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-relative-spacing-lv6);
-  min-height: 44px;
-  padding: 0 var(--spacing-relative-spacing-lv6);
-  background: var(--color-surface-primary);
-  border: 1px solid var(--color-border-low-emphasis);
-  border-radius: 24px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
-}
-.map-page-navigation > a {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-}
-.map-page-navigation > a:first-child > span:first-child {
-  transform: rotate(180deg);
 }
 @media (prefers-color-scheme: dark) {
   .spui-TextLink:hover,
@@ -1041,7 +1086,7 @@ h2 {
 .map-main > .top-error {
   position: fixed;
   z-index: 20;
-  top: 72px;
+  top: calc(var(--app-header-height) + 12px);
   left: 12px;
   right: 12px;
   max-width: 640px;
