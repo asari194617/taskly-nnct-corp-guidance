@@ -16,6 +16,17 @@ import { defaultRoute } from "../lib/route-state";
 import type { HomeTask, HomeTasksResponse } from "../lib/types";
 import { fixture } from "./fixtures";
 
+const documentNavigation = vi.hoisted(() => ({ assign: vi.fn() }));
+vi.mock("../lib/document-navigation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../lib/document-navigation")>();
+  return {
+    ...actual,
+    navigateDocument: (url: string, page?: number) =>
+      actual.navigateDocument(url, page, { assign: documentNavigation.assign }),
+  };
+});
+
 function task(
   id: string,
   kind: HomeTask["kind"],
@@ -103,6 +114,7 @@ let fetchMock: ReturnType<typeof vi.fn<FetchStub>>;
 const signedURL =
   "https://synthetic-r2.example.invalid/private/guide.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=synthetic";
 beforeEach(() => {
+  documentNavigation.assign.mockReset();
   snapshot = taskSnapshot();
   failures = new Map();
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
@@ -310,75 +322,85 @@ describe("Taskly-backed guidance home", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens the sheet at physical PDF page25 while preserving the issued R2 signature", async () => {
-    const tab = {
-      opener: window,
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    const open = vi
-      .spyOn(window, "open")
-      .mockReturnValue(tab as unknown as Window);
+  it.each(["blocked", "throws"] as const)(
+    "opens sheet page25 in the current tab with its signature preserved when popups are %s",
+    async (popup) => {
+      const open = vi.spyOn(window, "open").mockImplementation(() => {
+        if (popup === "throws") throw new Error("Synthetic popup policy");
+        return null;
+      });
+      await ready();
+      await userEvent.click(screen.getByRole("button", { name: "資料を見る" }));
+      await waitFor(() =>
+        expect(documentNavigation.assign).toHaveBeenCalledWith(
+          `${signedURL}#page=25`,
+        ),
+      );
+      expect(open).not.toHaveBeenCalled();
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("checkbox", { name: "見学シート提出" }),
+      ).not.toBeChecked();
+      expect(writes()).toHaveLength(0);
+    },
+  );
+  it.each([503, new Error("検証用ネットワーク切断")])(
+    "reports failed sheet signing and allows retry without completing the task (%s)",
+    async (failure) => {
+      failures.set("/api/documents/guide/url", failure);
+      await ready();
+      const button = screen.getByRole("button", { name: "資料を見る" });
+      await userEvent.click(button);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "資料を開けませんでした",
+      );
+      expect(documentNavigation.assign).not.toHaveBeenCalled();
+      expect(button).toBeEnabled();
+      failures.delete("/api/documents/guide/url");
+      await userEvent.click(button);
+      await waitFor(() =>
+        expect(documentNavigation.assign).toHaveBeenCalledWith(
+          `${signedURL}#page=25`,
+        ),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: "見学シート提出" }),
+      ).not.toBeChecked();
+      expect(writes()).toHaveLength(0);
+    },
+  );
+  it("recovers from denied sheet navigation without checking submission", async () => {
+    documentNavigation.assign.mockImplementationOnce(() => {
+      throw new Error("Synthetic navigation policy");
+    });
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "資料を見る" }));
-    await waitFor(() => expect(tab.location.href).toBe(`${signedURL}#page=25`));
-    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
-    expect(tab.opener).toBeNull();
-    expect(tab.close).not.toHaveBeenCalled();
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    const button = screen.getByRole("button", { name: "資料を見る" });
+    await userEvent.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "資料を開けませんでした",
+    );
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    await waitFor(() =>
+      expect(documentNavigation.assign).toHaveBeenCalledTimes(2),
+    );
+    expect(documentNavigation.assign).toHaveBeenLastCalledWith(
+      `${signedURL}#page=25`,
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(
       screen.getByRole("checkbox", { name: "見学シート提出" }),
     ).not.toBeChecked();
     expect(writes()).toHaveLength(0);
   });
-
-  it("reports a blocked sheet popup without issuing a signed URL", async () => {
-    vi.spyOn(window, "open").mockReturnValue(null);
-    await ready();
-    await userEvent.click(screen.getByRole("button", { name: "資料を見る" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "ポップアップを許可",
-    );
-    expect(
-      fetchMock.mock.calls.some(([url]) =>
-        String(url).includes("/api/documents/"),
-      ),
-    ).toBe(false);
-  });
-
-  it.each([503, new Error("検証用ネットワーク切断")])(
-    "closes an unused sheet tab and permits retry when signing fails (%s)",
-    async (failure) => {
-      const tab = {
-        opener: null,
-        location: { href: "about:blank" },
-        close: vi.fn(),
-      };
-      vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
-      failures.set("/api/documents/guide/url", failure);
-      await ready();
-      await userEvent.click(screen.getByRole("button", { name: "資料を見る" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "資料を開けませんでした",
-      );
-      expect(tab.close).toHaveBeenCalledOnce();
-      expect(screen.getByRole("button", { name: "資料を見る" })).toBeEnabled();
-      expect(writes()).toHaveLength(0);
-    },
-  );
-
-  it("reports expired authentication while opening a sheet", async () => {
-    const tab = {
-      opener: null,
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+  it("reports expired authentication while opening a sheet without navigating", async () => {
     failures.set("/api/documents/guide/url", 401);
     const { props } = await ready();
     await userEvent.click(screen.getByRole("button", { name: "資料を見る" }));
     await waitFor(() => expect(props.onExpired).toHaveBeenCalledOnce());
-    expect(tab.close).toHaveBeenCalledOnce();
+    expect(documentNavigation.assign).not.toHaveBeenCalled();
+    expect(writes()).toHaveLength(0);
   });
 
   it("shows unavailable Taskly state without inventing local tasks and recovers on retry", async () => {

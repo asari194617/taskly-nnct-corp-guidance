@@ -21,10 +21,10 @@ import {
   suggestRecommendations,
 } from "../lib/recommendations";
 import { routeHref, type RouteState } from "../lib/route-state";
-import { APIError, documentURL } from "../lib/api";
 import { FavoriteButton } from "./company-details";
 import { Icon } from "./icons";
 import { useHomeTasks } from "./use-home-tasks";
+import { useDocumentNavigation } from "./use-document-navigation";
 
 export type HomeDashboardProps = {
   data: Guidance;
@@ -69,8 +69,14 @@ export default function HomeDashboard({
 }: HomeDashboardProps) {
   const tasks = useHomeTasks(onExpired);
   const [surveyOpen, setSurveyOpen] = useState(false);
-  const [openingDocument, setOpeningDocument] = useState(false);
-  const [documentError, setDocumentError] = useState("");
+  const {
+    opening: openingDocument,
+    error: documentError,
+    openDocument,
+  } = useDocumentNavigation(
+    onExpired,
+    `${preferences.department}:${preferences.grade}:${preferences.roster_number}`,
+  );
   const options = {
     data,
     assignment,
@@ -122,33 +128,6 @@ export default function HomeDashboard({
     surveys[0];
   const completed = all.filter((task) => task.completed).length;
   const tasklyURL = all.find((task) => task.taskly_url)?.taskly_url;
-
-  async function openDocument(task: HomeTask) {
-    if (!task.document_id) return;
-    const tab = window.open("about:blank", "_blank");
-    if (!tab) {
-      setDocumentError(
-        "資料を開くには、ブラウザーのポップアップを許可してください。",
-      );
-      return;
-    }
-    tab.opener = null;
-    setOpeningDocument(true);
-    setDocumentError("");
-    try {
-      const result = await documentURL(task.document_id);
-      const url = new URL(result.url);
-      if (Number.isInteger(task.page) && task.page! > 0)
-        url.hash = `page=${task.page}`;
-      tab.location.href = url.href;
-    } catch (cause) {
-      tab.close();
-      if (cause instanceof APIError && cause.status === 401) onExpired();
-      else setDocumentError("資料を開けませんでした。もう一度お試しください。");
-    } finally {
-      setOpeningDocument(false);
-    }
-  }
 
   function map(company: Company) {
     return {
@@ -230,7 +209,7 @@ export default function HomeDashboard({
           {task.document_id && (
             <TextButton
               disabled={openingDocument}
-              onClick={() => void openDocument(task)}
+              onClick={() => void openDocument(task.document_id!, task.page)}
             >
               <Icon name="document" size={16} />
               資料を見る

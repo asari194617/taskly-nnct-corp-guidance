@@ -9,7 +9,7 @@ import { TextLink } from "@openameba/spindle-ui/TextLink";
 import { SegmentedControl } from "@openameba/spindle-ui/SegmentedControl";
 import { TextField } from "@openameba/spindle-ui/Form/TextField";
 import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
-import { api, APIError, API_URL, documentURL } from "../lib/api";
+import { api, APIError, API_URL } from "../lib/api";
 import {
   defaultRoute,
   readRoute,
@@ -31,6 +31,7 @@ import HeaderActions from "./header-actions";
 import IncrementalCompanyList from "./incremental-company-list";
 import IndustryChips from "./industry-chips";
 import HomeDashboard from "./home-dashboard";
+import { useDocumentNavigation } from "./use-document-navigation";
 import { useEventTime } from "./use-event-time";
 import { formatScheduleTime, type EventTimeState } from "../lib/event-time";
 import {
@@ -701,7 +702,11 @@ export default function GuidanceApp({
               />
             )}
             {route.view === "info" && (
-              <Information data={data} onExpired={expireSession} />
+              <Information
+                data={data}
+                onExpired={expireSession}
+                scope={`${user.sub}:${preferences.department}:${preferences.grade}:${preferences.roster_number}`}
+              />
             )}
           </main>
           {menu(true)}
@@ -1337,34 +1342,16 @@ function Schedule({
 function Information({
   data,
   onExpired,
+  scope,
 }: {
   data: Guidance;
   onExpired: () => void;
+  scope: string;
 }) {
-  const [error, setError] = useState("");
-  const [opening, setOpening] = useState(false);
-  async function openDocument(id: string) {
-    const tab = window.open("about:blank", "_blank");
-    if (!tab) {
-      setError("資料を開くには、ブラウザーのポップアップを許可してください。");
-      return;
-    }
-    tab.opener = null;
-    setOpening(true);
-    setError("");
-    try {
-      tab.location.href = (await documentURL(id)).url;
-    } catch (cause) {
-      tab.close();
-      if (cause instanceof APIError && cause.status === 401) onExpired();
-      else
-        setError(
-          cause instanceof Error ? cause.message : "資料を開けませんでした。",
-        );
-    } finally {
-      setOpening(false);
-    }
-  }
+  const { error, opening, openDocument } = useDocumentNavigation(
+    onExpired,
+    scope,
+  );
   const documents = data.documents.filter(
     (item) => item.mime_type === "application/pdf",
   );
@@ -1384,7 +1371,7 @@ function Information({
               onClick={() => void openDocument(item.id)}
             >
               {item.title}
-              <Icon name="external" size={16} />
+              <Icon name="document" size={16} />
             </Button>
           ))}
         </section>

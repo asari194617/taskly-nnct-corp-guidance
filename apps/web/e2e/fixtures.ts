@@ -4,7 +4,15 @@ import { resolve } from "node:path";
 
 export const test = base.extend<{ browserCoverage: void }>({
   browserCoverage: [
-    async ({ page }, use, info) => {
+    async ({ page, browserName }, use, info) => {
+      if (browserName !== "chromium") {
+        info.annotations.push({
+          type: "coverage",
+          description: "WebKit execution is reported separately; V8 source coverage measures Chromium only.",
+        });
+        await use();
+        return;
+      }
       await page.coverage.startJSCoverage({ resetOnNavigation: false });
       await use();
       const coverage = await page.coverage.stopJSCoverage();

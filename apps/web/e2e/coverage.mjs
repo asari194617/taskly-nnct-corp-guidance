@@ -79,6 +79,6 @@ export default async function reportBrowserCoverage() {
     JSON.stringify({ percent: summary.lines.pct }) + "\n",
   );
   console.log(
-    `Browser E2E source line coverage: ${summary.lines.pct}% (V8 mapped to authored TypeScript; separate from unit coverage).`,
+    `Chromium E2E source line coverage: ${summary.lines.pct}% (V8 mapped to authored TypeScript; WebKit execution and unit coverage are separate).`,
   );
 }
