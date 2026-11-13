@@ -100,6 +100,14 @@ function props() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
   vi.mocked(documentURL).mockReset();
   vi.mocked(documentURL).mockImplementation(async (id) => ({
     url: `https://api.example.test/documents/${id}?token=synthetic`,
@@ -780,6 +788,104 @@ describe("interactive private venue map", () => {
     expect(
       screen.queryByRole("status", { name: "ポイント中の企業" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("follows the cursor in one animation frame and flips inside the map edges", async () => {
+    class PreviewPointerEvent extends MouseEvent {
+      pointerType = "mouse";
+    }
+    vi.stubGlobal("PointerEvent", PreviewPointerEvent);
+    const frames: FrameRequestCallback[] = [];
+    const schedule = vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("requestAnimationFrame", schedule);
+    const cancel = vi.fn();
+    vi.stubGlobal("cancelAnimationFrame", cancel);
+    const rectangle = (
+      left: number,
+      top: number,
+      width: number,
+      height: number,
+    ) => ({
+      x: left,
+      y: top,
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        if (this.classList.contains("venue-map"))
+          return rectangle(100, 60, 500, 300);
+        if (this.classList.contains("venue-map-preview"))
+          return rectangle(0, 0, 180, 64);
+        return rectangle(0, 0, 0, 0);
+      },
+    );
+    const options = props();
+    const view = render(<VenueMap {...options} />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const first = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    const area = screen.getByRole("region", { name: "操作できる会場マップ" });
+    const before = {
+      left: area.scrollLeft,
+      top: area.scrollTop,
+      route: window.location.href,
+    };
+    fireEvent.pointerOver(first, { clientX: 200, clientY: 150 });
+    const preview = screen.getByRole("status", { name: "ポイント中の企業" });
+    expect(preview.style.left).toBe("112px");
+    expect(preview.style.top).toBe("102px");
+    fireEvent.pointerMove(first, { clientX: 240, clientY: 160 });
+    fireEvent.pointerMove(first, { clientX: 250, clientY: 180 });
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(preview.style.left).toBe("112px");
+    act(() => frames.shift()!(0));
+    expect(preview.style.left).toBe("162px");
+    expect(preview.style.top).toBe("132px");
+    fireEvent.pointerMove(first, { clientX: 590, clientY: 350 });
+    act(() => frames.shift()!(0));
+    expect(preview.style.left).toBe("298px");
+    expect(preview.style.top).toBe("214px");
+    expect(area.scrollLeft).toBe(before.left);
+    expect(area.scrollTop).toBe(before.top);
+    expect(window.location.href).toBe(before.route);
+    expect(options.onSelectCompany).not.toHaveBeenCalled();
+    fireEvent.pointerMove(first, { clientX: 580, clientY: 340 });
+    view.unmount();
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("does not create mouse-hover previews for a coarse pointer", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    const options = props();
+    render(<VenueMap {...options} />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const first = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    await userEvent.hover(first);
+    act(() => first.focus());
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    expect(first).toHaveAccessibleName("午前 ブース 1 架空あおば");
+    expect(options.onSelectCompany).not.toHaveBeenCalled();
   });
 
   it("offers focus previews to keyboard users and clears them for touch or a changed session", async () => {

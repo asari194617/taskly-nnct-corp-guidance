@@ -503,6 +503,185 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
   ).toBeVisible();
 });
 
+test("Desktop map previews follow the cursor and flip within map edges without moving the map", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, "map", "/map/");
+  const full = page.locator('.venue-map[data-mode="fullscreen"]');
+  const viewport = full.getByRole("region", {
+    name: "操作できる会場マップ",
+    exact: true,
+  });
+  const booth = full.getByRole("button", {
+    name: "午前 ブース 2 架空いろは機械",
+    exact: true,
+  });
+  const preview = full.getByRole("status", {
+    name: "ポイント中の企業",
+    exact: true,
+  });
+  const map = (await full.boundingBox())!;
+  const url = page.url();
+  await booth.hover();
+  await expect(preview).toContainText("架空いろは機械");
+  const box = (await booth.boundingBox())!;
+  const point = { x: box.x + box.width / 2 + 8, y: box.y + box.height / 2 + 8 };
+  const before = await viewport.evaluate((node) => ({
+    left: node.scrollLeft,
+    top: node.scrollTop,
+  }));
+  await page.mouse.move(point.x, point.y);
+  await expect
+    .poll(async () => (await preview.boundingBox())!.y)
+    .toBeCloseTo(point.y + 12, 0);
+  expect(page.url()).toBe(url);
+  expect(
+    await viewport.evaluate((node) => ({
+      left: node.scrollLeft,
+      top: node.scrollTop,
+    })),
+  ).toEqual(before);
+  await expect(booth).toHaveAttribute("aria-pressed", "false");
+  // The square drawing's booths are near its top. Zooming creates enough
+  // real drag range to bring one beneath the bottom-edge cursor at scrollTop 0.
+  for (let step = 0; step < 3; step++)
+    await full
+      .getByRole("button", { name: "マップを拡大", exact: true })
+      .click();
+  await expect(
+    full.getByRole("button", { name: "マップの表示をリセット", exact: true }),
+  ).toHaveAccessibleDescription("現在の倍率 175パーセント");
+  // Stay clear of native scrollbar gutters while remaining close enough to
+  // the edge that a 360px tooltip must flip to the other side of the cursor.
+  const targets = [
+    { x: map.x + map.width - 24, y: map.y + map.height * 0.45, edge: "right" },
+    { x: map.x + map.width * 0.55, y: map.y + map.height - 24, edge: "bottom" },
+  ];
+  for (const target of targets) {
+    await booth.scrollIntoViewIfNeeded();
+    const source = (await booth.boundingBox())!;
+    await page.mouse.move(
+      source.x + source.width / 2,
+      source.y + source.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(target.x, target.y, { steps: 8 });
+    await page.mouse.up();
+    const actual = (await booth.boundingBox())!;
+    const pointer = {
+      x: Math.max(
+        actual.x + 4,
+        Math.min(target.x, actual.x + actual.width - 4),
+      ),
+      y: Math.max(
+        actual.y + 4,
+        Math.min(target.y, actual.y + actual.height - 4),
+      ),
+    };
+    expect(
+      await booth.evaluate((node, point) => {
+        const hit = document.elementFromPoint(point.x, point.y);
+        return hit === node || node.contains(hit);
+      }, pointer),
+    ).toBe(true);
+    const hoverPan = await viewport.evaluate((node) => ({
+      left: node.scrollLeft,
+      top: node.scrollTop,
+    }));
+    // Enter the booth with the real pointer after releasing the drag capture.
+    await page.mouse.move(0, 0);
+    await page.mouse.move(pointer.x, pointer.y);
+    await expect(preview).toBeVisible();
+    await expect
+      .poll(async () => {
+        const rect = (await preview.boundingBox())!;
+        let left = pointer.x + 12;
+        let top = pointer.y + 12;
+        if (left + rect.width > map.x + map.width - 8)
+          left = pointer.x - rect.width - 12;
+        if (top + rect.height > map.y + map.height - 8)
+          top = pointer.y - rect.height - 12;
+        left = Math.max(
+          map.x + 8,
+          Math.min(left, map.x + map.width - rect.width - 8),
+        );
+        top = Math.max(
+          map.y + 8,
+          Math.min(top, map.y + map.height - rect.height - 8),
+        );
+        return Math.abs(rect.x - left) <= 1 && Math.abs(rect.y - top) <= 1;
+      })
+      .toBe(true);
+    const tooltip = (await preview.boundingBox())!;
+    // Confirm the setup really requires an edge flip, rather than testing a
+    // clamped pointer that remained far from the intended viewport edge.
+    if (target.edge === "right")
+      expect(pointer.x + 12 + tooltip.width).toBeGreaterThan(
+        map.x + map.width - 8,
+      );
+    else
+      expect(pointer.y + 12 + tooltip.height).toBeGreaterThan(
+        map.y + map.height - 8,
+      );
+    expect(tooltip.x).toBeGreaterThanOrEqual(map.x + 7);
+    expect(tooltip.y).toBeGreaterThanOrEqual(map.y + 7);
+    expect(tooltip.x + tooltip.width).toBeLessThanOrEqual(
+      map.x + map.width - 7,
+    );
+    expect(tooltip.y + tooltip.height).toBeLessThanOrEqual(
+      map.y + map.height - 7,
+    );
+    expect(
+      await preview.evaluate((node) => getComputedStyle(node).pointerEvents),
+    ).toBe("none");
+    expect(page.url()).toBe(url);
+    expect(
+      await viewport.evaluate((node) => ({
+        left: node.scrollLeft,
+        top: node.scrollTop,
+      })),
+    ).toEqual(hoverPan);
+    await expect(booth).toHaveAttribute("aria-pressed", "false");
+    await expect(
+      full.getByRole("button", { name: "マップの表示をリセット", exact: true }),
+    ).toHaveAccessibleDescription("現在の倍率 175パーセント");
+  }
+});
+
+test.describe("Touch map preview behavior", () => {
+  test.use({
+    isMobile: true,
+    hasTouch: true,
+    viewport: { width: 390, height: 844 },
+  });
+  test("touch and coarse pointers open company details without a hover preview", async ({
+    page,
+  }) => {
+    await login(page, "map", "/map/?focus=AM-1");
+    const full = page.locator('.venue-map[data-mode="fullscreen"]');
+    const booth = full.getByRole("button", {
+      name: "午前 ブース 1 架空あおばソフト",
+      exact: true,
+    });
+    const preview = full.getByRole("status", {
+      name: "ポイント中の企業",
+      exact: true,
+    });
+    expect(
+      await page.evaluate(
+        () => matchMedia("(hover: hover) and (pointer: fine)").matches,
+      ),
+    ).toBe(false);
+    await booth.hover();
+    await expect(preview).toHaveCount(0);
+    await booth.tap();
+    await expect(full.locator(".map-company-panel")).toBeVisible();
+    await expect(preview).toHaveCount(0);
+    await expect(booth).toHaveAccessibleName("午前 ブース 1 架空あおばソフト");
+  });
+});
+
 test("Fullscreen maps keep blue selection and a non-modal company panel while map controls remain interactive", async ({
   page,
 }) => {

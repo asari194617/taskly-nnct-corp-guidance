@@ -145,6 +145,38 @@ export default function VenueMap({
   const viewport = useRef<HTMLDivElement | null>(null);
   const mapRoot = useRef<HTMLElement | null>(null);
   const bottomControls = useRef<HTMLDivElement | null>(null);
+  const previewTooltip = useRef<HTMLDivElement | null>(null);
+  const previewPoint = useRef<{ x: number; y: number } | null>(null);
+  const previewFrame = useRef<number | null>(null);
+  const supportsHoverPreview = () =>
+    window.matchMedia?.("(hover: hover) and (pointer: fine)").matches === true;
+  function positionPreview() {
+    const tooltip = previewTooltip.current;
+    const root = mapRoot.current;
+    const point = previewPoint.current;
+    if (!tooltip || !root || !point) return;
+    const bounds = root.getBoundingClientRect();
+    const size = tooltip.getBoundingClientRect();
+    const gap = 12;
+    const edge = 8;
+    let left = point.x - bounds.left + gap;
+    let top = point.y - bounds.top + gap;
+    if (left + size.width > bounds.width - edge)
+      left = point.x - bounds.left - size.width - gap;
+    if (top + size.height > bounds.height - edge)
+      top = point.y - bounds.top - size.height - gap;
+    tooltip.style.left = `${Math.max(edge, Math.min(left, bounds.width - size.width - edge))}px`;
+    tooltip.style.top = `${Math.max(edge, Math.min(top, bounds.height - size.height - edge))}px`;
+  }
+  function movePreview(x: number, y: number) {
+    previewPoint.current = { x, y };
+    if (previewFrame.current !== null) return;
+    previewFrame.current = requestAnimationFrame(() => {
+      previewFrame.current = null;
+      positionPreview();
+    });
+  }
+
   const zoomValue = useRef(zoom);
   const zoomAnchor = useRef<{ left: number; top: number } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -433,6 +465,23 @@ export default function VenueMap({
     return () => window.removeEventListener("resize", measure);
   }, [current?.id, embedded]);
 
+  useLayoutEffect(() => {
+    if (previewCompanyId) positionPreview();
+  }, [previewCompanyId]);
+  useEffect(() => {
+    const media = window.matchMedia?.("(hover: hover) and (pointer: fine)");
+    const changed = () => {
+      if (!media?.matches) setPreviewCompanyId(null);
+    };
+    media?.addEventListener?.("change", changed);
+    window.addEventListener("resize", positionPreview);
+    return () => {
+      window.removeEventListener("resize", positionPreview);
+      media?.removeEventListener?.("change", changed);
+      if (previewFrame.current !== null)
+        cancelAnimationFrame(previewFrame.current);
+    };
+  }, []);
   useEffect(() => {
     setPreviewCompanyId(null);
   }, [session]);
@@ -493,7 +542,7 @@ export default function VenueMap({
     const root = element.closest(".venue-map");
     const overlays = Array.from(
       root?.querySelectorAll<HTMLElement>(
-        ".venue-map-floating, .map-company-panel",
+        ".venue-map-floating:not(.venue-map-preview), .map-company-panel",
       ) ?? [],
     );
     const reveal = () => {
@@ -788,6 +837,7 @@ export default function VenueMap({
             previewCompany.session === session &&
             matchedIds.has(previewCompany.id) && (
               <div
+                ref={previewTooltip}
                 className="venue-map-preview venue-map-floating"
                 role="status"
                 aria-label="ポイント中の企業"
@@ -923,13 +973,38 @@ export default function VenueMap({
                         tabIndex={booth.booth === tabBooth ? 0 : -1}
                         onFocus={(event) => {
                           setFocusedBooth(booth.booth);
-                          if (event.currentTarget.matches(":focus-visible"))
+                          if (
+                            supportsHoverPreview() &&
+                            event.currentTarget.matches(":focus-visible")
+                          ) {
+                            const bounds =
+                              event.currentTarget.getBoundingClientRect();
+                            previewPoint.current = {
+                              x: bounds.right,
+                              y: bounds.bottom,
+                            };
                             setPreviewCompanyId(company?.id ?? null);
+                          }
                         }}
                         onBlur={() => setPreviewCompanyId(null)}
                         onPointerEnter={(event) => {
-                          if (event.pointerType === "mouse")
+                          if (
+                            event.pointerType === "mouse" &&
+                            supportsHoverPreview()
+                          ) {
+                            previewPoint.current = {
+                              x: event.clientX,
+                              y: event.clientY,
+                            };
                             setPreviewCompanyId(company?.id ?? null);
+                          }
+                        }}
+                        onPointerMove={(event) => {
+                          if (
+                            event.pointerType === "mouse" &&
+                            supportsHoverPreview()
+                          )
+                            movePreview(event.clientX, event.clientY);
                         }}
                         onPointerLeave={() => setPreviewCompanyId(null)}
                         onPointerDown={(event) => {
