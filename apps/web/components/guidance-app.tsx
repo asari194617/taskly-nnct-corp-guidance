@@ -999,9 +999,14 @@ function CompanyCard({
       </div>
       <div className="company-card-main">
         <h2>
-          <TextLink href={href} onClick={(event) => intercept(event, onSelect)}>
-            {company.name}
-          </TextLink>
+          <span className="company-name-link">
+            <TextLink
+              href={href}
+              onClick={(event) => intercept(event, onSelect)}
+            >
+              {company.name}
+            </TextLink>
+          </span>
         </h2>
         <div className="industry-tags">
           {company.industries.map((value) => (
@@ -1200,14 +1205,16 @@ function Schedule({
                   )}
                 </div>
                 {company && (
-                  <TextLink
-                    href={routeHref({ ...route, company: company.id })}
-                    onClick={(event) =>
-                      intercept(event, () => onSelect(company))
-                    }
-                  >
-                    {company.name} · ブース{company.booth}
-                  </TextLink>
+                  <span className="company-name-link">
+                    <TextLink
+                      href={routeHref({ ...route, company: company.id })}
+                      onClick={(event) =>
+                        intercept(event, () => onSelect(company))
+                      }
+                    >
+                      {company.name} · ブース{company.booth}
+                    </TextLink>
+                  </span>
                 )}
               </div>
             </article>
@@ -1389,14 +1396,16 @@ function Plan({
                     ターム {visit.term}
                     <small>{slot ? timeLabel(slot.start) : ""}</small>
                   </span>
-                  <TextLink
-                    href={routeHref({ ...route, company: company.id })}
-                    onClick={(event) =>
-                      intercept(event, () => onSelect(company))
-                    }
-                  >
-                    {company.name}
-                  </TextLink>
+                  <span className="company-name-link">
+                    <TextLink
+                      href={routeHref({ ...route, company: company.id })}
+                      onClick={(event) =>
+                        intercept(event, () => onSelect(company))
+                      }
+                    >
+                      {company.name}
+                    </TextLink>
+                  </span>
                   <span className="assignment-booth">
                     ブース {company.booth}
                   </span>

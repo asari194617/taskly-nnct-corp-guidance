@@ -1,6 +1,12 @@
 "use client";
 
-import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode, Ref } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
@@ -24,7 +30,8 @@ export function FavoriteButton({
   );
   const activeRequests = useRef(new Set<string>());
   const sharedPending = useContext(FavoritePendingContext);
-  const pending = sharedPending.has(company.id) || pendingCompanies.has(company.id);
+  const pending =
+    sharedPending.has(company.id) || pendingCompanies.has(company.id);
   return (
     <Button
       size="small"
@@ -86,29 +93,31 @@ export function CompanyDetailContent({
           {assigned && <span className="assignment-badge">指定</span>}
         </span>
       </div>
-      <div className="company-detail-heading">
-        <h2
-          id={titleId}
-          ref={headingRef}
-          tabIndex={headingRef ? -1 : undefined}
-        >
-          {company.name}
-        </h2>
-        {closeAction}
+      <div className="company-identity" role="group" aria-labelledby={titleId}>
+        <div className="company-detail-heading">
+          <h2
+            id={titleId}
+            ref={headingRef}
+            tabIndex={headingRef ? -1 : undefined}
+          >
+            {company.name}
+          </h2>
+          {closeAction}
+        </div>
+        <div className="industry-tags">
+          {company.industries.map((value) => (
+            <span key={value}>{value}</span>
+          ))}
+        </div>
+        <FavoriteButton company={company} saved={saved} onToggle={onSave} />
       </div>
       {notification}
-      <div className="industry-tags">
-        {company.industries.map((value) => (
-          <span key={value}>{value}</span>
-        ))}
-      </div>
       <div className="booth-detail">
         <Icon name="location" size={27} />
         <div>
           <span>ブース</span>
           <strong>{company.booth}</strong>
         </div>
-        <FavoriteButton company={company} saved={saved} onToggle={onSave} />
       </div>
     </>
   );
