@@ -106,7 +106,7 @@ h2 {
   min-height: 64px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--spacing-relative-spacing-lv8);
   padding: 8px var(--spacing-relative-spacing-lv12);
   background: var(--color-surface-primary);
@@ -200,6 +200,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: var(--spacing-relative-spacing-lv4);
+  margin-left: auto;
 }
 .desktop-navigation ul,
 .mobile-navigation ul {
@@ -302,7 +303,8 @@ h2 {
 }
 .search-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  align-items: start;
   gap: var(--spacing-relative-spacing-lv8);
 }
 .search-field,
@@ -311,6 +313,21 @@ h2 {
 }
 .search-field {
   display: block;
+  position: relative;
+}
+.search-field > .spui-TextField {
+  display: block;
+  padding-left: 44px;
+}
+.company-search-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 14px;
+  display: flex;
+  color: var(--color-object-medium-emphasis);
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 .filter-row {
   display: flex;
@@ -433,6 +450,10 @@ h2 {
 .company-card-bottom b {
   font-size: 1.25rem;
   margin-left: var(--spacing-relative-spacing-lv4);
+}
+.company-card-bottom > .spui-TextLink {
+  padding: 12px;
+  margin: -12px;
 }
 .empty-state {
   display: grid;
@@ -575,6 +596,10 @@ h2 {
   justify-content: flex-end;
   gap: var(--spacing-relative-spacing-lv8);
   margin-top: var(--spacing-relative-spacing-lv6);
+}
+.dialog-actions > .spui-TextButton {
+  padding: 12px;
+  margin: -12px;
 }
 .timeline {
   background: var(--color-surface-primary);
@@ -823,6 +848,9 @@ h2 {
   }
 }
 @media (max-width: 767px) {
+  .company-dialog-actions > button {
+    width: 100%;
+  }
   h1 {
     font-size: 1.375rem;
   }
@@ -979,34 +1007,43 @@ h2 {
 }
 .industry-filter {
   min-width: 0;
-  align-self: start;
-  border: 1px solid var(--color-border-low-emphasis);
-  border-radius: 8px;
-  background: var(--color-surface-primary);
 }
-.industry-filter > summary {
-  cursor: pointer;
-  min-height: 48px;
+.industry-filter > .spui-Button {
   display: flex;
-  align-items: center;
-  padding: var(--spacing-relative-spacing-lv6);
-  font-weight: bold;
-}
-.industry-filter > summary::after {
-  content: "+";
-  margin-left: auto;
-}
-.industry-filter[open] > summary::after {
-  content: "−";
+  justify-content: space-between;
+  min-height: 48px;
+  text-align: left;
 }
 .industry-options {
+  grid-column: 1 / -1;
   display: grid;
   gap: var(--spacing-relative-spacing-lv6);
-  border: 0;
+  padding-top: var(--spacing-relative-spacing-lv4);
+  border-top: 1px solid var(--color-border-low-emphasis);
+}
+.industry-options > .spui-TextButton {
+  justify-self: start;
+  padding: 8px;
+  margin-left: -8px;
+}
+.industry-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
   margin: 0;
-  padding: var(--spacing-relative-spacing-lv6);
-  max-height: 320px;
-  overflow: auto;
+  padding: 0;
+  border: 0;
+}
+.industry-chips > .spui-Button {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 40px;
+  height: auto;
+  padding: 8px 12px;
+  border-radius: 24px;
+  text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 .company-dialog {
@@ -1074,9 +1111,12 @@ h2 {
 .brand:hover {
   opacity: 0.78;
 }
-.company-map-accordion > summary:hover,
-.industry-filter > summary:hover {
+.company-map-accordion > summary:hover {
   background-color: var(--color-hover-outlined-button);
+}
+.desktop-navigation .spui-TextLink:hover,
+.mobile-navigation .spui-TextLink:hover {
+  background-color: transparent;
 }
 @media (prefers-reduced-motion: reduce) {
   .brand {

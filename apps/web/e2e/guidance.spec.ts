@@ -74,14 +74,14 @@ async function assertCompanyCount(page: Page, count: number) {
 }
 async function verifyLongIndustryFits(page: Page) {
   const group = await industries(page);
-  const longIndustry = group.getByRole("checkbox", { name: /^架空の研究開発/ });
-  await checkbox(longIndustry, true);
+  const longIndustry = group.getByRole("button", { name: /^架空の研究開発/ });
+  await industryChip(longIndustry, true);
   await assertCompanyCount(page, 1);
   await expect
     .poll(() => page.locator("body").evaluate((body) => body.scrollWidth))
     .toBeLessThanOrEqual(page.viewportSize()!.width);
-  await checkbox(
-    group.getByRole("checkbox", { name: "研究", exact: true }),
+  await industryChip(
+    group.getByRole("button", { name: "研究", exact: true }),
     true,
   );
   // OR matching must not duplicate a company matching both selected industries.
@@ -89,15 +89,18 @@ async function verifyLongIndustryFits(page: Page) {
   await group.getByRole("button", { name: "業種を解除", exact: true }).click();
   await assertCompanyCount(page, 4);
 }
-async function checkbox(input: Locator, checked: boolean) {
-  if ((await input.isChecked()) !== checked) await input.locator("..").click();
-  if (checked) await expect(input).toBeChecked();
-  else await expect(input).not.toBeChecked();
+async function industryChip(input: Locator, selected: boolean) {
+  if ((await input.getAttribute("aria-pressed")) !== String(selected))
+    await input.click();
+  await expect(input).toHaveAttribute("aria-pressed", String(selected));
 }
 async function industries(page: Page) {
   const group = page.getByRole("group", { name: "業種", exact: true });
   if (!(await group.isVisible()))
-    await page.locator("summary").filter({ hasText: /^業種/ }).first().click();
+    await page
+      .locator(".industry-filter")
+      .getByRole("button", { name: /^業種/ })
+      .click();
   await expect(group).toBeVisible();
   return group;
 }
@@ -231,17 +234,54 @@ test("First Ec4 roster setup validates, personalizes, persists and can be change
 test("Search filters and saved companies survive reload through real MySQL", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, "alice", "/search/");
   expect(new URL(page.url()).pathname).toBe("/search/");
   await assertCompanyCount(page, 4);
+  const searchInput = page.getByRole("searchbox", {
+    name: "企業名・業種・ブース番号で検索",
+    exact: true,
+  });
+  await expect(page.locator(".company-search-icon svg")).toBeVisible();
+  const industryToggle = page
+    .locator(".industry-filter")
+    .getByRole("button", { name: /^業種/ });
+  const collapsedInput = (await searchInput.boundingBox())!;
+  await industryToggle.click();
+  await expect(industryToggle).toHaveAttribute("aria-expanded", "true");
+  const expandedInput = (await searchInput.boundingBox())!;
+  const toggleBounds = (await industryToggle.boundingBox())!;
+  const optionsBounds = (await page
+    .locator(".industry-options")
+    .boundingBox())!;
+  const rowBounds = (await page.locator(".search-row").boundingBox())!;
+  expect(expandedInput).toEqual(collapsedInput);
+  expect(expandedInput.height).toBe(48);
+  expect(toggleBounds.height).toBe(48);
+  expect(toggleBounds.y).toBe(expandedInput.y);
+  expect(optionsBounds.x).toBeCloseTo(rowBounds.x, 0);
+  expect(optionsBounds.width).toBeCloseTo(rowBounds.width, 0);
+  expect(optionsBounds.y).toBeGreaterThanOrEqual(
+    expandedInput.y + expandedInput.height,
+  );
+  const keyboardChip = page
+    .getByRole("group", { name: "業種", exact: true })
+    .getByRole("button", { name: "情報処理", exact: true });
+  await keyboardChip.focus();
+  await page.keyboard.press("Enter");
+  await expect(keyboardChip).toHaveAttribute("aria-pressed", "true");
+  await assertCompanyCount(page, 1);
+  await page.keyboard.press("Space");
+  await expect(keyboardChip).toHaveAttribute("aria-pressed", "false");
+  await assertCompanyCount(page, 4);
   await verifyLongIndustryFits(page);
   let group = await industries(page);
-  await checkbox(
-    group.getByRole("checkbox", { name: "情報処理", exact: true }),
+  await industryChip(
+    group.getByRole("button", { name: "情報処理", exact: true }),
     true,
   );
-  await checkbox(
-    group.getByRole("checkbox", { name: "機械", exact: true }),
+  await industryChip(
+    group.getByRole("button", { name: "機械", exact: true }),
     true,
   );
   await assertCompanyCount(page, 2);
@@ -252,11 +292,11 @@ test("Search filters and saved companies survive reload through real MySQL", asy
   await assertCompanyCount(page, 2);
   group = await industries(page);
   await expect(
-    group.getByRole("checkbox", { name: "情報処理", exact: true }),
-  ).toBeChecked();
+    group.getByRole("button", { name: "情報処理", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await expect(
-    group.getByRole("checkbox", { name: "機械", exact: true }),
-  ).toBeChecked();
+    group.getByRole("button", { name: "機械", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await group.getByRole("button", { name: "業種を解除", exact: true }).click();
   await page.getByRole("searchbox").fill("あおば");
   await assertCompanyCount(page, 1);
@@ -291,8 +331,8 @@ test("Search filters and saved companies survive reload through real MySQL", asy
   await page.getByRole("radio", { name: "午後の部", exact: true }).click();
   await assertCompanyCount(page, 2);
   group = await industries(page);
-  await checkbox(
-    group.getByRole("checkbox", { name: "建設", exact: true }),
+  await industryChip(
+    group.getByRole("button", { name: "建設", exact: true }),
     true,
   );
   await assertCompanyCount(page, 1);
@@ -339,10 +379,10 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
   ).toHaveAttribute("data-selected", "true");
   await expect(
     full.getByRole("button", {
-      name: "拡大率を100パーセントに戻す",
+      name: "マップの表示をリセット",
       exact: true,
     }),
-  ).toHaveText("100%");
+  ).toHaveAccessibleDescription("現在の倍率 100パーセント");
   await page.getByRole("link", { name: /一覧/ }).first().click();
   await assertCompanyCount(page, 4);
   await nav(page, "スケジュール").click();
@@ -391,9 +431,11 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     exact: true,
   });
   const zoom = full.getByRole("button", {
-    name: "拡大率を100パーセントに戻す",
+    name: "マップの表示をリセット",
     exact: true,
   });
+  await expect(zoom).toHaveText("");
+  await expect(zoom.locator("svg")).toBeVisible();
   const first = full.getByRole("button", {
     name: "午前 ブース 1 架空あおばソフト",
     exact: true,
@@ -403,7 +445,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     exact: true,
   });
   await expect(first).toHaveAttribute("data-selected", "true");
-  await expect(zoom).toHaveText("100%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 100パーセント");
   await expect(first).toHaveAttribute("data-assigned", "true");
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
@@ -440,6 +482,8 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     .boundingBox())!;
   expect(zoomInBounds.width).toBeLessThanOrEqual(40);
   expect(zoomInBounds.height).toBeLessThanOrEqual(40);
+  const canvas = full.locator(".venue-map-canvas");
+  const initialCanvasWidth = (await canvas.boundingBox())!.width;
   const area = (await viewport.boundingBox())!;
   expect(area.x).toBe(0);
   const header = page.getByRole("banner");
@@ -453,7 +497,11 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     await full
       .getByRole("button", { name: "マップを拡大", exact: true })
       .click();
-  await expect(zoom).toHaveText("175%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
+  expect((await canvas.boundingBox())!.width).toBeCloseTo(
+    initialCanvasWidth * 1.75,
+    0,
+  );
   await first.click();
   let panel = page.getByRole("region", {
     name: "架空あおばソフト",
@@ -467,7 +515,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   expect(side.x + side.width).toBeLessThanOrEqual(1440);
   expect(new URL(page.url()).searchParams.get("company")).toBe("AM-1");
   await full.getByRole("button", { name: "マップを拡大", exact: true }).click();
-  await expect(zoom).toHaveText("200%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 200パーセント");
   await expect(panel).toBeVisible();
   await full.getByRole("button", { name: "マップを縮小", exact: true }).click();
   await openAccount(page);
@@ -491,7 +539,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   }
   await page.emulateMedia({ colorScheme: "light" });
   expect(new URL(page.url()).searchParams.get("focus")).toBe("AM-2");
-  await expect(zoom).toHaveText("175%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
   await panel
     .getByRole("heading", { name: "架空いろは機械", exact: true })
     .focus();
@@ -521,7 +569,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   expect(bottom.y + bottom.height).toBeLessThanOrEqual(navigationBounds.y);
   expect(bottom.y + bottom.height).toBeGreaterThan(navigationBounds.y - 20);
   await full.getByRole("button", { name: "マップを拡大", exact: true }).click();
-  await expect(zoom).toHaveText("200%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 200パーセント");
   await expect(panel).toBeVisible();
   await full.getByRole("button", { name: "マップを縮小", exact: true }).click();
   await page.setViewportSize({ width: 844, height: 390 });
@@ -542,7 +590,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     );
     for (const name of [
       "マップを拡大",
-      "拡大率を100パーセントに戻す",
+      "マップの表示をリセット",
       "マップを縮小",
       "検証1階マップ",
       "検証2階マップ",
@@ -570,11 +618,11 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     await full
       .getByRole("button", { name: "マップを拡大", exact: true })
       .click();
-    await expect(zoom).toHaveText("200%");
+    await expect(zoom).toHaveAccessibleDescription("現在の倍率 200パーセント");
     await full
       .getByRole("button", { name: "マップを縮小", exact: true })
       .click();
-    await expect(zoom).toHaveText("175%");
+    await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
     await expect(panel).toBeVisible();
   }
   await page.emulateMedia({ colorScheme: "light" });
@@ -640,7 +688,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     .click();
   await expect(landscapeResults).not.toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(zoom).toHaveText("175%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
   await full.getByRole("button", { name: /^表示中の一覧/ }).click();
   const results = full.getByRole("region", {
     name: "表示中の一覧",
@@ -682,28 +730,28 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   await secondDialog
     .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
-  await expect(zoom).toHaveText("175%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
   await full.getByRole("button", { name: "絞り込み", exact: true }).click();
   const industry = full.getByRole("group", { name: "業種", exact: true });
-  await checkbox(
-    industry.getByRole("checkbox", { name: "情報処理", exact: true }),
+  await industryChip(
+    industry.getByRole("button", { name: "情報処理", exact: true }),
     true,
   );
-  await checkbox(
-    industry.getByRole("checkbox", { name: "機械", exact: true }),
+  await industryChip(
+    industry.getByRole("button", { name: "機械", exact: true }),
     true,
   );
   await expect(first).toBeEnabled();
 
   await expect(second).toBeEnabled();
-  await checkbox(
-    industry.getByRole("checkbox", { name: "情報処理", exact: true }),
+  await industryChip(
+    industry.getByRole("button", { name: "情報処理", exact: true }),
     false,
   );
   await expect(first).toBeDisabled();
   await expect(second).toBeEnabled();
-  await checkbox(
-    industry.getByRole("checkbox", { name: "機械", exact: true }),
+  await industryChip(
+    industry.getByRole("button", { name: "機械", exact: true }),
     false,
   );
   await page.getByLabel("マップの企業名", { exact: true }).fill("いろは");
@@ -715,7 +763,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   await secondDialog
     .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
-  await expect(zoom).toHaveText("175%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
   await page.getByLabel("マップの企業名", { exact: true }).fill("");
   await full.getByRole("button", { name: "絞り込み", exact: true }).click();
   await full.getByRole("radio", { name: "午後の部", exact: true }).click();
@@ -726,7 +774,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     .getByRole("region", { name: "架空みらい建設", exact: true })
     .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
-  await expect(zoom).toHaveText("175%");
+  await expect(zoom).toHaveAccessibleDescription("現在の倍率 175パーセント");
   const booth = full.getByRole("button", {
     name: "午後 ブース 1 架空みらい建設",
     exact: true,
@@ -762,7 +810,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     x: viewportBounds.x + viewportBounds.width / 2,
     y: viewportBounds.y + viewportBounds.height / 2,
   };
-  const zoomBeforePinch = await zoom.textContent();
+  const zoomBeforePinch = await zoom.getAttribute("aria-description");
   await client.send("Input.dispatchTouchEvent", {
     type: "touchStart",
     touchPoints: [
@@ -782,7 +830,7 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     touchPoints: [],
   });
   await client.detach();
-  await expect(zoom).not.toHaveText(zoomBeforePinch!);
+  await expect(zoom).not.toHaveAttribute("aria-description", zoomBeforePinch!);
   await full
     .getByRole("button", { name: "検証2階マップ", exact: true })
     .click();
@@ -1138,6 +1186,7 @@ test("The directory starts with companies and follows readable system color them
 test("Account actions, interest labels and document guidance are available without crowding the header", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, "menu");
   const trigger = page.getByRole("button", {
     name: "ユーザーメニュー",
@@ -1176,6 +1225,48 @@ test("Account actions, interest labels and document guidance are available witho
         triggerBounds.height / 2,
     ),
   ).toBeLessThanOrEqual(3);
+  const mainNavigation = page.getByRole("navigation", {
+    name: "メインナビゲーション",
+  });
+  const brandBounds = (await brand.boundingBox())!;
+  const navigationBounds = (await mainNavigation.boundingBox())!;
+  expect(navigationBounds.x).toBeGreaterThanOrEqual(
+    brandBounds.x + brandBounds.width,
+  );
+  expect(
+    navigationBounds.x - brandBounds.x - brandBounds.width,
+  ).toBeLessThanOrEqual(40);
+  const searchNavigation = mainNavigation.getByRole("link", {
+    name: "探す",
+    exact: true,
+  });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.mouse.move(1430, 890);
+    const before = await searchNavigation.evaluate((node) => ({
+      color: getComputedStyle(node).color,
+      background: getComputedStyle(node).backgroundColor,
+    }));
+    const beforeBounds = (await searchNavigation.boundingBox())!;
+    await searchNavigation.hover();
+    expect(
+      await searchNavigation.evaluate(
+        (node) => getComputedStyle(node).backgroundColor,
+      ),
+    ).toBe("rgba(0, 0, 0, 0)");
+    await expect
+      .poll(() =>
+        searchNavigation.evaluate((node) => getComputedStyle(node).color),
+      )
+      .not.toBe(before.color);
+    expect(await searchNavigation.boundingBox()).toEqual(beforeBounds);
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(
+    page
+      .locator(".view-heading")
+      .getByRole("link", { name: "探す", exact: true }),
+  ).toHaveCount(0);
   const menu = await openAccount(page);
   await expect(menu).toContainText("検証ユーザー menu");
   await expect(menu.getByRole("menuitem")).toHaveCount(2);
@@ -1202,6 +1293,27 @@ test("Account actions, interest labels and document guidance are available witho
   await openAccount(page);
   await page.getByRole("heading", { name: "一覧", exact: true }).click();
   await expect(menu).not.toBeVisible();
+  await accountAction(page, "名簿番号の設定");
+  const rosterSettings = rosterDialog(page);
+  const cancel = rosterSettings.getByRole("button", {
+    name: "キャンセル",
+    exact: true,
+  });
+  const modalHeight = (await rosterSettings.boundingBox())!.height;
+  await cancel.hover();
+  const cancelPadding = await cancel.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return [
+      style.paddingTop,
+      style.paddingRight,
+      style.paddingBottom,
+      style.paddingLeft,
+    ].map(parseFloat);
+  });
+  for (const value of cancelPadding) expect(value).toBeGreaterThan(0);
+  expect((await rosterSettings.boundingBox())!.height).toBe(modalHeight);
+  await cancel.click();
+  await expect(rosterSettings).not.toBeVisible();
   await documentLink(page).click();
   await expect(
     page.getByRole("heading", { name: "配布資料の案内", level: 1 }),
@@ -1267,12 +1379,42 @@ test("Long company names align left without underlines and schedule markers alig
         (node) => getComputedStyle(node).textDecorationLine,
       ),
     ).toBe("none");
+    const article = title.locator("xpath=ancestor::article");
+    const articleHeight = (await article.boundingBox())!.height;
     await details.hover();
     expect(
       await details.evaluate(
         (node) => getComputedStyle(node).textDecorationLine,
       ),
     ).toBe("none");
+    const detailPadding = await details.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [
+        style.paddingTop,
+        style.paddingRight,
+        style.paddingBottom,
+        style.paddingLeft,
+      ].map(parseFloat);
+    });
+    for (const value of detailPadding) expect(value).toBeGreaterThan(0);
+    expect((await article.boundingBox())!.height).toBe(articleHeight);
+    if (viewport.width === 390) {
+      await details.click();
+      const companyDialog = page.getByRole("dialog", {
+        name: await title.innerText(),
+        exact: true,
+      });
+      const close = companyDialog.getByRole("button", {
+        name: "閉じる",
+        exact: true,
+      });
+      const actions = (await companyDialog
+        .locator(".company-dialog-actions")
+        .boundingBox())!;
+      expect((await close.boundingBox())!.width).toBeCloseTo(actions.width, 0);
+      await close.click();
+      await expect(companyDialog).not.toBeVisible();
+    }
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await nav(page, "スケジュール").click();
@@ -1523,4 +1665,99 @@ test("Logout and another account do not inherit retained interest cards", async 
     (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
   ).not.toContain("AM-2");
   await expect(kept).toHaveCount(0);
+});
+
+test("Interest changes appear before a delayed API response and roll back a failed write", async ({
+  page,
+}) => {
+  await login(page, "bob");
+  for (const id of ["AM-1", "AM-2", "PM-1", "PM-2"])
+    expect(
+      (
+        await page.request.delete(`${API}/api/bookmarks/${id}`, {
+          headers: { Origin: "http://127.0.0.1:3300" },
+        })
+      ).status(),
+    ).toBe(204);
+  await page.reload();
+  const company = page
+    .locator(".company-card")
+    .filter({ hasText: "架空いろは機械" });
+  const favorite = company.getByRole("button", {
+    name: /架空いろは機械を気になる/,
+  });
+  let releaseSuccess!: () => void;
+  let successReceived!: () => void;
+  const successGate = new Promise<void>((resolve) => {
+    releaseSuccess = resolve;
+  });
+  const successReady = new Promise<void>((resolve) => {
+    successReceived = resolve;
+  });
+  const bookmarkURL = `${API}/api/bookmarks/AM-2`;
+  // The write and persistence use the real Go service and MySQL. Only delivery
+  // of its response is delayed, so the optimistic state cannot await success.
+  await page.route(bookmarkURL, async (route) => {
+    const response = await route.fetch();
+    successReceived();
+    await successGate;
+    await route.fulfill({ response });
+  });
+  await favorite.click();
+  await successReady;
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+  await expect(favorite).toHaveAttribute("aria-busy", "true");
+  await expect(favorite).toBeDisabled();
+  await expect(nav(page, "気になる")).toContainText("1");
+  releaseSuccess();
+  await expect(favorite).toBeEnabled();
+  expect(
+    (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
+  ).toContain("AM-2");
+  await page.unroute(bookmarkURL);
+  await nav(page, "気になる").click();
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+
+  let releaseFailure!: () => void;
+  let failureReceived!: () => void;
+  const failureGate = new Promise<void>((resolve) => {
+    releaseFailure = resolve;
+  });
+  const failureReady = new Promise<void>((resolve) => {
+    failureReceived = resolve;
+  });
+  // This case substitutes an unavailable bookmark response only; the real
+  // persisted record must stay intact and the optimistic removal must reverse.
+  await page.route(bookmarkURL, async (route) => {
+    failureReceived();
+    await failureGate;
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "synthetic_unavailable" }),
+    });
+  });
+  await favorite.click();
+  await failureReady;
+  await expect(favorite).toHaveAttribute("aria-pressed", "false");
+  await expect(favorite).toHaveAttribute("aria-busy", "true");
+  await expect(company).toBeVisible();
+  await expect(nav(page, "気になる").locator(".saved-count")).toHaveCount(0);
+  releaseFailure();
+  await expect(favorite).toBeEnabled();
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+  await expect(nav(page, "気になる")).toContainText("1");
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect(
+    (await (await page.request.get(`${API}/api/bookmarks`)).json()).company_ids,
+  ).toContain("AM-2");
+  await page.unroute(bookmarkURL);
+  await page.reload();
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+  await favorite.click();
+  await expect(favorite).toHaveAttribute("aria-pressed", "false");
+  await expect(favorite).toBeEnabled();
+  await expect(company).toBeVisible();
+  await page.reload();
+  await expect(company).toHaveCount(0);
 });

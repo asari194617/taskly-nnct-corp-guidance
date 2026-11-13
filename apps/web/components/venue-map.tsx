@@ -20,6 +20,7 @@ import { APIError, documentURL } from "../lib/api";
 import type { Company, Document } from "../lib/types";
 import { Icon } from "./icons";
 import "./venue-map.css";
+import IndustryChips from "./industry-chips";
 
 type Booth = {
   booth: number;
@@ -619,24 +620,11 @@ export default function VenueMap({
                   閉じる
                 </TextButton>
               </div>
-              <fieldset className="venue-map-industry-options">
-                <legend>業種</legend>
-                {industries.map((value) => (
-                  <Checkbox
-                    key={value}
-                    checked={filters.industries.includes(value)}
-                    onChange={(event) =>
-                      changeFilters({
-                        industries: event.target.checked
-                          ? [...filters.industries, value]
-                          : filters.industries.filter((item) => item !== value),
-                      })
-                    }
-                  >
-                    {value}
-                  </Checkbox>
-                ))}
-              </fieldset>
+              <IndustryChips
+                options={industries}
+                selected={filters.industries}
+                onChange={(industries) => changeFilters({ industries })}
+              />
               <Checkbox
                 checked={filters.saved}
                 onChange={(event) =>
@@ -716,12 +704,15 @@ export default function VenueMap({
               >
                 <Icon name="plus" size={18} />
               </IconButton>
-              <TextButton
-                aria-label="拡大率を100パーセントに戻す"
+              <IconButton
+                variant="neutral"
+                size="small"
+                aria-label="マップの表示をリセット"
+                aria-description={`現在の倍率 ${zoom}パーセント`}
                 onClick={resetView}
               >
-                {zoom}%
-              </TextButton>
+                <Icon name="fit" size={18} />
+              </IconButton>
               <IconButton
                 variant="neutral"
                 size="small"
