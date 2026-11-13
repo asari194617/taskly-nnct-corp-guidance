@@ -53,9 +53,9 @@ API の配備・readiness・未認証アクセスの拒否を確認してから 
 
 UI配備用のR2資格情報はUI専用1バケットのObject Read & Writeに限定します。API 配備鍵は新規サービス専用で、サーバー側の authorized_keys は `restrict,command=".../deploy-entrypoint.sh"` を設定します。private key を Actions に登録する際はユーザーの明示的な承認を得てください。
 
-API イメージは GitHub のランナーでビルドし、コミット SHA と OCI revision label を付け、圧縮して SSH の標準入力で送ります。レジストリのパスワードを本番へ保存しません。強制コマンドは `deploy <40桁SHA>` だけを受け付け、排他制御、イメージの revision 検証、readiness 検査を実行します。
+API イメージは GitHub のランナーでビルドし、コミット SHA と OCI revision label を付け、圧縮して SSH の標準入力で送ります。レジストリのパスワードを本番へ保存しません。強制コマンドは `deploy <40桁SHA>` だけを受け付け、排他制御を行います。受信した archive は共有 Docker daemon にロードする前に `validate-image-archive.py` で検査し、対象リポジトリの要求 SHA だけを持つ単一イメージ、同じ revision label、許可された構成ファイルと layer だけであることを確認します。検査済みの manifest・config・layer から archive を組み直してからロードし、readiness を確認します。圧縮入力は最大 512 MiB、展開後は最大 2 GiB です。
 
-Compose と強制コマンドはサーバーに初回設置したファイルを使用します。これらの運用設定を変更する PR では、レビュー済みのファイルを管理者が明示的に同期してください。日常配備はイメージだけを送り、設定・鍵・データを上書きしません。
+Compose と強制コマンドはサーバーに初回設置したファイルを使用します。これらの運用設定を変更する PR では、レビュー済みのファイルを管理者が明示的に同期してください。この検査を有効にするには `deploy/deploy-entrypoint.sh` をサーバーの `deploy-entrypoint.sh` へ、`deploy/validate-image-archive.py` を同じディレクトリの `validate-image-archive.py` へ、同時に設置します。設置後は強制コマンドが新しいスクリプトを指し、両ファイルが所有者以外から書き換えられないことを確認します。日常配備はイメージだけを送り、設定・鍵・データを上書きしません。
 
 R2 配備は immutable asset を先、HTML を最後にアップロードし、旧 asset を保持します。HTML の Next.js bootstrap inline script から CSP の SHA-256 を生成し、meta CSP に埋め込みます。CSS の動的スタイルと設定したR2 endpoint originの署名付き地図画像を許可し、スクリプトの `unsafe-inline` は使用しません。PDF は別タブで開き、iframe・object の埋め込みは許可しません。Cloudflare の応答ヘッダールールは新 UI host にだけ限定します。
 
