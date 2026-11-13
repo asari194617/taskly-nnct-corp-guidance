@@ -512,8 +512,8 @@ describe("interactive private venue map", () => {
           ).toBe(false);
       }
       expect(
-        screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-      ).toHaveTextContent("100%");
+        screen.getByRole("button", { name: "マップの表示をリセット" }),
+      ).toHaveAccessibleDescription("現在の倍率 100パーセント");
     },
   );
 
