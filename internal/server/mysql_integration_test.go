@@ -13,7 +13,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -63,10 +62,17 @@ func TestMySQLIntegration(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO guidance_dataset(id,payload) VALUES(1,?)`, payload); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "synthetic.pdf"), []byte("%PDF-1.4 synthetic document"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	objectService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !validTestR2Signature(r, "synthetic-access", "synthetic-secret", time.Now()) || r.URL.Path != "/synthetic-documents/synthetic.pdf" {
+			w.WriteHeader(403)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/pdf")
+		http.ServeContent(w, r, "synthetic.pdf", time.Time{}, strings.NewReader("%PDF-1.4 synthetic document"))
+	}))
+	defer objectService.Close()
+
 	if _, err := db.ExecContext(ctx, `INSERT INTO guidance_documents(id,file_name,mime_type,title) VALUES('example-map','synthetic.pdf','application/pdf','Example map')`); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +161,7 @@ func TestMySQLIntegration(t *testing.T) {
 	defer issuer.Close()
 	apiServer := httptest.NewUnstartedServer(nil)
 	apiOrigin = "http://" + apiServer.Listener.Addr().String()
-	cfg := Config{UIOrigin: "http://127.0.0.1:3000", APIOrigin: apiOrigin, AuthIssuer: issuer.URL, ClientID: "integration-client", DataDir: dir, EncryptionKey: make([]byte, 32)}
+	cfg := Config{R2Endpoint: objectService.URL, R2Bucket: "synthetic-documents", R2AccessKeyID: "synthetic-access", R2SecretKey: "synthetic-secret", UIOrigin: "http://127.0.0.1:3000", APIOrigin: apiOrigin, AuthIssuer: issuer.URL, ClientID: "integration-client", EncryptionKey: make([]byte, 32)}
 	app, err := New(cfg, SQLStore{DB: db}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +175,11 @@ func TestMySQLIntegration(t *testing.T) {
 		if len(payload) != 0 {
 			body = strings.NewReader(payload[0])
 		}
-		req, _ := http.NewRequest(method, apiOrigin+path, body)
+		target := apiOrigin + path
+		if strings.HasPrefix(path, "http://") {
+			target = path
+		}
+		req, _ := http.NewRequest(method, target, body)
 		req.Header.Set("Origin", cfg.UIOrigin)
 		if len(payload) != 0 {
 			req.Header.Set("Content-Type", "application/json")
@@ -249,11 +259,11 @@ func TestMySQLIntegration(t *testing.T) {
 	if err := json.Unmarshal([]byte(request(alice, "GET", "/api/documents/example-map/url", 200)), &aliceDocument); err != nil {
 		t.Fatal(err)
 	}
-	aliceDocumentPath := strings.TrimPrefix(aliceDocument.URL, apiOrigin)
+	aliceDocumentPath := aliceDocument.URL
 	if !strings.HasPrefix(request(http.DefaultClient, "GET", aliceDocumentPath, 200), "%PDF") {
 		t.Fatal("signed document did not open without browser credentials")
 	}
-	request(http.DefaultClient, "HEAD", aliceDocumentPath, 200)
+	request(alice, "HEAD", "/api/documents/example-map", 200)
 	request(alice, "PUT", "/api/bookmarks/AM-1", 204)
 	request(alice, "PUT", "/api/bookmarks/AM-1", 204)
 	if !strings.Contains(request(alice, "GET", "/api/bookmarks", 200), `"AM-1"`) {
@@ -295,7 +305,9 @@ func TestMySQLIntegration(t *testing.T) {
 	mu.Unlock()
 	request(alice, "GET", "/api/guidance", 401)
 	request(aliceOtherDevice, "GET", "/api/documents/example-map", 401)
-	request(http.DefaultClient, "GET", aliceDocumentPath, 403)
+	// A bearer URL already signed by R2 lasts until its five-minute deadline.
+	request(http.DefaultClient, "GET", aliceDocumentPath, 200)
+	request(alice, "GET", "/api/documents/example-map/url", 401)
 	// Independent API instances share a DB row lock, not an in-process mutex.
 	// Age the encrypted access credential beyond its 900-second lifetime while
 	// retaining the same 30-day browser session, preferences and saved companies.

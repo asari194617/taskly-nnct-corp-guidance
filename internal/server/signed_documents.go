@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -74,7 +73,7 @@ func (s *Server) documentURL(w http.ResponseWriter, r *http.Request, _ User) {
 		return
 	}
 	document, err := s.store.Document(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && !allowedDocumentMIME(document.MIMEType)) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !allowedDocument(document)) {
 		failure(w, 404, "document_not_found")
 		return
 	}
@@ -102,9 +101,12 @@ func (s *Server) documentURL(w http.ResponseWriter, r *http.Request, _ User) {
 		failure(w, 401, "authentication_required")
 		return
 	}
-	token := s.signDocumentToken(signedDocumentClaims{DocumentID: id, SessionHash: sessionHash, ExpiresAt: expiry.Unix()})
-	link := s.config.APIOrigin + "/documents/" + url.PathEscape(id) + "?" + url.Values{"token": {token}}.Encode()
-	respond(w, 200, map[string]any{"url": link, "expires_at": expiry})
+	link, signedExpiry, err := s.presignDocument(r.Context(), document, http.MethodGet, expiry)
+	if err != nil {
+		failure(w, 503, "document_unavailable")
+		return
+	}
+	respond(w, 200, map[string]any{"url": link, "expires_at": signedExpiry})
 }
 
 func (s *Server) signedDocument(w http.ResponseWriter, r *http.Request) {
@@ -127,5 +129,7 @@ func (s *Server) signedDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	s.serveDocument(w, r)
+	// Compatibility for API-hosted links issued by an older release. New links
+	// go directly to private R2 and remain valid until their short expiry.
+	s.redirectDocument(w, r, time.Unix(claims.ExpiresAt, 0), claims.SessionHash)
 }

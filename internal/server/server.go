@@ -7,18 +7,19 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type Server struct {
-	config Config
-	store  Store
-	client *http.Client
-	aead   cipher.AEAD
+	config    Config
+	store     Store
+	client    *http.Client
+	aead      cipher.AEAD
+	documents *s3.PresignClient
 }
 type User struct {
 	Sub   string `json:"sub"`
@@ -38,7 +39,7 @@ func New(c Config, store Store, client *http.Client) (*Server, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &Server{config: c, store: store, client: client, aead: aead}, nil
+	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c)}, nil
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -147,10 +148,11 @@ func (s *Server) guidance(w http.ResponseWriter, r *http.Request, _ User) {
 var documentIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func (s *Server) document(w http.ResponseWriter, r *http.Request, _ User) {
-	s.serveDocument(w, r)
+	cookie, _ := r.Cookie(s.sessionCookieName()) // protect already verified it.
+	s.redirectDocument(w, r, time.Now().Add(documentURLLifetime), digest(cookie.Value))
 }
 
-func (s *Server) serveDocument(w http.ResponseWriter, r *http.Request) {
+func (s *Server) redirectDocument(w http.ResponseWriter, r *http.Request, expiry time.Time, sessionHash string) {
 	id := r.PathValue("id")
 	if !documentIDPattern.MatchString(id) {
 		failure(w, 404, "document_not_found")
@@ -165,37 +167,28 @@ func (s *Server) serveDocument(w http.ResponseWriter, r *http.Request) {
 		failure(w, 503, "document_unavailable")
 		return
 	}
-	// Only flat, allowlisted regular files are served. Symlinks are rejected even
-	// within the private directory to make deployment mistakes fail closed.
-	if d.FileName == "" || d.FileName == "." || filepath.Base(d.FileName) != d.FileName || strings.ContainsAny(d.FileName, "/\\") || !allowedDocumentMIME(d.MIMEType) {
+	if !allowedDocument(d) {
 		failure(w, 404, "document_not_found")
 		return
 	}
-	root, err := os.OpenRoot(s.config.DataDir)
+	_, sessionExpiry, err := s.store.Session(r.Context(), sessionHash)
+	if errors.Is(err, ErrNotFound) || (err == nil && !sessionExpiry.After(time.Now().Add(time.Second))) {
+		failure(w, 401, "authentication_required")
+		return
+	}
+	if err != nil {
+		failure(w, 503, "session_unavailable")
+		return
+	}
+	if sessionExpiry.Before(expiry) {
+		expiry = sessionExpiry
+	}
+	link, _, err := s.presignDocument(r.Context(), d, r.Method, expiry)
 	if err != nil {
 		failure(w, 503, "document_unavailable")
 		return
 	}
-	defer root.Close()
-	st, err := root.Lstat(d.FileName)
-	if err != nil || !st.Mode().IsRegular() {
-		failure(w, 404, "document_not_found")
-		return
-	}
-	f, err := root.Open(d.FileName)
-	if err != nil {
-		failure(w, 404, "document_not_found")
-		return
-	}
-	defer f.Close()
-	st, err = f.Stat()
-	if err != nil || !st.Mode().IsRegular() {
-		failure(w, 404, "document_not_found")
-		return
-	}
-	w.Header().Set("Content-Type", d.MIMEType)
-	w.Header().Set("Content-Disposition", `inline; filename="`+id+documentExtension(d.MIMEType)+`"`)
-	http.ServeContent(w, r, d.FileName, st.ModTime(), f)
+	http.Redirect(w, r, link, http.StatusFound)
 }
 func allowedDocumentMIME(v string) bool {
 	return v == "image/png" || v == "image/jpeg" || v == "application/pdf"

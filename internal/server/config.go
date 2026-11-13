@@ -13,22 +13,26 @@ type Config struct {
 	APIOrigin     string
 	AuthIssuer    string
 	ClientID      string
-	DataDir       string
 	EncryptionKey []byte
 	SecureCookies bool
+	R2Endpoint    string
+	R2Bucket      string
+	R2AccessKeyID string
+	R2SecretKey   string
 }
 
 func ConfigFromEnv() (Config, error) {
+	if storage := os.Getenv("DOCUMENT_STORAGE"); storage != "" && storage != "r2" {
+		return Config{}, fmt.Errorf("DOCUMENT_STORAGE must be r2")
+	}
 	key, err := base64.StdEncoding.DecodeString(os.Getenv("SESSION_ENCRYPTION_KEY"))
 	if err != nil {
 		return Config{}, fmt.Errorf("SESSION_ENCRYPTION_KEY must be base64")
 	}
-	c := Config{UIOrigin: os.Getenv("UI_ORIGIN"), APIOrigin: os.Getenv("API_ORIGIN"), AuthIssuer: os.Getenv("AUTH_ISSUER"), ClientID: os.Getenv("AUTH_CLIENT_ID"), DataDir: os.Getenv("DATA_DIR"), EncryptionKey: key}
+	c := Config{UIOrigin: os.Getenv("UI_ORIGIN"), APIOrigin: os.Getenv("API_ORIGIN"), AuthIssuer: os.Getenv("AUTH_ISSUER"), ClientID: os.Getenv("AUTH_CLIENT_ID"), EncryptionKey: key,
+		R2Endpoint: os.Getenv("R2_ENDPOINT"), R2Bucket: os.Getenv("R2_BUCKET"), R2AccessKeyID: os.Getenv("R2_ACCESS_KEY_ID"), R2SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY")}
 	if c.ClientID == "" {
 		c.ClientID = "nnct-corp-guidance-2026"
-	}
-	if c.DataDir == "" {
-		c.DataDir = "/data"
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
@@ -51,6 +55,9 @@ func (c Config) Validate() error {
 	}
 	if c.ClientID == "" || len(c.ClientID) > 128 {
 		return fmt.Errorf("AUTH_CLIENT_ID required")
+	}
+	if err := c.validateR2(); err != nil {
+		return err
 	}
 	return nil
 }

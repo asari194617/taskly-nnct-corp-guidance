@@ -4,18 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
 import { Checkbox } from "@openameba/spindle-ui/Form/Checkbox";
-import { IconButton } from "@openameba/spindle-ui/IconButton";
 import { TextButton } from "@openameba/spindle-ui/TextButton";
 import { TextLink } from "@openameba/spindle-ui/TextLink";
 import { SegmentedControl } from "@openameba/spindle-ui/SegmentedControl";
 import { TextField } from "@openameba/spindle-ui/Form/TextField";
-import { DropDown } from "@openameba/spindle-ui/Form/DropDown";
 import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
 import { api, APIError, API_URL, documentURL } from "../lib/api";
 import {
   defaultRoute,
   readRoute,
   routeHref,
+  isAppPath,
   type RouteState,
   type View,
 } from "../lib/route-state";
@@ -31,12 +30,11 @@ import VenueMap from "./venue-map";
 import AccountMenu from "./account-menu";
 
 const EC4 = { department: "電子制御工学科", grade: 4 };
-const selectLayout = { width: "100%", maxWidth: "100%", minWidth: 0 };
 const returnKey = "guidance-return-route";
 const navigation: { id: View; title: string; short: string; icon: IconName }[] =
   [
-    { id: "companies", title: "企業一覧", short: "企業", icon: "building" },
-    { id: "search", title: "企業を探す", short: "検索", icon: "search" },
+    { id: "companies", title: "一覧", short: "一覧", icon: "building" },
+    { id: "search", title: "探す", short: "探す", icon: "search" },
     { id: "schedule", title: "スケジュール", short: "予定", icon: "calendar" },
     { id: "map", title: "会場マップ", short: "マップ", icon: "map" },
     {
@@ -103,7 +101,11 @@ function normalized(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase("ja").replace(/\s+/g, "");
 }
 
-export default function GuidanceApp() {
+export default function GuidanceApp({
+  initialView = "companies",
+}: {
+  initialView?: View;
+}) {
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<Guidance | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -111,7 +113,10 @@ export default function GuidanceApp() {
     "loading" | "signed-out" | "ready" | "error"
   >("loading");
   const [error, setError] = useState("");
-  const [route, setRoute] = useState<RouteState>({ ...defaultRoute });
+  const [route, setRoute] = useState<RouteState>({
+    ...defaultRoute,
+    view: initialView,
+  });
   const routeRef = useRef(route);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -133,30 +138,40 @@ export default function GuidanceApp() {
   );
   useEffect(() => {
     let target =
-      window.location.pathname + window.location.search + window.location.hash;
+      routeHref(readRoute(window.location.search, window.location.pathname)) +
+      window.location.hash;
     try {
       const intent = window.sessionStorage.getItem(returnKey);
       window.sessionStorage.removeItem(returnKey);
-      if (!window.location.search && intent) {
+      if (
+        window.location.pathname === "/" &&
+        !window.location.search &&
+        intent
+      ) {
         const intended = new URL(intent, window.location.origin);
         if (
           intended.origin === window.location.origin &&
-          ["/", "/index.html"].includes(intended.pathname)
-        )
-          target = routeHref(readRoute(intended.search)) + intended.hash;
+          isAppPath(intended.pathname)
+        ) {
+          target =
+            routeHref(readRoute(intended.search, intended.pathname)) +
+            intended.hash;
+        }
       }
     } catch {
       /* Browsing still works when session storage is unavailable. */
     }
-    if (target.startsWith("/index.html"))
-      target = "/" + target.slice("/index.html".length);
     if (
       target !==
       window.location.pathname + window.location.search + window.location.hash
-    )
+    ) {
       window.history.replaceState(window.history.state, "", target);
+    }
     const sync = () => {
-      const current = readRoute(window.location.search);
+      const current = readRoute(
+        window.location.search,
+        window.location.pathname,
+      );
       routeRef.current = current;
       setRoute(current);
     };
@@ -164,6 +179,13 @@ export default function GuidanceApp() {
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
+  useEffect(() => {
+    const title =
+      route.view === "info"
+        ? "配布資料の案内"
+        : navigation.find((item) => item.id === route.view)?.title || "一覧";
+    document.title = `${title} | 企業ガイダンス | Taskly`;
+  }, [route.view]);
   const expireSession = useCallback(() => {
     setData(null);
     setUser(null);
@@ -265,7 +287,11 @@ export default function GuidanceApp() {
     window.scrollTo({ top: 0, behavior: "instant" });
   }
   function openCompany(company: Company) {
-    changeRoute({ company: company.id });
+    changeRoute(
+      routeRef.current.view === "map"
+        ? { company: company.id, focus: company.id, session: company.session }
+        : { company: company.id },
+    );
   }
   function closeCompany() {
     changeRoute({ company: "" }, true);
@@ -277,7 +303,7 @@ export default function GuidanceApp() {
       focus: company.id,
       session: company.session,
       q: "",
-      industry: "",
+      industries: [],
       saved: false,
       assigned: false,
     });
@@ -336,24 +362,26 @@ export default function GuidanceApp() {
       <a className="skip-link" href="#main">
         本文へ移動
       </a>
-      <header className="topbar">
-        <div className="header-brand">
-          <Brand />
-        </div>
-        {ready && menu(false)}
-        <div className="header-right">
-          {ready && (
-            <AccountMenu
-              name={user.name}
-              rosterNumber={preferences.roster_number}
-              busy={busy}
-              onConfigure={() => setSettingNumber(true)}
-              onInformation={() => navigate("info")}
-              onLogout={() => void logout()}
-            />
-          )}
-        </div>
-      </header>
+      {(!ready || route.view !== "map") && (
+        <header className="topbar">
+          <div className="header-brand">
+            <Brand />
+          </div>
+          {ready && menu(false)}
+          <div className="header-right">
+            {ready && (
+              <AccountMenu
+                name={user.name}
+                rosterNumber={preferences.roster_number}
+                busy={busy}
+                onConfigure={() => setSettingNumber(true)}
+                onInformation={() => navigate("info")}
+                onLogout={() => void logout()}
+              />
+            )}
+          </div>
+        </header>
+      )}
       {!ready ? (
         <main id="main" className="welcome-main">
           <section className="welcome-content" aria-labelledby="welcome-title">
@@ -394,8 +422,11 @@ export default function GuidanceApp() {
         </main>
       ) : (
         <>
-          <main id="main" className="main-content">
-            {error && (
+          <main
+            id="main"
+            className={route.view === "map" ? "map-main" : "main-content"}
+          >
+            {error && !selected && (
               <div className="top-error">
                 <Message error>{error}</Message>
               </div>
@@ -403,7 +434,7 @@ export default function GuidanceApp() {
             {route.company && !selected && (
               <div className="top-error">
                 <Message error>企業が見つかりません。</Message>
-                <TextButton onClick={closeCompany}>企業一覧へ戻る</TextButton>
+                <TextButton onClick={closeCompany}>一覧へ戻る</TextButton>
               </div>
             )}
             {(route.view === "companies" || route.view === "search") && (
@@ -433,7 +464,40 @@ export default function GuidanceApp() {
                 session={route.session === "PM" ? "PM" : "AM"}
                 selectedCompanyId={route.company || route.focus}
                 search={route.q}
-                industry={route.industry}
+                industries={route.industries}
+                mode="fullscreen"
+                navigation={
+                  <div className="map-page-navigation">
+                    <TextLink
+                      href="/"
+                      icon={<Icon name="arrow" />}
+                      onClick={(event) =>
+                        intercept(event, () => navigate("companies"))
+                      }
+                    >
+                      一覧
+                    </TextLink>
+                    <TextLink
+                      href="/search/"
+                      icon={<Icon name="search" />}
+                      onClick={(event) =>
+                        intercept(event, () => navigate("search"))
+                      }
+                    >
+                      探す
+                    </TextLink>
+                  </div>
+                }
+                topRight={
+                  <AccountMenu
+                    name={user.name}
+                    rosterNumber={preferences.roster_number}
+                    busy={busy}
+                    onConfigure={() => setSettingNumber(true)}
+                    onInformation={() => navigate("info")}
+                    onLogout={() => void logout()}
+                  />
+                }
                 onlySaved={route.saved}
                 onlyAssigned={route.assigned}
                 onFiltersChange={(patch) =>
@@ -465,14 +529,17 @@ export default function GuidanceApp() {
                 onSave={toggleSave}
                 onSelect={openCompany}
                 onConfigure={() => setSettingNumber(true)}
-                onFind={() => navigate("companies")}
+                onFind={() => {
+                  changeRoute({ ...defaultRoute, view: "search" });
+                  window.scrollTo({ top: 0, behavior: "instant" });
+                }}
               />
             )}
             {route.view === "info" && (
               <Information data={data} onExpired={expireSession} />
             )}
           </main>
-          {menu(true)}
+          {route.view !== "map" && menu(true)}
         </>
       )}
       {ready && settingNumber && (
@@ -489,12 +556,18 @@ export default function GuidanceApp() {
       {ready && selected && !settingNumber && (
         <CompanyDialog
           company={selected}
+          error={error}
           saved={saved.has(selected.id)}
           assigned={assignedIDs.has(selected.id)}
           route={route}
-          onSave={() => void toggleSave(selected)}
+          onSave={() => toggleSave(selected)}
           onClose={closeCompany}
           onMap={() => mapCompany(selected)}
+          data={data}
+          savedCompanyIds={saved}
+          assignedCompanyIds={assignedIDs}
+          onSelect={openCompany}
+          onExpired={expireSession}
         />
       )}
     </>
@@ -615,7 +688,7 @@ function Companies({
   assignedIDs: Set<string>;
   route: RouteState;
   onRouteChange: (patch: Partial<RouteState>, replace?: boolean) => void;
-  onSave: (company: Company) => void;
+  onSave: (company: Company) => Promise<void>;
   onSelect: (company: Company) => void;
 }) {
   const industries = useMemo(
@@ -625,17 +698,6 @@ function Companies({
       ].sort((a, b) => a.localeCompare(b, "ja")),
     [data],
   );
-  // Spindle DropDown caches its visible option label. Remount only when an
-  // external change (history/reset) alters the value, preserving keyboard
-  // focus during normal selection.
-  const chosenIndustry = useRef(route.industry);
-  const [industryReset, setIndustryReset] = useState(0);
-  useEffect(() => {
-    if (chosenIndustry.current !== route.industry) {
-      chosenIndustry.current = route.industry;
-      setIndustryReset((previous) => previous + 1);
-    }
-  }, [route.industry]);
   const searching = route.view === "search";
   const filtered = useMemo(
     () =>
@@ -644,8 +706,10 @@ function Companies({
         : data.companies.filter(
             (company) =>
               (route.session === "all" || company.session === route.session) &&
-              (!route.industry ||
-                company.industries.includes(route.industry)) &&
+              (!route.industries.length ||
+                route.industries.some((industry) =>
+                  company.industries.includes(industry),
+                )) &&
               (!route.saved || saved.has(company.id)) &&
               (!route.q.trim() ||
                 normalized(
@@ -657,7 +721,7 @@ function Companies({
   return (
     <>
       <div className="view-heading">
-        <h1>{searching ? "企業を探す" : "企業一覧"}</h1>
+        <h1>{searching ? "探す" : "一覧"}</h1>
         {!searching && (
           <TextLink
             href={routeHref({ ...route, view: "search", company: "" })}
@@ -668,7 +732,7 @@ function Companies({
               )
             }
           >
-            企業を探す
+            探す
           </TextLink>
         )}
       </div>
@@ -687,27 +751,39 @@ function Companies({
                 }
               />
             </label>
-            <div className="industry-select bounded-field">
-              <label className="sr-only" htmlFor="industry-filter">
-                業種で絞り込む
-              </label>
-              <DropDown
-                key={industryReset}
-                id="industry-filter"
-                style={selectLayout}
-                value={route.industry}
-                onChange={(event) => {
-                  chosenIndustry.current = event.target.value;
-                  onRouteChange({ industry: event.target.value });
-                }}
-                aria-label="業種で絞り込む"
-              >
-                <option value="">すべての業種</option>
-                {industries.map((value) => (
-                  <option key={value}>{value}</option>
+            <details className="industry-filter">
+              <summary>
+                業種
+                {route.industries.length
+                  ? ` · ${route.industries.length}件`
+                  : ""}
+              </summary>
+              <fieldset className="industry-options">
+                <legend className="sr-only">業種</legend>
+                {industries.map((industry) => (
+                  <Checkbox
+                    key={industry}
+                    checked={route.industries.includes(industry)}
+                    onChange={(event) =>
+                      onRouteChange({
+                        industries: event.target.checked
+                          ? [...route.industries, industry]
+                          : route.industries.filter(
+                              (value) => value !== industry,
+                            ),
+                      })
+                    }
+                  >
+                    {industry}
+                  </Checkbox>
                 ))}
-              </DropDown>
-            </div>
+                {route.industries.length > 0 && (
+                  <TextButton onClick={() => onRouteChange({ industries: [] })}>
+                    業種を解除
+                  </TextButton>
+                )}
+              </fieldset>
+            </details>
           </div>
           <div className="filter-row">
             <fieldset className="session-tabs">
@@ -731,7 +807,7 @@ function Companies({
                   onRouteChange({ saved: event.target.checked })
                 }
               >
-                気になる企業のみ
+                気になるのみ
               </Checkbox>
             </div>
           </div>
@@ -739,7 +815,7 @@ function Companies({
       )}
       <div className="results-label" aria-live="polite">
         <span>
-          <strong>{filtered.length}</strong> 社の企業
+          <strong>{filtered.length}</strong> 社
         </span>
       </div>
       {filtered.length ? (
@@ -766,7 +842,7 @@ function Companies({
               onRouteChange({
                 q: "",
                 session: "all",
-                industry: "",
+                industries: [],
                 saved: false,
               })
             }
@@ -790,7 +866,7 @@ function CompanyCard({
   saved: boolean;
   assigned: boolean;
   route: RouteState;
-  onSave: () => void;
+  onSave: () => Promise<void>;
   onSelect: () => void;
 }) {
   const href = routeHref({ ...route, company: company.id });
@@ -801,13 +877,7 @@ function CompanyCard({
           {sessionLabel(company.session)}の部{" "}
           {assigned && <span className="assignment-badge">指定</span>}
         </span>
-        <Checkbox
-          checked={saved}
-          onChange={onSave}
-          aria-label={`${company.name}を${saved ? "気になるから削除" : "気になるに追加"}`}
-        >
-          気になる
-        </Checkbox>
+        <FavoriteButton company={company} saved={saved} onToggle={onSave} />
       </div>
       <div className="company-card-main">
         <h2>
@@ -845,29 +915,80 @@ function Empty({ title, children }: { title: string; children?: ReactNode }) {
     </div>
   );
 }
+function FavoriteButton({
+  company,
+  saved,
+  onToggle,
+}: {
+  company: Company;
+  saved: boolean;
+  onToggle: () => Promise<void>;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      size="small"
+      variant={saved ? "lighted" : "outlined"}
+      icon={<Icon name={saved ? "check" : "plus"} size={18} />}
+      aria-pressed={saved}
+      aria-label={`${company.name}を${saved ? "気になるから解除" : "気になるに追加"}`}
+      disabled={pending}
+      onClick={() => {
+        setPending(true);
+        void onToggle().finally(() => setPending(false));
+      }}
+    >
+      気になる
+    </Button>
+  );
+}
 function CompanyDialog({
   company,
+  error,
   saved,
   assigned,
   route,
   onSave,
   onClose,
   onMap,
+  data,
+  savedCompanyIds,
+  assignedCompanyIds,
+  onSelect,
+  onExpired,
 }: {
   company: Company;
+  error: string;
   saved: boolean;
   assigned: boolean;
   route: RouteState;
-  onSave: () => void;
+  onSave: () => Promise<void>;
   onClose: () => void;
   onMap: () => void;
+  data: Guidance;
+  savedCompanyIds: Set<string>;
+  assignedCompanyIds: Set<string>;
+  onSelect: (company: Company) => void;
+  onExpired: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
     return () => dialog?.close();
   }, []);
+  const mapHref = routeHref({
+    ...route,
+    view: "map",
+    company: "",
+    focus: company.id,
+    session: company.session,
+    q: "",
+    industries: [],
+    saved: false,
+    assigned: false,
+  });
   return (
     <dialog
       ref={ref}
@@ -884,15 +1005,9 @@ function CompanyDialog({
             {sessionLabel(company.session)}の部{" "}
             {assigned && <span className="assignment-badge">指定</span>}
           </span>
-          <IconButton
-            variant="neutral"
-            onClick={onClose}
-            aria-label="詳細を閉じる"
-          >
-            <Icon name="close" />
-          </IconButton>
         </div>
         <h2 id="company-dialog-title">{company.name}</h2>
+        {error && <Message error>{error}</Message>}
         <div className="industry-tags">
           {company.industries.map((value) => (
             <span key={value}>{value}</span>
@@ -904,32 +1019,45 @@ function CompanyDialog({
             <span>ブース</span>
             <strong>{company.booth}</strong>
           </div>
-          <TextLink
-            href={routeHref({
-              ...route,
-              view: "map",
-              company: "",
-              focus: company.id,
-              session: company.session,
-              q: "",
-              industry: "",
-              saved: false,
-              assigned: false,
-            })}
-            onClick={(event) => intercept(event, onMap)}
-            icon={<Icon name="map" />}
-          >
-            マップを確認
-          </TextLink>
+          <FavoriteButton company={company} saved={saved} onToggle={onSave} />
         </div>
-        <div className="detail-interest">
-          <Checkbox
-            checked={saved}
-            onChange={onSave}
-            aria-label={`${company.name}を${saved ? "気になるから削除" : "気になるに追加"}`}
-          >
-            気になる
-          </Checkbox>
+        <details
+          className="company-map-accordion"
+          onToggle={(event) => setMapOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <Icon name="map" />
+            会場マップ
+            <Icon name="plus" size={16} />
+          </summary>
+          {mapOpen && (
+            <div className="company-map-content">
+              <VenueMap
+                mode="embedded"
+                documents={data.documents}
+                companies={data.companies}
+                session={company.session}
+                selectedCompanyId={company.id}
+                savedCompanyIds={savedCompanyIds}
+                assignedCompanyIds={assignedCompanyIds}
+                onSelectCompany={onSelect}
+                onSessionChange={() => {}}
+                onExpired={onExpired}
+              />
+              <TextLink
+                href={mapHref}
+                icon={<Icon name="external" />}
+                onClick={(event) => intercept(event, onMap)}
+              >
+                マップページを開く
+              </TextLink>
+            </div>
+          )}
+        </details>
+        <div className="company-dialog-actions">
+          <Button variant="neutral" onClick={onClose}>
+            閉じる
+          </Button>
         </div>
       </div>
     </dialog>
@@ -1114,7 +1242,7 @@ function Plan({
   assignedIDs: Set<string>;
   rosterNumber: number | null;
   route: RouteState;
-  onSave: (company: Company) => void;
+  onSave: (company: Company) => Promise<void>;
   onSelect: (company: Company) => void;
   onConfigure: () => void;
   onFind: () => void;
@@ -1173,7 +1301,7 @@ function Plan({
       </section>
       <div className="section-heading">
         <h2>
-          気になる企業 <span>{companies.length}</span>
+          気になる <span>{companies.length}</span>
         </h2>
       </div>
       {companies.length ? (
@@ -1191,9 +1319,9 @@ function Plan({
           ))}
         </div>
       ) : (
-        <Empty title="気になる企業はありません">
+        <Empty title="まだ追加されていません">
           <Button variant="outlined" onClick={onFind}>
-            企業を探す
+            探す
           </Button>
         </Empty>
       )}

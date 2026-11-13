@@ -198,11 +198,11 @@ func TestRefreshFailuresNeverRetryUncertainOrRejectedCredentials(t *testing.T) {
 
 func TestSignedDocumentRefreshesIssuingSessionWithoutExtendingLink(t *testing.T) {
 	s, f, cookie, _ := signedDocumentFixture(t)
-	link, expiry := issueDocumentURL(t, s, cookie)
+	link, expiry := legacyDocumentURL(t, s, cookie)
 	expiringSession(t, s, f)
 	var calls atomic.Int32
 	s.client.Transport = refreshingIdentity(t, &calls)
-	requireStatus(t, request(s, "GET", link.RequestURI(), nil, ""), 200)
+	requireStatus(t, request(s, "GET", link.RequestURI(), nil, ""), 302)
 	if calls.Load() != 1 || time.Until(expiry) > documentURLLifetime {
 		t.Fatal("document refresh altered the signed link lifetime")
 	}
