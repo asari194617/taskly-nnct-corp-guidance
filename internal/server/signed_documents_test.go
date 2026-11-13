@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,9 +20,6 @@ func signedDocumentFixture(t *testing.T) (*Server, *fakeStore, *http.Cookie, str
 	s, f := testServer(t)
 	cookie := authenticated(t, s, f)
 	body := "%PDF-1.4\nSynthetic signed document\n%%EOF\n"
-	if err := os.WriteFile(filepath.Join(s.config.DataDir, "synthetic.pdf"), []byte(body), 0600); err != nil {
-		t.Fatal(err)
-	}
 	f.documents["guide"] = Document{ID: "guide", FileName: "synthetic.pdf", MIMEType: "application/pdf", Title: "Synthetic guide"}
 	return s, f, cookie, body
 }
@@ -44,7 +39,7 @@ func issueDocumentURL(t *testing.T, s *Server, cookie *http.Cookie) (*url.URL, t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Scheme+"://"+u.Host != s.config.APIOrigin || u.Path != "/documents/guide" || u.Query().Get("token") == "" {
+	if u.Scheme+"://"+u.Host != s.config.R2Endpoint || u.Path != "/"+s.config.R2Bucket+"/synthetic.pdf" || u.Query().Get("X-Amz-Signature") == "" {
 		t.Fatalf("invalid URL contract: %s", data.URL)
 	}
 	if strings.Contains(data.URL, cookie.Value) || strings.Contains(data.URL, "upstream-access") {
@@ -165,38 +160,32 @@ func TestSignedDocumentIssuanceHandlesDocumentAndSessionFailures(t *testing.T) {
 	}
 }
 
-func TestSignedDocumentSupportsDirectNavigationHeadAndRange(t *testing.T) {
-	s, _, cookie, body := signedDocumentFixture(t)
-	u, _ := issueDocumentURL(t, s, cookie)
-	w := request(s, "GET", u.RequestURI(), nil, "")
-	requireStatus(t, w, 200)
-	if w.Body.String() != body || w.Header().Get("Content-Type") != "application/pdf" {
-		t.Fatal("signed document contents changed")
+func legacyDocumentURL(t *testing.T, s *Server, cookie *http.Cookie) (*url.URL, time.Time) {
+	t.Helper()
+	_, expiry := issueDocumentURL(t, s, cookie)
+	claims := signedDocumentClaims{DocumentID: "guide", SessionHash: digest(cookie.Value), ExpiresAt: expiry.Unix()}
+	u, err := url.Parse(s.config.APIOrigin + "/documents/guide?token=" + url.QueryEscape(s.signDocumentToken(claims)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Referrer-Policy") != "no-referrer" {
-		t.Fatal("signed document leaks cache/referrer")
-	}
-	if !strings.HasPrefix(w.Header().Get("Content-Disposition"), "inline;") {
-		t.Fatal("PDF not served inline")
-	}
-	w = request(s, "HEAD", u.RequestURI(), nil, "")
-	requireStatus(t, w, 200)
-	if w.Body.Len() != 0 {
-		t.Fatal("HEAD returned document bytes")
-	}
-	r := httptest.NewRequest("GET", u.String(), nil)
-	r.Header.Set("Range", "bytes=0-4")
-	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
-	requireStatus(t, w, 206)
-	if w.Body.String() != body[:5] || w.Header().Get("Content-Range") == "" {
-		t.Fatal("PDF range request not supported")
+	return u, expiry
+}
+func TestLegacySignedDocumentsRedirectGetAndHeadToR2(t *testing.T) {
+	s, _, cookie, _ := signedDocumentFixture(t)
+	u, _ := legacyDocumentURL(t, s, cookie)
+	for _, method := range []string{"GET", "HEAD"} {
+		w := request(s, method, u.RequestURI(), nil, "")
+		requireStatus(t, w, 302)
+		target, _ := url.Parse(w.Header().Get("Location"))
+		if target.Host != strings.TrimPrefix(s.config.R2Endpoint, "https://") || target.Path != "/"+s.config.R2Bucket+"/synthetic.pdf" {
+			t.Fatal("legacy redirect changed allowed object")
+		}
 	}
 }
 
 func TestSignedDocumentSignatureIsBoundToPathAndToken(t *testing.T) {
 	s, _, cookie, _ := signedDocumentFixture(t)
-	original, _ := issueDocumentURL(t, s, cookie)
+	original, _ := legacyDocumentURL(t, s, cookie)
 	for _, change := range []struct {
 		name   string
 		mutate func(*url.URL)
@@ -244,11 +233,11 @@ func TestSignedURLLifetimeNeverOutlivesTheSession(t *testing.T) {
 	}
 }
 
-func TestSignedDocumentsStopWorkingAfterLogoutSessionExpiryOrRevocation(t *testing.T) {
+func TestLegacySignedDocumentsStopWorkingAfterLogoutSessionExpiryOrRevocation(t *testing.T) {
 	for _, mode := range []string{"logout", "missing session", "expired session", "upstream revoked", "upstream blocked"} {
 		t.Run(mode, func(t *testing.T) {
 			s, f, cookie, body := signedDocumentFixture(t)
-			u, _ := issueDocumentURL(t, s, cookie)
+			u, _ := legacyDocumentURL(t, s, cookie)
 			switch mode {
 			case "logout":
 				requireStatus(t, request(s, "POST", "/auth/logout", cookie, s.config.UIOrigin), 204)
@@ -274,11 +263,11 @@ func TestSignedDocumentsStopWorkingAfterLogoutSessionExpiryOrRevocation(t *testi
 	}
 }
 
-func TestSignedDocumentsFailClosedOnStorageIdentityAndFileErrors(t *testing.T) {
-	for _, mode := range []string{"session storage", "identity unavailable", "identity transport", "bad ciphertext", "document storage", "missing file", "symlink", "invalid filename", "unsupported mime"} {
+func TestLegacySignedDocumentsFailClosedOnStorageIdentityAndMetadataErrors(t *testing.T) {
+	for _, mode := range []string{"session storage", "identity unavailable", "identity transport", "bad ciphertext", "document storage", "invalid filename", "unsupported mime"} {
 		t.Run(mode, func(t *testing.T) {
 			s, f, cookie, _ := signedDocumentFixture(t)
-			u, _ := issueDocumentURL(t, s, cookie)
+			u, _ := legacyDocumentURL(t, s, cookie)
 			want := 503
 			switch mode {
 			case "session storage":
@@ -293,20 +282,6 @@ func TestSignedDocumentsFailClosedOnStorageIdentityAndFileErrors(t *testing.T) {
 				f.sessions[digest(cookie.Value)] = row
 			case "document storage":
 				f.errorDocument = errors.New("database unavailable")
-			case "missing file":
-				if err := os.Remove(filepath.Join(s.config.DataDir, "synthetic.pdf")); err != nil {
-					t.Fatal(err)
-				}
-				want = 404
-			case "symlink":
-				file := filepath.Join(s.config.DataDir, "synthetic.pdf")
-				if err := os.Rename(file, file+".real"); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(file+".real", file); err != nil {
-					t.Fatal(err)
-				}
-				want = 404
 			case "invalid filename":
 				d := f.documents["guide"]
 				d.FileName = "../secret.pdf"

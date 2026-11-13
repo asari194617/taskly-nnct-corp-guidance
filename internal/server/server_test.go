@@ -7,8 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +32,6 @@ func testServer(t *testing.T) (*Server, *fakeStore) {
 	t.Helper()
 	f := newFakeStore()
 	c := validConfig()
-	c.DataDir = t.TempDir()
 	s, err := New(c, f, &http.Client{Transport: roundTripFunc(healthyIdentity)})
 	if err != nil {
 		t.Fatal(err)
@@ -182,74 +180,52 @@ func TestAuthenticationFailureModes(t *testing.T) {
 		})
 	}
 }
-func TestDocumentServingAndRange(t *testing.T) {
+func TestDocumentsRedirectToPrivateR2WithoutReadingHostFiles(t *testing.T) {
 	s, f := testServer(t)
 	cookie := authenticated(t, s, f)
-	if err := os.WriteFile(filepath.Join(s.config.DataDir, "map.png"), []byte("synthetic image bytes"), 0600); err != nil {
-		t.Fatal(err)
-	}
 	f.documents["map"] = Document{ID: "map", FileName: "map.png", MIMEType: "image/png", Title: "Map"}
-	w := request(s, "GET", "/api/documents/map", cookie, "")
-	requireStatus(t, w, 200)
-	if w.Header().Get("Content-Type") != "image/png" || w.Body.String() != "synthetic image bytes" {
-		t.Fatal("document response mismatch")
+	for _, method := range []string{"GET", "HEAD"} {
+		w := request(s, method, "/api/documents/map", cookie, "")
+		requireStatus(t, w, 302)
+		target, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if target.Scheme+"://"+target.Host != s.config.R2Endpoint || target.Path != "/"+s.config.R2Bucket+"/map.png" || target.Query().Get("X-Amz-Signature") == "" {
+			t.Fatal("document did not redirect directly to private R2")
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("private redirect cacheable")
+		}
 	}
-	r := httptest.NewRequest("GET", s.config.APIOrigin+"/api/documents/map", nil)
-	r.AddCookie(cookie)
-	r.Header.Set("Range", "bytes=0-8")
-	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
-	requireStatus(t, w, 206)
-	if w.Body.String() != "synthetic" {
-		t.Fatalf("range mismatch: %q", w.Body.String())
-	}
-	requireStatus(t, request(s, "HEAD", "/api/documents/map", cookie, ""), 200)
 	if documentExtension("image/png") != ".png" || documentExtension("image/jpeg") != ".jpg" || documentExtension("application/pdf") != ".pdf" {
-		t.Fatal("unexpected document extension")
+		t.Fatal("unexpected extension")
 	}
 }
-func TestDocumentsRejectMissingUnsafeAndSymlinkFiles(t *testing.T) {
+func TestDocumentsRejectUnknownOrUnsafeObjectMetadata(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		edit   func(*testing.T, *Server, *fakeStore)
-		path   string
-		status int
+		name string
+		edit func(*Server, *fakeStore)
+		id   string
+		want int
 	}{
-		{"invalid identifier", func(*testing.T, *Server, *fakeStore) {}, "map.invalid", 404},
-		{"missing metadata", func(t *testing.T, s *Server, f *fakeStore) { delete(f.documents, "map") }, "map", 404},
-		{"metadata database failure", func(t *testing.T, s *Server, f *fakeStore) { f.errorDocument = errors.New("unavailable") }, "map", 503},
-		{"missing file", func(*testing.T, *Server, *fakeStore) {}, "map", 404},
-		{"unsafe filename", func(t *testing.T, s *Server, f *fakeStore) {
-			f.documents["map"] = Document{FileName: "../secret.pdf", MIMEType: "application/pdf"}
+		{"invalid identifier", func(*Server, *fakeStore) {}, "map.invalid", 404},
+		{"missing metadata", func(_ *Server, f *fakeStore) { delete(f.documents, "map") }, "map", 404},
+		{"metadata failure", func(_ *Server, f *fakeStore) { f.errorDocument = errors.New("offline") }, "map", 503},
+		{"unsafe key", func(_ *Server, f *fakeStore) {
+			f.documents["map"] = Document{ID: "map", FileName: "../secret.pdf", MIMEType: "application/pdf"}
 		}, "map", 404},
-		{"unsupported mime", func(t *testing.T, s *Server, f *fakeStore) {
-			f.documents["map"] = Document{FileName: "map.html", MIMEType: "text/html"}
+		{"unsupported mime", func(_ *Server, f *fakeStore) {
+			f.documents["map"] = Document{ID: "map", FileName: "map.html", MIMEType: "text/html"}
 		}, "map", 404},
-		{"empty filename", func(t *testing.T, s *Server, f *fakeStore) {
-			f.documents["map"] = Document{MIMEType: "application/pdf"}
-		}, "map", 404},
-		{"directory", func(t *testing.T, s *Server, f *fakeStore) {
-			if err := os.Mkdir(filepath.Join(s.config.DataDir, "map.png"), 0700); err != nil {
-				t.Fatal(err)
-			}
-		}, "map", 404},
-		{"symlink", func(t *testing.T, s *Server, f *fakeStore) {
-			target := filepath.Join(t.TempDir(), "private.pdf")
-			if err := os.WriteFile(target, []byte("private"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(target, filepath.Join(s.config.DataDir, "map.png")); err != nil {
-				t.Fatal(err)
-			}
-		}, "map", 404},
-		{"missing data directory", func(t *testing.T, s *Server, f *fakeStore) { s.config.DataDir = filepath.Join(t.TempDir(), "missing") }, "map", 503},
+		{"empty key", func(_ *Server, f *fakeStore) { f.documents["map"] = Document{ID: "map", MIMEType: "application/pdf"} }, "map", 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, f := testServer(t)
 			c := authenticated(t, s, f)
 			f.documents["map"] = Document{ID: "map", FileName: "map.png", MIMEType: "image/png"}
-			tc.edit(t, s, f)
-			requireStatus(t, request(s, "GET", "/api/documents/"+tc.path, c, ""), tc.status)
+			tc.edit(s, f)
+			requireStatus(t, request(s, "GET", "/api/documents/"+tc.id, c, ""), tc.want)
 		})
 	}
 }

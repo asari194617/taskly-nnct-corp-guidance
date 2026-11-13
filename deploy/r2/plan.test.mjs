@@ -21,6 +21,9 @@ test('CSP hashes bootstrap bytes and permits only trusted signed document image 
   assert.ok(!html.includes('blob:'));
   assert.throws(()=>secureHTML('<head>','http://api.example.test'));
   assert.throws(()=>secureHTML('<head>','https://api.example.test/path'));
+  const documents=secureHTML('<head>','https://api.example.test','https://private.example.test');
+  assert.ok(documents.includes("img-src 'self' https://cdn.taskly.iy0306.com https://api.example.test https://private.example.test"));
+  for(const origin of ['http://private.example.test','https://private.example.test/path','https://private.example.test/?token=secret','https://user:secret@private.example.test']) assert.throws(()=>secureHTML('<head>','https://api.example.test',origin));
 });
 test('assets precede HTML; index required; symlinks rejected',async()=> {
   const root=await mkdtemp(join(tmpdir(),'nnct-r2-test-'));

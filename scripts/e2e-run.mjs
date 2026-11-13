@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startServices } from "./e2e-services.mjs";
+import { startObjectStore, syntheticObjectStore } from "./e2e-object-store.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), ".."),
   web = resolve(root, "apps/web");
@@ -35,6 +36,11 @@ const env = {
   AUTH_ISSUER: "http://127.0.0.1:3372",
   AUTH_CLIENT_ID: "synthetic-e2e",
   DATA_DIR: privateDir,
+  DOCUMENT_STORAGE: "r2",
+  R2_ENDPOINT: "http://127.0.0.1:3373",
+  R2_BUCKET: syntheticObjectStore.bucket,
+  R2_ACCESS_KEY_ID: syntheticObjectStore.accessKey,
+  R2_SECRET_ACCESS_KEY: syntheticObjectStore.secretKey,
   ADDR: "127.0.0.1:3371",
   NEXT_PUBLIC_API_URL: "http://127.0.0.1:3371",
   E2E_COVERAGE: "1",
@@ -48,8 +54,9 @@ const run = (command, args, cwd = root) =>
       code === 0 ? ok() : fail(Error(`${command} exited ${code}`)),
     );
   });
-let api, stop;
+let api, stop, objectStore;
 try {
+  await run(process.execPath, ["--test", "scripts/e2e-object-store.test.mjs"]);
   const db = await mysql.createConnection({
     host,
     port,
@@ -191,13 +198,19 @@ try {
     documents,
     notices: ["検証用の案内です。実際の配布資料ではありません。"],
     notice_sections: [
-      { id: "preparation", title: "見学前の準備", blocks: [
-        { type: "paragraph", text: "検証用の持ち物案内です。" },
-        { type: "list", items: ["検証用の筆記具", "検証用の名札"] },
-      ] },
-      { id: "questions", title: "質問するとき", blocks: [
-        { type: "paragraph", text: "検証用の質問を整理しましょう。" },
-      ] },
+      {
+        id: "preparation",
+        title: "見学前の準備",
+        blocks: [
+          { type: "paragraph", text: "検証用の持ち物案内です。" },
+          { type: "list", items: ["検証用の筆記具", "検証用の名札"] },
+        ],
+      },
+      {
+        id: "questions",
+        title: "質問するとき",
+        blocks: [{ type: "paragraph", text: "検証用の質問を整理しましょう。" }],
+      },
     ],
   };
   const pixel = Buffer.from(
@@ -221,16 +234,16 @@ try {
   }
   const crossReference = Buffer.byteLength(pdf);
   pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  pdf += offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${crossReference}\n%%EOF\n`;
   await Promise.all([
     writeFile(resolve(privateDir, "guidance.json"), JSON.stringify(dataset)),
     writeFile(resolve(privateDir, "floor-a.png"), pixel),
     writeFile(resolve(privateDir, "floor-b.png"), pixel),
-    writeFile(
-      resolve(privateDir, "guide.pdf"),
-      pdf,
-    ),
+    writeFile(resolve(privateDir, "guide.pdf"), pdf),
   ]);
   await run("go", [
     "run",
@@ -242,6 +255,7 @@ try {
     await run("npm", ["run", "build"], web);
   await run("go", ["build", "-o", resolve(privateDir, "api"), "./cmd/api"]);
   await mkdir(resolve(web, "coverage/e2e/raw"), { recursive: true });
+  objectStore = await startObjectStore(privateDir);
   stop = await startServices(resolve(web, "out"));
   api = spawn(resolve(privateDir, "api"), [], {
     cwd: root,
@@ -263,5 +277,6 @@ try {
 } finally {
   api?.kill("SIGTERM");
   if (stop) await stop();
+  if (objectStore) await objectStore.close();
   await rm(privateDir, { recursive: true, force: true });
 }

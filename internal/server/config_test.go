@@ -7,7 +7,7 @@ import (
 )
 
 func validConfig() Config {
-	return Config{UIOrigin: "https://ui.example.test", APIOrigin: "https://api.example.test", AuthIssuer: "https://auth.example.test", ClientID: "test-client", DataDir: "/data", EncryptionKey: make([]byte, 32)}
+	return Config{UIOrigin: "https://ui.example.test", APIOrigin: "https://api.example.test", AuthIssuer: "https://auth.example.test", ClientID: "test-client", EncryptionKey: make([]byte, 32), R2Endpoint: "https://objects.example.test", R2Bucket: "synthetic-documents", R2AccessKeyID: "synthetic-access", R2SecretKey: "synthetic-secret"}
 }
 
 func TestConfigValidation(t *testing.T) {
@@ -52,11 +52,14 @@ func TestConfigFromEnv(t *testing.T) {
 	for k, v := range map[string]string{"UI_ORIGIN": "https://ui.example.test", "API_ORIGIN": "https://api.example.test", "AUTH_ISSUER": "https://auth.example.test", "SESSION_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)), "AUTH_CLIENT_ID": "", "DATA_DIR": ""} {
 		t.Setenv(k, v)
 	}
+	for key, value := range map[string]string{"DOCUMENT_STORAGE": "r2", "R2_ENDPOINT": "https://objects.example.test", "R2_BUCKET": "synthetic-documents", "R2_ACCESS_KEY_ID": "synthetic-access", "R2_SECRET_ACCESS_KEY": "synthetic-secret"} {
+		t.Setenv(key, value)
+	}
 	c, err := ConfigFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.SecureCookies || c.ClientID != "nnct-corp-guidance-2026" || c.DataDir != "/data" {
+	if !c.SecureCookies || c.ClientID != "nnct-corp-guidance-2026" {
 		t.Fatalf("unexpected defaults: %+v", c)
 	}
 	t.Setenv("SESSION_ENCRYPTION_KEY", "invalid base64")
@@ -75,7 +78,7 @@ func TestConfigFromEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.SecureCookies || c.ClientID != "custom" || c.DataDir != "/private" {
+	if c.SecureCookies || c.ClientID != "custom" {
 		t.Fatalf("overrides ignored: %+v", c)
 	}
 }

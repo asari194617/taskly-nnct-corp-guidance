@@ -229,8 +229,7 @@ describe("interactive private venue map", () => {
     await waitFor(() => expect(options.onExpired).toHaveBeenCalledOnce());
   });
 
-  it("zooms a newly selected small booth to a usable size and preserves later manual zoom", async () => {
-    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
+  it("never changes zoom when selecting a booth, opening details or changing floors", async () => {
     const options = props();
     const precise = [
       {
@@ -242,6 +241,7 @@ describe("interactive private venue map", () => {
           { booth: 2, x: 0.4, y: 0.2, width: 0.02, height: 0.02 },
         ],
       },
+      documents[1],
     ];
     const view = render(
       <VenueMap {...options} documents={precise} selectedCompanyId="AM-1" />,
@@ -252,94 +252,58 @@ describe("interactive private venue map", () => {
     const reset = screen.getByRole("button", {
       name: "拡大率を100パーセントに戻す",
     });
-    await waitFor(() => expect(reset).toHaveTextContent("700%"));
-    await userEvent.click(screen.getByRole("button", { name: "マップを縮小" }));
-    expect(reset).toHaveTextContent("675%");
-    view.rerender(
-      <VenueMap
-        {...options}
-        documents={precise}
-        selectedCompanyId="AM-1"
-        savedCompanyIds={new Set(["AM-1"])}
-      />,
-    );
-    expect(reset).toHaveTextContent("675%");
-    await userEvent.click(reset);
     expect(reset).toHaveTextContent("100%");
+    await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
+    expect(reset).toHaveTextContent("125%");
     view.rerender(
       <VenueMap {...options} documents={precise} selectedCompanyId="AM-2" />,
     );
-    await waitFor(() => expect(reset).toHaveTextContent("700%"));
-  });
-
-  it("uses image loading dimensions when older map metadata has no intrinsic size", async () => {
-    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
-    const precise = [
-      {
-        ...documents[0],
-        booths: [{ booth: 1, x: 0.1, y: 0.2, width: 0.02, height: 0.02 }],
-      },
-    ];
-    render(
-      <VenueMap {...props()} documents={precise} selectedCompanyId="AM-1" />,
+    expect(reset).toHaveTextContent("125%");
+    await userEvent.click(
+      screen.getByRole("button", { name: "検証2階マップ" }),
     );
-    const image = await screen.findByRole("img", { name: "検証1階マップ" });
-    Object.defineProperties(image, {
-      naturalWidth: { value: 1000 },
-      naturalHeight: { value: 1000 },
-    });
-    fireEvent.load(image);
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-      ).toHaveTextContent("700%"),
+    await screen.findByRole("img", { name: "検証2階マップ" });
+    expect(reset).toHaveTextContent("125%");
+    view.rerender(
+      <VenueMap {...options} documents={precise} selectedCompanyId="AM-1" />,
     );
-  });
-
-  it("navigates a PDF tab to its signed URL without creating a blob", async () => {
-    const tab = {
-      opener: {},
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
-    render(<VenueMap {...props()} />);
     await screen.findByRole("img", { name: "検証1階マップ" });
-    await userEvent.click(screen.getByRole("button", { name: "検証用PDF" }));
-    await waitFor(() =>
-      expect(tab.location.href).toBe(
-        "https://api.example.test/documents/guide?token=synthetic",
-      ),
-    );
-    expect(tab.opener).toBeNull();
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
-    expect(documentURL).toHaveBeenLastCalledWith("guide");
+    expect(reset).toHaveTextContent("125%");
   });
 
-  it("closes failed PDF tabs, reports popup blocking and propagates authentication expiry", async () => {
+  it("provides a fullscreen canvas or compact embedded map without duplicate page controls", async () => {
     const options = props();
-    const tab = {
-      opener: {},
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    const open = vi
-      .spyOn(window, "open")
-      .mockReturnValue(tab as unknown as Window);
-    render(<VenueMap {...options} />);
-    await screen.findByRole("img", { name: "検証1階マップ" });
-    vi.mocked(documentURL).mockRejectedValueOnce(new Error("PDFを開けません"));
-    await userEvent.click(screen.getByRole("button", { name: "検証用PDF" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "PDFを開けません",
+    const view = render(
+      <VenueMap
+        {...options}
+        navigation={<a href="/">一覧</a>}
+        topRight={<button>アカウント</button>}
+      />,
     );
-    expect(tab.close).toHaveBeenCalledOnce();
-    vi.mocked(documentURL).mockRejectedValueOnce(new APIError(401, "expired"));
-    await userEvent.click(screen.getByRole("button", { name: "検証用PDF" }));
-    await waitFor(() => expect(options.onExpired).toHaveBeenCalledOnce());
-    open.mockReturnValue(null);
-    await userEvent.click(screen.getByRole("button", { name: "検証用PDF" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("ポップアップを許可");
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    expect(screen.getByRole("region", { name: "会場マップ" })).toHaveAttribute(
+      "data-mode",
+      "fullscreen",
+    );
+    expect(document.body).toHaveStyle({ overflow: "hidden" });
+    expect(screen.getByRole("link", { name: "一覧" })).toHaveAttribute(
+      "href",
+      "/",
+    );
+    view.unmount();
+    expect(document.body.style.overflow).toBe("");
+    render(<VenueMap {...options} mode="embedded" selectedCompanyId="AM-1" />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    expect(
+      screen.getByRole("region", { name: "企業のブース位置" }),
+    ).toHaveAttribute("data-mode", "embedded");
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "絞り込み" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "マップを拡大" })).toBeEnabled();
+    expect(document.body.style.overflow).toBe("");
   });
 
   it("ignores an aborted map request and handles missing floor metadata", async () => {
@@ -367,7 +331,7 @@ describe("interactive private venue map", () => {
       screen.queryByRole("heading", { name: "配布資料" }),
     ).not.toBeInTheDocument();
   });
-  it("keeps filters compact, dims excluded booths, and exposes an accessible matching list", async () => {
+  it("combines selected industries with OR and other conditions with AND", async () => {
     const options = props();
     render(
       <VenueMap
@@ -384,44 +348,26 @@ describe("interactive private venue map", () => {
     const toggle = screen.getByRole("button", { name: "絞り込み" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(
-      screen.queryByRole("searchbox", { name: "マップの企業名" }),
+      screen.queryByRole("group", { name: "業種" }),
     ).not.toBeInTheDocument();
     await userEvent.click(toggle);
-    await userEvent.type(
-      screen.getByRole("searchbox", { name: "マップの企業名" }),
-      "あおば",
-    );
+    await userEvent.click(screen.getByRole("checkbox", { name: "製造" }));
     expect(
       screen.getByRole("button", { name: "午前 ブース 1 架空あおば" }),
     ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
-    ).toHaveAttribute("data-match", "false");
+    ).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "情報" }));
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
-    ).toBeDisabled();
-    await userEvent.click(screen.getByText("表示中の企業（1社）"));
-    await userEvent.click(
-      screen.getByRole("button", { name: "企業詳細 架空あおば" }),
-    );
-    expect(options.onSelectCompany).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "AM-1" }),
-    );
-    await userEvent.click(screen.getByRole("button", { name: "解除" }));
-    const industrySelect = screen.getByRole("combobox", {
-      name: "マップの業種",
-    });
-    industrySelect.focus();
-    await userEvent.selectOptions(industrySelect, "情報");
-    expect(industrySelect).toHaveFocus();
-    expect(
-      industrySelect.closest("label")?.querySelector(".spui-DropDown-visual"),
-    ).toHaveTextContent("情報");
+    ).toBeEnabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "製造" }));
     expect(
       screen.getByRole("button", { name: "午前 ブース 1 架空あおば" }),
     ).toBeDisabled();
     await userEvent.click(
-      screen.getByRole("checkbox", { name: "気になる企業のみ" }),
+      screen.getByRole("checkbox", { name: "気になるのみ" }),
     );
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
@@ -430,16 +376,32 @@ describe("interactive private venue map", () => {
       screen.getByRole("checkbox", { name: "指定企業のみ" }),
     );
     expect(
+      screen.getByRole("button", { name: "表示中の一覧（0社）" }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "表示中の一覧（0社）" }),
+    );
+    expect(
       screen.getByText("条件に合う企業がありません。"),
     ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "解除" }));
-    expect(screen.getByText("表示中の企業（2社）")).toBeInTheDocument();
+    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "条件を解除" }));
     expect(
-      screen
-        .getByRole("combobox", { name: "マップの業種" })
-        .closest("label")
-        ?.querySelector(".spui-DropDown-visual"),
-    ).toHaveTextContent("すべての業種");
+      screen.getByRole("button", { name: "表示中の一覧（2社）" }),
+    ).toBeInTheDocument();
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "マップの企業名" }),
+      "あおば",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "表示中の一覧（1社）" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "企業詳細 架空あおば" }),
+    );
+    expect(options.onSelectCompany).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "AM-1" }),
+    );
   });
 
   it("reports controlled filters to the URL owner without overriding its current values", async () => {
@@ -449,16 +411,14 @@ describe("interactive private venue map", () => {
       <VenueMap
         {...options}
         search="あおば"
-        industry=""
+        industries={[]}
         onlySaved={false}
         onlyAssigned={false}
         onFiltersChange={change}
       />,
     );
     await screen.findByRole("img", { name: "検証1階マップ" });
-    await userEvent.click(
-      screen.getByRole("button", { name: "絞り込み（1）" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "絞り込み" }));
     fireEvent.change(
       screen.getByRole("searchbox", { name: "マップの企業名" }),
       { target: { value: "いろは" } },
@@ -471,7 +431,7 @@ describe("interactive private venue map", () => {
       <VenueMap
         {...options}
         search="いろは"
-        industry=""
+        industries={[]}
         onlySaved={false}
         onlyAssigned={false}
         onFiltersChange={change}
@@ -480,6 +440,148 @@ describe("interactive private venue map", () => {
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
     ).toBeEnabled();
+  });
+
+  it("fits and centers the drawing while retaining pan room at 100 percent", async () => {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(480);
+    render(
+      <VenueMap
+        {...props()}
+        documents={[{ ...documents[0], image_width: 1000, image_height: 1000 }]}
+      />,
+    );
+    const image = await screen.findByRole("img", { name: "検証1階マップ" });
+    const map = screen.getByRole("region", { name: "操作できる会場マップ" });
+    expect(image.parentElement?.parentElement).toHaveStyle({
+      width: "320px",
+      padding: "240px 160px",
+    });
+    expect(map.scrollLeft).toBe(160);
+    expect(map.scrollTop).toBe(160);
+    fireEvent(
+      map,
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: -Math.log(2) / 0.005,
+        ctrlKey: true,
+        clientX: 80,
+        clientY: 100,
+      }),
+    );
+    expect(map.scrollLeft).toBe(240);
+    expect(map.scrollTop).toBe(180);
+    expect(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    ).toHaveTextContent("200%");
+    fireEvent.keyDown(map, { key: "0" });
+    expect(map.scrollLeft).toBe(160);
+    expect(map.scrollTop).toBe(160);
+    expect(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    ).toHaveTextContent("100%");
+    await userEvent.click(screen.getByRole("button", { name: "マップを縮小" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    );
+    expect(map.scrollLeft).toBe(160);
+    expect(map.scrollTop).toBe(160);
+  });
+
+  it("offers one booth tab stop and arrow navigation without trapping users before controls", async () => {
+    render(<VenueMap {...props()} />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const first = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    const second = screen.getByRole("button", {
+      name: "午前 ブース 2 架空いろは",
+    });
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowLeft" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "End" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "Home" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "Escape" });
+    expect(first).toHaveFocus();
+    expect(
+      screen
+        .getByRole("searchbox", { name: "マップの企業名" })
+        .compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("only pans a selected booth when fully offscreen and never zooms during selection", async () => {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        if (this.classList.contains("venue-map-viewport"))
+          return {
+            x: 0,
+            y: 0,
+            left: 0,
+            top: 0,
+            right: 320,
+            bottom: 300,
+            width: 320,
+            height: 300,
+            toJSON: () => ({}),
+          };
+        if (this.getAttribute("data-booth") === "1")
+          return {
+            x: 50,
+            y: 50,
+            left: 50,
+            top: 50,
+            right: 70,
+            bottom: 70,
+            width: 20,
+            height: 20,
+            toJSON: () => ({}),
+          };
+        return {
+          x: 400,
+          y: 400,
+          left: 400,
+          top: 400,
+          right: 420,
+          bottom: 420,
+          width: 20,
+          height: 20,
+          toJSON: () => ({}),
+        };
+      },
+    );
+    const options = props();
+    const view = render(<VenueMap {...options} />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const area = screen.getByRole("region", { name: "操作できる会場マップ" });
+    area.scrollLeft = 100;
+    area.scrollTop = 100;
+    view.rerender(<VenueMap {...options} selectedCompanyId="AM-1" />);
+    expect(area.scrollLeft).toBe(100);
+    expect(area.scrollTop).toBe(100);
+    view.rerender(<VenueMap {...options} selectedCompanyId="AM-2" />);
+    expect(area.scrollLeft).toBe(216);
+    expect(area.scrollTop).toBe(236);
+    expect(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    ).toHaveTextContent("100%");
+    view.rerender(
+      <VenueMap {...options} selectedCompanyId="AM-2" mode="embedded" />,
+    );
+    const image = screen.getByRole("img", { name: "検証1階マップ" });
+    fireEvent.load(image);
+    expect(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    ).toHaveTextContent("100%");
   });
 
   it("pans by pointer and keyboard, suppresses drag clicks, and permits the next intentional tap", async () => {

@@ -17,22 +17,28 @@ export async function files(root, directory=root) {
   }
   return output.sort((a,b)=>Number(a.endsWith('.html'))-Number(b.endsWith('.html')) || a.localeCompare(b));
 }
-export function secureHTML(html, apiOrigin) {
+export function secureHTML(html, apiOrigin, documentOrigin) {
   const api=new URL(apiOrigin);
   if(api.protocol!=='https:' || api.pathname!=='/' || api.search || api.hash) throw new Error('HTTPS API origin required');
+  let documentSource='';
+  if(documentOrigin) {
+    const documentURL=new URL(documentOrigin);
+    if(documentURL.protocol!=='https:' || documentURL.pathname!=='/' || documentURL.search || documentURL.hash || documentURL.username || documentURL.password) throw new Error('HTTPS document origin required');
+    documentSource=` ${documentURL.origin}`;
+  }
   const hashes=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter(([,attrs,body])=>! /\bsrc\s*=/i.test(attrs) && body.length)
     .map(([, ,body])=>`'sha256-${createHash('sha256').update(body).digest('base64')}'`);
-  const policy=`default-src 'none'; script-src 'self' ${[...new Set(hashes)].join(' ')}; style-src 'self' 'unsafe-inline'; connect-src ${api.origin}; img-src 'self' https://cdn.taskly.iy0306.com ${api.origin}; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self' ${api.origin}`;
+  const policy=`default-src 'none'; script-src 'self' ${[...new Set(hashes)].join(' ')}; style-src 'self' 'unsafe-inline'; connect-src ${api.origin}; img-src 'self' https://cdn.taskly.iy0306.com ${api.origin}${documentSource}; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self' ${api.origin}`;
   return html.replace(/<head>/i,`<head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer">`);
 }
-export async function prepare(root,apiOrigin) {
+export async function prepare(root,apiOrigin,documentOrigin) {
   const keys=await files(root);
   if(!keys.includes('index.html')) throw new Error('Static index.html missing');
   for(const key of keys.filter(k=>k.endsWith('.html'))) {
     const path=join(root,key);
     const html=await readFile(path,'utf8');
-    if(!html.includes('http-equiv="Content-Security-Policy"')) await writeFile(path,secureHTML(html,apiOrigin));
+    if(!html.includes('http-equiv="Content-Security-Policy"')) await writeFile(path,secureHTML(html,apiOrigin,documentOrigin));
   }
   return keys;
 }
