@@ -2236,3 +2236,99 @@ test("Search controls stay balanced and company links change only text across sy
     );
   }
 });
+
+test.describe("Mobile navigation pointer feedback", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test("Footer links stay unpainted during hover, mouse press and touch while retaining selection and keyboard focus", async ({
+    page,
+  }) => {
+    await login(page, "mobile");
+    const footer = page.getByRole("navigation", {
+      name: "モバイルナビゲーション",
+    });
+    const list = footer.getByRole("link", { name: "一覧", exact: true });
+    const search = footer.getByRole("link", { name: "探す", exact: true });
+    const client = await page.context().newCDPSession(page);
+    async function expectUnpainted(link: Locator) {
+      const frames = await link.evaluate(async (node) => {
+        const samples = [];
+        for (let frame = 0; frame < 8; frame++) {
+          const style = getComputedStyle(node);
+          samples.push({
+            background: style.backgroundColor,
+            tapHighlight: style.getPropertyValue("-webkit-tap-highlight-color"),
+            transition: style.transitionDuration,
+          });
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+        }
+        return samples;
+      });
+      for (const sample of frames) {
+        expect(sample.background).toBe("rgba(0, 0, 0, 0)");
+        expect(sample.tapHighlight).toBe("rgba(0, 0, 0, 0)");
+        expect(sample.transition).toBe("0s");
+      }
+    }
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await list.click();
+      await expect(list).toHaveAttribute("aria-current", "page");
+      await expect(list.locator("svg")).toHaveAttribute("data-filled", "true");
+      await page.mouse.move(0, 0);
+      const beforeHover = await search.evaluate(
+        (node) => getComputedStyle(node).color,
+      );
+      await search.hover();
+      expect(
+        await search.evaluate((node) => getComputedStyle(node).color),
+      ).not.toBe(beforeHover);
+      await expectUnpainted(search);
+      await page.mouse.down();
+      expect(await search.evaluate((node) => node.matches(":active"))).toBe(
+        true,
+      );
+      await expectUnpainted(search);
+      await page.mouse.up();
+      await list.click();
+      const bounds = (await search.boundingBox())!;
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [
+          { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
+        ],
+      });
+      await expectUnpainted(search);
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+      });
+      await expect(search).toHaveAttribute("aria-current", "page");
+      await expect(search.locator("svg")).toHaveAttribute(
+        "data-filled",
+        "true",
+      );
+      await expectUnpainted(search);
+      await search.focus();
+      await page.keyboard.press("Tab");
+      const next = footer.getByRole("link", { name: "予定", exact: true });
+      await expect(next).toBeFocused();
+      expect(
+        await next.evaluate((node) => node.matches(":focus-visible")),
+      ).toBe(true);
+      expect(
+        await next.evaluate((node) => getComputedStyle(node).outlineStyle),
+      ).toBe("solid");
+      expect(
+        await next.evaluate((node) => getComputedStyle(node).outlineWidth),
+      ).toBe("2px");
+    }
+    await client.detach();
+  });
+});

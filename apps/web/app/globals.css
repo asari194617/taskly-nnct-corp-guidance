@@ -1184,3 +1184,16 @@ h2 {
   padding-left: 16px;
   padding-right: 16px;
 }
+
+@media (max-width: 1023px) {
+  /* Spindle's link tap token otherwise paints a white touch highlight. */
+  .mobile-navigation .spui-TextLink {
+    --TextLink-tapHighlightColor: transparent;
+    background-color: transparent;
+    transition: none;
+  }
+  .mobile-navigation .spui-TextLink:hover,
+  .mobile-navigation .spui-TextLink:active {
+    background-color: transparent;
+  }
+}
