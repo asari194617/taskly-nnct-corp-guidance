@@ -423,6 +423,11 @@ test("Search filters and saved companies survive reload through real MySQL", asy
   await expect
     .poll(() => new URL(page.url()).searchParams.get("q"))
     .toBe("あおば");
+  const savedResponse = page.waitForResponse(
+    (response) =>
+      response.url() === `${API}/api/bookmarks/AM-1` &&
+      response.request().method() === "PUT",
+  );
   await page
     .getByRole("button", {
       name: "架空あおばソフトを気になるに追加",
@@ -435,6 +440,13 @@ test("Search filters and saved companies survive reload through real MySQL", asy
       exact: true,
     }),
   ).toHaveAttribute("aria-pressed", "true");
+  expect((await savedResponse).status()).toBe(204);
+  await expect(
+    page.getByRole("button", {
+      name: "架空あおばソフトを気になるから解除",
+      exact: true,
+    }),
+  ).toBeEnabled();
   await page.reload();
   await assertCompanyCount(page, 1);
   await expect(page.getByRole("searchbox")).toHaveValue("あおば");
