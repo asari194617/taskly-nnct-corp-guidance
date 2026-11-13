@@ -107,7 +107,7 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--spacing-relative-spacing-lv8);
+  gap: var(--spacing-relative-spacing-lv7);
   padding: 8px var(--spacing-relative-spacing-lv12);
   background: var(--color-surface-primary);
   border-bottom: 1px solid var(--color-border-low-emphasis);
@@ -145,7 +145,7 @@ h2 {
 .brand {
   display: flex;
   align-items: center;
-  gap: var(--spacing-relative-spacing-lv6);
+  gap: var(--spacing-relative-spacing-lv2);
   text-decoration: none;
   color: var(--color-text-high-emphasis);
   font-size: 1rem;
@@ -851,7 +851,6 @@ h2 {
   .topbar {
     padding-right: var(--spacing-relative-spacing-lv8);
     padding-left: var(--spacing-relative-spacing-lv8);
-    gap: var(--spacing-relative-spacing-lv6);
   }
   .desktop-navigation ul {
     gap: var(--spacing-relative-spacing-lv6);
@@ -934,7 +933,6 @@ h2 {
     gap: var(--spacing-relative-spacing-lv4);
   }
   .brand {
-    gap: var(--spacing-relative-spacing-lv4);
     font-size: 0.8125rem;
   }
   .brand-logo {
@@ -1232,4 +1230,17 @@ h2 {
   min-width: 0;
   padding-left: 16px;
   padding-right: 16px;
+}
+
+@media (max-width: 1023px) {
+  /* Spindle's link tap token otherwise paints a white touch highlight. */
+  .mobile-navigation .spui-TextLink {
+    --TextLink-tapHighlightColor: transparent;
+    background-color: transparent;
+    transition: none;
+  }
+  .mobile-navigation .spui-TextLink:hover,
+  .mobile-navigation .spui-TextLink:active {
+    background-color: transparent;
+  }
 }
