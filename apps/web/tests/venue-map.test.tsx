@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -156,7 +157,14 @@ describe("interactive private venue map", () => {
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
     ).toHaveAttribute("data-saved", "true");
-    expect(screen.getByRole("status")).toHaveTextContent("ブース 1");
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    await userEvent.hover(selected);
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("ブース 1");
+    await userEvent.unhover(selected);
     await userEvent.click(screen.getByRole("radio", { name: "午後の部" }));
     expect(options.onSessionChange).toHaveBeenCalledWith("PM");
     view.rerender(
@@ -221,7 +229,10 @@ describe("interactive private venue map", () => {
     expect(options.onSelectCompany).toHaveBeenCalledWith(companies[1]);
     view.rerender(<VenueMap {...options} selectedCompanyId="AM-1" />);
     expect(map).not.toHaveAttribute("data-detail-open");
-    expect(screen.getByRole("status")).toHaveTextContent("ブース 1");
+    await userEvent.hover(selected);
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("ブース 1");
     expect(zoom).toHaveAccessibleDescription("現在の倍率 125パーセント");
   });
 
@@ -242,7 +253,12 @@ describe("interactive private venue map", () => {
     expect(
       screen.queryByRole("region", { name: "表示しない情報" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("ブース 1");
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "午前 ブース 1 架空あおば" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it.each(["right", "bottom"] as const)(
@@ -673,6 +689,185 @@ describe("interactive private venue map", () => {
       screen.queryByRole("heading", { name: "配布資料" }),
     ).not.toBeInTheDocument();
   });
+  it("describes active filter conditions separately from whether the icon panel is open", async () => {
+    render(
+      <VenueMap
+        {...props()}
+        companies={companies.map((company) => ({
+          ...company,
+          industries: ["検証業種"],
+        }))}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const toggle = screen.getByRole("button", { name: "絞り込み" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveAccessibleDescription("指定条件0件");
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(screen.getByRole("button", { name: "検証業種" }));
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "気になるのみ" }),
+    );
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveAccessibleDescription("指定条件2件");
+    await userEvent.click(
+      within(
+        screen.getByRole("region", { name: "マップの絞り込み" }),
+      ).getByRole("button", { name: "閉じる" }),
+    );
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "条件を解除" }));
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveAccessibleDescription("指定条件0件");
+  });
+
+  it("previews the currently hovered company without changing selection, zoom or routing", async () => {
+    const options = props();
+    const route = window.location.href;
+    const view = render(<VenueMap {...options} />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
+    const first = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    const second = screen.getByRole("button", {
+      name: "午前 ブース 2 架空いろは",
+    });
+    await userEvent.hover(first);
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("架空あおば");
+    await userEvent.hover(second);
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("架空いろは");
+    expect(options.onSelectCompany).not.toHaveBeenCalled();
+    expect(first).toHaveAttribute("aria-pressed", "false");
+    expect(second).toHaveAttribute("aria-pressed", "false");
+    expect(window.location.href).toBe(route);
+    expect(
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 125パーセント");
+    await userEvent.unhover(second);
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+
+    view.rerender(
+      <VenueMap
+        {...options}
+        selectedCompanyId="AM-1"
+        detailPanelOpen
+        detailPanel={<section aria-label="選択した架空あおばの情報" />}
+      />,
+    );
+    await userEvent.hover(second);
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("架空いろは");
+    expect(
+      screen.getByRole("region", { name: "選択した架空あおばの情報" }),
+    ).toBeInTheDocument();
+    expect(first).toHaveAttribute("aria-pressed", "true");
+    expect(second).toHaveAttribute("aria-pressed", "false");
+    expect(options.onSelectCompany).not.toHaveBeenCalled();
+    await userEvent.unhover(second);
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers focus previews to keyboard users and clears them for touch or a changed session", async () => {
+    class PreviewPointerEvent extends MouseEvent {
+      pointerType: string;
+      constructor(
+        type: string,
+        options: MouseEventInit & { pointerType?: string } = {},
+      ) {
+        super(type, options);
+        this.pointerType = options.pointerType ?? "mouse";
+      }
+    }
+    vi.stubGlobal("PointerEvent", PreviewPointerEvent);
+    const options = props();
+    const view = render(<VenueMap {...options} />);
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const first = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    // JSDOM does not track keyboard/pointer input modality for :focus-visible.
+    // Model keyboard-visible focus here; browser E2E checks the real selector.
+    const matches = first.matches.bind(first);
+    vi.spyOn(first, "matches").mockImplementation(
+      (selector) => selector === ":focus-visible" || matches(selector),
+    );
+    act(() => first.focus());
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("架空あおば");
+    act(() => first.blur());
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    fireEvent.pointerOver(first, { pointerType: "touch" });
+    fireEvent.pointerDown(first, { pointerType: "touch" });
+    fireEvent.pointerUp(first, { pointerType: "touch" });
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    fireEvent.pointerOver(first, { pointerType: "mouse" });
+    expect(
+      screen.getByRole("status", { name: "ポイント中の企業" }),
+    ).toHaveTextContent("架空あおば");
+    view.rerender(<VenueMap {...options} session="PM" />);
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    view.rerender(<VenueMap {...options} session="AM" />);
+    expect(
+      screen.queryByRole("status", { name: "ポイント中の企業" }),
+    ).not.toBeInTheDocument();
+    expect(options.onSelectCompany).not.toHaveBeenCalled();
+  });
+
+  it("explains selected, assigned and favorite booth states through an accessible legend", async () => {
+    render(
+      <VenueMap
+        {...props()}
+        selectedCompanyId="AM-1"
+        assignedCompanyIds={new Set(["AM-1"])}
+        savedCompanyIds={new Set(["AM-1"])}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const toggle = screen.getByRole("button", { name: "凡例" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("list", { name: "マップの凡例" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(toggle);
+    const legend = screen.getByRole("list", { name: "マップの凡例" });
+    expect(
+      within(legend)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["選択中", "指定企業", "気になる"]);
+    const selected = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(selected).toHaveAccessibleDescription("指定企業、気になる");
+    await userEvent.click(toggle);
+    expect(
+      screen.queryByRole("list", { name: "マップの凡例" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("combines selected industries with OR and other conditions with AND", async () => {
     const options = props();
     render(
