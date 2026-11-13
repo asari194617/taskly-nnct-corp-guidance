@@ -3,9 +3,8 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:
@@ -15,9 +14,8 @@ updates:
   - package-ecosystem: npm
     directory: /apps/web
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:
@@ -27,9 +25,8 @@ updates:
   - package-ecosystem: npm
     directory: /deploy/r2
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:
@@ -39,9 +36,8 @@ updates:
   - package-ecosystem: pip
     directory: /scripts
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:
@@ -51,9 +47,8 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:
@@ -63,9 +58,8 @@ updates:
   - package-ecosystem: docker-compose
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:
@@ -75,9 +69,8 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
+      interval: cron
+      cronjob: '0 9 * * *'
       timezone: Asia/Tokyo
     groups:
       minor-and-patch:

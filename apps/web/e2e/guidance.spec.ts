@@ -2450,7 +2450,13 @@ for (const width of [320, 1440]) {
         await expect(booth).toBeFocused();
       }
     }
-    await nav(page, "一覧").click();
+    await page
+      .getByRole("navigation", {
+        name: width < 1024 ? "モバイルナビゲーション" : "メインナビゲーション",
+        exact: true,
+      })
+      .getByRole("link", { name: "一覧", exact: true })
+      .click();
     await page.getByRole("link", { name: shortName, exact: true }).click();
     const directoryDialog = page.getByRole("dialog", {
       name: shortName,
