@@ -108,6 +108,30 @@ async function industries(page: Page) {
   return group;
 }
 
+async function renderedMapPixels(page: Page, image: Locator) {
+  const screenshot = await image.screenshot();
+  return page.evaluate(async (bytes) => {
+    const bitmap = await createImageBitmap(
+      new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(bitmap, 0, 0);
+    const at = (x: number, y: number) =>
+      Array.from(
+        context.getImageData(
+          Math.floor(x * bitmap.width),
+          Math.floor(y * bitmap.height),
+          1,
+          1,
+        ).data,
+      ).slice(0, 3);
+    return { paper: at(0.85, 0.75), numeral: at(0.65, 0.2) };
+  }, Array.from(screenshot));
+}
+
 async function expectCenteredIcon(icon: Locator, input: Locator) {
   await expect(icon).toBeVisible();
   const iconBounds = (await icon.boundingBox())!;
@@ -506,8 +530,26 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   await expect(first).toHaveAttribute("data-selected", "true");
   await expect(zoom).toHaveAccessibleDescription("現在の倍率 100パーセント");
   await expect(first).toHaveAttribute("data-assigned", "true");
+  const image = full.getByRole("img", { name: "検証1階マップ", exact: true });
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
+    await page.mouse.move(0, 0);
+    await expect(image).toBeVisible();
+    const pixels = await renderedMapPixels(page, image);
+    for (const channel of pixels.paper) {
+      if (colorScheme === "dark") expect(channel).toBeLessThan(60);
+      else expect(channel).toBeGreaterThan(245);
+    }
+    for (const channel of pixels.numeral) {
+      if (colorScheme === "dark") expect(channel).toBeGreaterThan(180);
+      else expect(channel).toBeLessThan(20);
+    }
+    const viewportBackground = await viewport.evaluate(
+      (node) => getComputedStyle(node).backgroundColor,
+    );
+    if (colorScheme === "dark")
+      expect(viewportBackground).not.toBe("rgb(255, 255, 255)");
+    else expect(viewportBackground).toBe("rgb(255, 255, 255)");
     await first.hover();
     const selectedStyle = await first.evaluate((node) => {
       const style = getComputedStyle(node);
@@ -526,6 +568,9 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
     expect(
       await second.evaluate((node) => getComputedStyle(node).backgroundColor),
     ).toBe("rgba(0, 0, 0, 0)");
+    expect((await renderedMapPixels(page, image)).numeral).toEqual(
+      pixels.numeral,
+    );
   }
   await page.emulateMedia({ colorScheme: "light" });
   const preview = full.getByRole("status", {
@@ -543,7 +588,6 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   await expect(zoom).toHaveAccessibleDescription("現在の倍率 100パーセント");
   await zoom.hover();
   await expect(preview).toHaveCount(0);
-  const image = full.getByRole("img", { name: "検証1階マップ", exact: true });
   expect(await image.evaluate((node) => getComputedStyle(node).opacity)).toBe(
     "1",
   );
@@ -859,6 +903,24 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   );
   await page.getByLabel("マップの企業名", { exact: true }).fill("いろは");
   await expect(first).toHaveAttribute("data-match", "false");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const channels = await first.evaluate((node) => {
+      // Canvas normalizes rgb(), color(srgb ...), and color-mix() into bytes.
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext("2d")!;
+      context.fillStyle = getComputedStyle(node).backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data);
+    });
+    expect(channels[3] / 255).toBeCloseTo(0.8, 1);
+    for (const channel of channels.slice(0, 3)) {
+      if (colorScheme === "dark") expect(channel).toBeLessThan(60);
+      else expect(channel).toBeGreaterThan(245);
+    }
+  }
+  await page.emulateMedia({ colorScheme: "light" });
   await second.click();
   await expect(
     page.getByRole("region", { name: "架空いろは機械", exact: true }),
@@ -2000,9 +2062,7 @@ for (const width of [320, 390, 1024, 1440]) {
       });
       // Spindle's native input is visually hidden beneath its visible outline.
       // Click the associated label, as a pointer user does, without forcing a hidden-input click.
-      const savedOnlyLabel = filters
-        .locator("label")
-        .filter({ has: savedOnly });
+      const savedOnlyLabel = savedOnly.locator("xpath=ancestor::label");
       await savedOnlyLabel.click();
       await expect(savedOnly).toBeChecked();
       await expect(filter).toHaveAttribute("aria-pressed", "true");

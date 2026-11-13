@@ -508,3 +508,29 @@
     );
   }
 }
+
+/* Transform only the displayed drawing. Downloaded source documents and the
+   blue/green/gray booth overlays retain their original colors. */
+@media (prefers-color-scheme: dark) {
+  .venue-map,
+  .venue-map-viewport,
+  .venue-map-canvas {
+    background: var(--color-background);
+  }
+  .venue-map-viewport {
+    color: var(--color-text-high-emphasis);
+  }
+  .venue-map-canvas > img {
+    filter: invert(0.92) hue-rotate(180deg);
+  }
+  .venue-map-booth[data-match="false"]:not([data-selected="true"]) {
+    background: color-mix(in srgb, var(--color-background) 80%, transparent);
+  }
+  .venue-map-loading,
+  .venue-map-empty {
+    color: var(--color-text-medium-emphasis);
+  }
+  .venue-map-legend li > span {
+    background: var(--color-background);
+  }
+}
