@@ -320,6 +320,11 @@
 .venue-map[data-mode="embedded"] .venue-map-bottom-right > .venue-map-zoom {
   inset: auto;
 }
+@media (max-width: 639px), (max-height: 700px) {
+  .venue-map[data-mode="fullscreen"] .venue-map-selection {
+    display: none;
+  }
+}
 /* Keep controls outside the nonmodal company pane without shrinking the map. */
 @media (min-width: 1024px) {
   .venue-map[data-mode="fullscreen"][data-detail-open="true"]

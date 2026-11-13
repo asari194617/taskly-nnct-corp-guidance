@@ -460,84 +460,85 @@ export default function VenueMap({
     const element = viewport.current,
       target = highlighted.current;
     if (!url || !element || !target || !element.clientWidth) return;
-    const panel = panelOpen
-      ? element
-          .closest(".venue-map")
-          ?.querySelector<HTMLElement>(".map-company-panel")
-      : null;
+    const root = element.closest(".venue-map");
+    const overlays = Array.from(
+      root?.querySelectorAll<HTMLElement>(
+        ".venue-map-floating, .map-company-panel",
+      ) ?? [],
+    );
     const reveal = () => {
       const bounds = element.getBoundingClientRect();
-      let selectedBounds = target.getBoundingClientRect();
+      const selected = target.getBoundingClientRect();
       const padding = 16;
-      if (selectedBounds.right <= bounds.left)
-        element.scrollLeft -= bounds.left + padding - selectedBounds.left;
-      else if (selectedBounds.left >= bounds.right)
-        element.scrollLeft += selectedBounds.right - bounds.right + padding;
-      if (selectedBounds.bottom <= bounds.top)
-        element.scrollTop -= bounds.top + padding - selectedBounds.top;
-      else if (selectedBounds.top >= bounds.bottom)
-        element.scrollTop += selectedBounds.bottom - bounds.bottom + padding;
-
-      const intersects = (first: DOMRect, second: DOMRect) =>
-        first.right > second.left &&
-        first.left < second.right &&
-        first.bottom > second.top &&
-        first.top < second.bottom;
-      const panelBounds = panel?.getBoundingClientRect();
-      selectedBounds = target.getBoundingClientRect();
-      if (
-        panelBounds?.width &&
-        panelBounds.height &&
-        intersects(selectedBounds, panelBounds)
-      ) {
-        const sidePane =
-          panelBounds.left > bounds.left + bounds.width * 0.35 &&
-          panelBounds.width < bounds.width * 0.75;
-        if (sidePane)
-          element.scrollLeft +=
-            selectedBounds.right - panelBounds.left + padding;
-        else
-          element.scrollTop +=
-            selectedBounds.bottom - panelBounds.top + padding;
+      const revealOffscreen = () => {
+        // A highly zoomed booth may not fit anywhere; preserve its useful edge.
+        if (selected.right <= bounds.left)
+          element.scrollLeft -= bounds.left + padding - selected.left;
+        else if (selected.left >= bounds.right)
+          element.scrollLeft += selected.right - bounds.right + padding;
+        if (selected.bottom <= bounds.top)
+          element.scrollTop -= bounds.top + padding - selected.top;
+        else if (selected.top >= bounds.bottom)
+          element.scrollTop += selected.bottom - bounds.bottom + padding;
+      };
+      const obstacles = overlays
+        .map((overlay) => overlay.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      const intersects = (left: number, top: number, obstacle: DOMRect) =>
+        left + selected.width > obstacle.left &&
+        left < obstacle.right &&
+        top + selected.height > obstacle.top &&
+        top < obstacle.bottom;
+      const minX = bounds.left + padding;
+      const maxX = bounds.right - selected.width - padding;
+      const minY = bounds.top + padding;
+      const maxY = bounds.bottom - selected.height - padding;
+      if (minX > maxX || minY > maxY) {
+        revealOffscreen();
+        return;
       }
-      // The right-hand map controls can cover a booth that is otherwise beside
-      // or above the company pane. Reveal it above that stack, without zooming.
-      const controls = element
-        .closest(".venue-map")
-        ?.querySelector<HTMLElement>(".venue-map-bottom-right");
-      if (controls) {
-        selectedBounds = target.getBoundingClientRect();
-        const covered = Array.from(controls.children).some((child) => {
-          const controlBounds = child.getBoundingClientRect();
-          return (
-            controlBounds.width &&
-            controlBounds.height &&
-            intersects(selectedBounds, controlBounds)
-          );
-        });
-        if (covered) {
-          const controlBounds = controls.getBoundingClientRect();
-          const moveUp = selectedBounds.bottom - controlBounds.top + padding;
-          const moveLeft = selectedBounds.right - controlBounds.left + padding;
-          if (selectedBounds.top - moveUp >= bounds.top + padding)
-            element.scrollTop += moveUp;
-          else if (selectedBounds.left - moveLeft >= bounds.left + padding)
-            element.scrollLeft += moveLeft;
-          else
-            element.scrollTop += Math.min(
-              moveUp,
-              Math.max(0, selectedBounds.top - bounds.top - padding),
-            );
+      const clamp = (value: number, min: number, max: number) =>
+        Math.max(min, Math.min(max, value));
+      const xs = [selected.left, minX, maxX];
+      const ys = [selected.top, minY, maxY];
+      for (const rect of obstacles) {
+        xs.push(rect.left - selected.width - padding, rect.right + padding);
+        ys.push(rect.top - selected.height - padding, rect.bottom + padding);
+      }
+      let best: { left: number; top: number; distance: number } | undefined;
+      for (const x of xs) {
+        const left = clamp(x, minX, maxX);
+        for (const y of ys) {
+          const top = clamp(y, minY, maxY);
+          if (obstacles.some((rect) => intersects(left, top, rect))) continue;
+          const distance =
+            (left - selected.left) ** 2 + (top - selected.top) ** 2;
+          if (!best || distance < best.distance) best = { left, top, distance };
         }
       }
+      // Find the nearest free rectangle against every visible overlay together,
+      // rather than moving a booth out of one control and underneath another.
+      if (best) {
+        element.scrollLeft -= best.left - selected.left;
+        element.scrollTop -= best.top - selected.top;
+      } else revealOffscreen();
     };
     reveal();
-    if (panel && typeof ResizeObserver !== "undefined") {
+    if (overlays.length && typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(reveal);
-      observer.observe(panel);
+      overlays.forEach((overlay) => observer.observe(overlay));
       return () => observer.disconnect();
     }
-  }, [url, selectedCompanyId, session, imageSize, panelOpen, viewportSize]);
+  }, [
+    url,
+    selectedCompanyId,
+    session,
+    imageSize,
+    panelOpen,
+    viewportSize,
+    filtersOpen,
+    resultsOpen,
+  ]);
 
   return (
     <section

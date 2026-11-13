@@ -629,6 +629,26 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   await panel
     .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
+  await page.setViewportSize({ width: 320, height: 900 });
+  expect(new URL(page.url()).searchParams.get("focus")).toBe("AM-1");
+  expect(new URL(page.url()).searchParams.has("company")).toBe(false);
+  for (const name of ["検証2階マップ", "検証1階マップ"]) {
+    const floor = full.getByRole("button", { name, exact: true });
+    expect(
+      await floor.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return node.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        );
+      }),
+    ).toBe(true);
+    await floor.click();
+    await expect(full.getByRole("img", { name, exact: true })).toBeVisible();
+  }
+  await page.setViewportSize({ width: 844, height: 390 });
   await full.getByRole("button", { name: /^表示中の一覧/ }).click();
   const landscapeResults = full.getByRole("region", {
     name: "表示中の一覧",
