@@ -10,6 +10,10 @@ REPOSITORY = "ghcr.io/asari194617/taskly-nnct-corp-guidance"
 MAX_ARCHIVE_SIZE = 2 * 1024**3
 MAX_MEMBERS = 10000
 MAX_METADATA_SIZE = 1024**2
+MAX_OCI_BLOBS = 512
+OCI_BLOB = re.compile(r"blobs/sha256/[0-9a-f]{64}")
+LEGACY_CONFIG = re.compile(r"[0-9a-f]{64}\.json")
+LEGACY_LAYER = re.compile(r"[0-9a-f]{64}/layer\.tar")
 
 
 class InvalidArchive(Exception):
@@ -60,15 +64,13 @@ def validate(source_path, output_path, sha):
             name = canonical_name(member)
             if name in members:
                 raise InvalidArchive("duplicate archive path")
-            members[name] = member.isdir()
+            members[name] = member
             if len(members) > MAX_MEMBERS:
                 raise InvalidArchive("too many archive entries")
             total_size += member.size
             if total_size > MAX_ARCHIVE_SIZE:
                 raise InvalidArchive("archive is too large")
             if name in ("manifest.json", "repositories") and member.isfile():
-                metadata[name] = read_json(archive, member)
-            elif member.isfile() and re.fullmatch(r"[0-9a-f]{64}\.json", name):
                 metadata[name] = read_json(archive, member)
 
     manifest = metadata.get("manifest.json")
@@ -78,9 +80,14 @@ def validate(source_path, output_path, sha):
     if not isinstance(image, dict) or set(image) != {"Config", "RepoTags", "Layers"} or image.get("RepoTags") != [expected_tag]:
         raise InvalidArchive("unexpected image tag")
     config_name = image.get("Config")
-    if not isinstance(config_name, str) or not re.fullmatch(r"[0-9a-f]{64}\.json", config_name):
+    if not isinstance(config_name, str) or not (
+        LEGACY_CONFIG.fullmatch(config_name) or OCI_BLOB.fullmatch(config_name)
+    ):
         raise InvalidArchive("unexpected image config path")
-    config = metadata.get(config_name)
+    if config_name not in members or not members[config_name].isfile():
+        raise InvalidArchive("missing image config")
+    with tarfile.open(source_path, "r:gz") as archive:
+        config = read_json(archive, archive.getmember(config_name))
     if not isinstance(config, dict) or not isinstance(config.get("config"), dict):
         raise InvalidArchive("missing image config")
     labels = config["config"].get("Labels")
@@ -89,18 +96,54 @@ def validate(source_path, output_path, sha):
     layers = image.get("Layers")
     if not isinstance(layers, list) or not layers or len(layers) > 128:
         raise InvalidArchive("unexpected image layers")
-    if any(not isinstance(layer, str) or not re.fullmatch(r"[0-9a-f]{64}/layer\.tar", layer) for layer in layers):
+    if any(not isinstance(layer, str) or not (
+        LEGACY_LAYER.fullmatch(layer) or OCI_BLOB.fullmatch(layer)
+    ) for layer in layers):
         raise InvalidArchive("unexpected layer path")
     if len(set(layers)) != len(layers):
         raise InvalidArchive("unexpected layer path")
     selected = {"manifest.json", config_name, *layers}
     allowed = selected | {"repositories"}
-    for layer in layers:
-        directory = layer.split("/", 1)[0]
-        allowed.update((directory, f"{directory}/json", f"{directory}/VERSION"))
+    if OCI_BLOB.fullmatch(config_name):
+        if any(not OCI_BLOB.fullmatch(layer) for layer in layers):
+            raise InvalidArchive("mixed archive formats")
+        blob_names = [name for name in members if OCI_BLOB.fullmatch(name)]
+        if len(blob_names) > MAX_OCI_BLOBS or "index.json" not in members or "oci-layout" not in members:
+            raise InvalidArchive("invalid OCI archive")
+        allowed.update(("blobs", "blobs/sha256", "index.json", "oci-layout", *blob_names))
+        image_manifests = []
+        with tarfile.open(source_path, "r:gz") as archive:
+            for name in blob_names:
+                member = members[name]
+                if not member.isfile() or member.size > MAX_METADATA_SIZE:
+                    continue
+                source = archive.extractfile(archive.getmember(name))
+                if source is None:
+                    raise InvalidArchive("invalid OCI blob")
+                try:
+                    data = json.load(source, object_pairs_hook=object_pairs)
+                except (ValueError, UnicodeError):
+                    continue  # Layer contents are opaque to this validator.
+                if isinstance(data, dict) and data.get("mediaType") == "application/vnd.oci.image.manifest.v1+json" and not data.get("artifactType"):
+                    image_manifests.append(data)
+        if len(image_manifests) != 1:
+            raise InvalidArchive("expected one OCI image")
+        oci_image = image_manifests[0]
+        oci_config = oci_image.get("config")
+        oci_layers = oci_image.get("layers")
+        if not isinstance(oci_config, dict) or oci_config.get("digest") != "sha256:" + config_name.rsplit("/", 1)[1]:
+            raise InvalidArchive("OCI image config mismatch")
+        if not isinstance(oci_layers, list) or [layer.get("digest") if isinstance(layer, dict) else None for layer in oci_layers] != ["sha256:" + layer.rsplit("/", 1)[1] for layer in layers]:
+            raise InvalidArchive("OCI image layer mismatch")
+    else:
+        if any(not LEGACY_LAYER.fullmatch(layer) for layer in layers):
+            raise InvalidArchive("mixed archive formats")
+        for layer in layers:
+            directory = layer.split("/", 1)[0]
+            allowed.update((directory, f"{directory}/json", f"{directory}/VERSION"))
     if any(name not in allowed for name in members):
         raise InvalidArchive("archive contains an additional image or file")
-    if any(members.get(name) is not False for name in selected):
+    if any(name not in members or not members[name].isfile() for name in selected):
         raise InvalidArchive("image archive is incomplete")
     if "repositories" in metadata:
         repositories = metadata["repositories"]
