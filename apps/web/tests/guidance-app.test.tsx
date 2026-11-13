@@ -10,6 +10,17 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GuidanceApp from "../components/guidance-app";
 import { fixture, largeFixture } from "./fixtures";
+
+const documentNavigation = vi.hoisted(() => ({ assign: vi.fn() }));
+vi.mock("../lib/document-navigation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../lib/document-navigation")>();
+  return {
+    ...actual,
+    navigateDocument: (url: string, page?: number) =>
+      actual.navigateDocument(url, page, { assign: documentNavigation.assign }),
+  };
+});
 import type { Guidance } from "../lib/types";
 
 let dataset: Guidance;
@@ -181,6 +192,7 @@ function holdBookmarkWrites(ids: string[]) {
   };
 }
 beforeEach(() => {
+  documentNavigation.assign.mockReset();
   // Company workflows start on their dedicated page; Home routing is explicit below.
   window.history.replaceState(null, "", "/search/");
   window.sessionStorage.clear();
@@ -1345,83 +1357,150 @@ describe("structured guide notices", () => {
 });
 
 describe("guide PDF access", () => {
-  it("opens the issued signed URL directly and detaches the new tab from its opener", async () => {
-    window.history.replaceState(null, "", "/documents/");
-    const tab = {
-      opener: window,
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    const open = vi
-      .spyOn(window, "open")
-      .mockReturnValue(tab as unknown as Window);
-    await ready();
-    await userEvent.click(
-      screen.getByRole("button", { name: "テストガイド原本" }),
-    );
-    await waitFor(() =>
-      expect(tab.location.href).toBe(
-        "https://synthetic-r2.example.invalid/private-guide/guide?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=synthetic",
-      ),
-    );
-    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
-    expect(tab.opener).toBeNull();
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
-    expect(tab.close).not.toHaveBeenCalled();
-  });
-  it("reports a blocked popup without fetching a document URL", async () => {
-    window.history.replaceState(null, "", "/documents/");
-    vi.spyOn(window, "open").mockReturnValue(null);
-    await ready();
-    await userEvent.click(
-      screen.getByRole("button", { name: "テストガイド原本" }),
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "ポップアップを許可",
-    );
-    expect(
-      fetchMock.mock.calls.some(([url]) =>
-        String(url).includes("/documents/guide/url"),
-      ),
-    ).toBe(false);
-  });
-  it.each([503, new Error("検証用通信エラー")])(
-    "closes the placeholder tab when URL issuance fails (%s)",
-    async (failure) => {
+  const signedGuide =
+    "https://synthetic-r2.example.invalid/private-guide/guide?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=synthetic";
+  it.each(["blocked", "throws"] as const)(
+    "navigates the current tab to the issued signed URL even if popups are %s",
+    async (popup) => {
       window.history.replaceState(null, "", "/documents/");
-      const tab = {
-        opener: null,
-        location: { href: "about:blank" },
-        close: vi.fn(),
-      };
-      vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
-      failures.set("/api/documents/guide/url", failure);
+      const open = vi.spyOn(window, "open").mockImplementation(() => {
+        if (popup === "throws") throw new Error("Synthetic popup policy");
+        return null;
+      });
       await ready();
       await userEvent.click(
         screen.getByRole("button", { name: "テストガイド原本" }),
       );
-      expect(await screen.findByRole("alert")).toBeInTheDocument();
-      expect(tab.close).toHaveBeenCalledOnce();
+      await waitFor(() =>
+        expect(documentNavigation.assign).toHaveBeenCalledWith(signedGuide),
+      );
+      expect(open).not.toHaveBeenCalled();
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
       expect(
-        screen.getByRole("button", { name: "テストガイド原本" }),
-      ).toBeEnabled();
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes("/documents/guide/url"),
+        ),
+      ).toBe(true);
     },
   );
+  it.each([503, new Error("検証用通信エラー")])(
+    "reports failed signing and enables an actual retry (%s)",
+    async (failure) => {
+      window.history.replaceState(null, "", "/documents/");
+      failures.set("/api/documents/guide/url", failure);
+      await ready();
+      const button = screen.getByRole("button", { name: "テストガイド原本" });
+      await userEvent.click(button);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "資料を開けませんでした",
+      );
+      expect(documentNavigation.assign).not.toHaveBeenCalled();
+      expect(button).toBeEnabled();
+      failures.delete("/api/documents/guide/url");
+      await userEvent.click(button);
+      await waitFor(() =>
+        expect(documentNavigation.assign).toHaveBeenCalledWith(signedGuide),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+  it("recovers if the browser rejects navigation after signing", async () => {
+    window.history.replaceState(null, "", "/documents/");
+    documentNavigation.assign.mockImplementationOnce(() => {
+      throw new Error("Synthetic navigation policy");
+    });
+    await ready();
+    const button = screen.getByRole("button", { name: "テストガイド原本" });
+    await userEvent.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "資料を開けませんでした",
+    );
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    await waitFor(() =>
+      expect(documentNavigation.assign).toHaveBeenCalledTimes(2),
+    );
+    expect(documentNavigation.assign).toHaveBeenLastCalledWith(signedGuide);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("disables all document controls and deduplicates signing until the current request settles", async () => {
+    window.history.replaceState(null, "", "/documents/");
+    dataset.documents.push({
+      ...dataset.documents.find((item) => item.id === "guide")!,
+      id: "second-guide",
+      title: "検証用の別資料",
+    });
+    const original = fetchMock.getMockImplementation()! as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    let finish!: (response: Response) => void;
+    fetchMock.mockImplementation(async (input, init) =>
+      new URL(String(input)).pathname === "/api/documents/guide/url"
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : original(input, init),
+    );
+    await ready();
+    const first = screen.getByRole("button", { name: "テストガイド原本" });
+    const second = screen.getByRole("button", { name: "検証用の別資料" });
+    fireEvent.click(first);
+    fireEvent.click(first);
+    fireEvent.click(second);
+    expect(first).toBeDisabled();
+    expect(second).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        /\/api\/documents\/[^/]+\/url$/.test(new URL(String(url)).pathname),
+      ),
+    ).toHaveLength(1);
+    expect(documentNavigation.assign).not.toHaveBeenCalled();
+    await act(async () =>
+      finish(json({ url: signedGuide, expires_at: "2030-01-01T00:05:00Z" })),
+    );
+    expect(documentNavigation.assign).toHaveBeenCalledOnce();
+    expect(first).toBeEnabled();
+    expect(second).toBeEnabled();
+  });
+  it("aborts signing on logout and never navigates to a late signed URL", async () => {
+    window.history.replaceState(null, "", "/documents/");
+    const original = fetchMock.getMockImplementation()! as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    let finish!: (response: Response) => void;
+    let requestSignal: AbortSignal | undefined;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (new URL(String(input)).pathname !== "/api/documents/guide/url")
+        return original(input, init);
+      requestSignal = init?.signal as AbortSignal;
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await ready();
+    fireEvent.click(screen.getByRole("button", { name: "テストガイド原本" }));
+    await accountAction("ログアウト");
+    await screen.findByRole("button", { name: "Tasklyでログイン" });
+    expect(requestSignal?.aborted).toBe(true);
+    await act(async () =>
+      finish(json({ url: signedGuide, expires_at: "2030-01-01T00:05:00Z" })),
+    );
+    expect(documentNavigation.assign).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Tasklyでログイン" }),
+    ).toBeInTheDocument();
+  });
   it("clears private information if signed URL issuance discovers an expired login", async () => {
     window.history.replaceState(null, "", "/documents/");
-    const tab = {
-      opener: null,
-      location: { href: "about:blank" },
-      close: vi.fn(),
-    };
-    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
     failures.set("/api/documents/guide/url", 401);
     await ready();
     await userEvent.click(
       screen.getByRole("button", { name: "テストガイド原本" }),
     );
     await screen.findByRole("button", { name: "Tasklyでログイン" });
-    expect(tab.close).toHaveBeenCalledOnce();
+    expect(documentNavigation.assign).not.toHaveBeenCalled();
     expect(
       screen.queryByRole("heading", { name: "配布資料の案内" }),
     ).not.toBeInTheDocument();

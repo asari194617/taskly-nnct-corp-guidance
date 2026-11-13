@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { largeFixture } from "../tests/fixtures";
+import { captureCurrentPDF, returnToApplication } from "./pdf-navigation";
 
 const API = "http://127.0.0.1:3371";
 const ISSUER = "http://127.0.0.1:3372";
@@ -1234,28 +1235,8 @@ test("Private R2 presigned PDFs work without cookies and expire independently of
   request,
 }) => {
   await login(page, "documents", "/documents/");
-  const popupPromise = page.waitForEvent("popup");
-  // A headless browser can download a PDF instead of committing a viewer page.
-  const navigationPromise = page.context().waitForEvent("request", {
-    predicate: (navigation) => {
-      const url = new URL(navigation.url());
-      return (
-        navigation.isNavigationRequest() &&
-        url.origin === OBJECTS &&
-        url.pathname === `/${BUCKET}/guide.pdf`
-      );
-    },
-  });
-  await page
-    .getByRole("button", { name: "検証用ガイドPDF", exact: true })
-    .click();
-  const [popup, navigation] = await Promise.all([
-    popupPromise,
-    navigationPromise,
-  ]);
-  expect(navigation.frame()).toBe(popup.mainFrame());
-  expect(navigation.resourceType()).toBe("document");
-  const signed = new URL(navigation.url());
+  const { signed, appURL } = await captureCurrentPDF(page, () => page
+    .getByRole("button", { name: "検証用ガイドPDF", exact: true }).click());
   expect(signed.origin).toBe(OBJECTS);
   expect(signed.searchParams.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
   expect(signed.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
@@ -1283,7 +1264,7 @@ test("Private R2 presigned PDFs work without cookies and expire independently of
   expect(
     (await request.get(new URL(signed.pathname, signed.origin).href)).status(),
   ).toBe(403);
-  if (!popup.isClosed()) await popup.close();
+  await returnToApplication(page, appURL);
   await accountAction(page, "ログアウト");
   await expect(
     page.getByRole("button", { name: "Tasklyでログイン" }),
@@ -1692,22 +1673,8 @@ test("Opening survey forms never completes tasks and the signed report link open
   await expect(firstSurvey.getByRole("checkbox")).not.toBeChecked();
   expect(await canonicalCompleted(request, fixture, "home", "visit-survey-1")).toBe(false);
   const sheet = homeTask(page, "sheet-submission");
-  // Headless Chromium downloads inline PDFs while a headed browser opens its
-  // native viewer. Both retain the complete navigation URL, including page25.
-  let documentTarget = "";
-  const observeDocument = (tab: Page) => {
-    tab.on("download", download => { documentTarget = download.url(); });
-    tab.on("framenavigated", frame => {
-      if (frame === tab.mainFrame() && frame.url().startsWith(OBJECTS)) documentTarget = frame.url();
-    });
-  };
-  context.on("page", observeDocument);
-  const documentOpened = context.waitForEvent("page");
-  await sheet.getByRole("button", { name: "資料を見る", exact: true }).click();
-  const document = await documentOpened;
-  await expect.poll(() => documentTarget).toContain("#page=25");
-  context.off("page", observeDocument);
-  const signed = new URL(documentTarget);
+  const { signed, appURL } = await captureCurrentPDF(page, () => sheet.getByRole("button", { name: "資料を見る", exact: true }).click());
+  expect(signed.hash).toBe("#page=25");
   expect(signed.origin).toBe(OBJECTS);
   expect(signed.pathname).toBe(`/${BUCKET}/guide.pdf`);
   expect(signed.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
@@ -1717,7 +1684,7 @@ test("Opening survey forms never completes tasks and the signed report link open
   const content = (await anonymous.body()).toString("latin1");
   expect(content.match(/\/Type \/Page\b/g)).toHaveLength(26);
   expect(content).toContain("Synthetic physical page 25");
-  await document.close();
+  await returnToApplication(page, appURL);
   await expect(sheet.getByRole("checkbox")).not.toBeChecked();
   expect(await canonicalCompleted(request, fixture, "home", "sheet-submission")).toBe(false);
   expect(writes).toBe(0);

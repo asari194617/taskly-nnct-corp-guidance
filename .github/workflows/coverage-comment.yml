@@ -42,7 +42,7 @@ jobs:
             const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
             if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
                 pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
-            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['PDF extractor (Python statements)', 'extractor'], ['Browser E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
+            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
               let value = 'Unavailable (test/setup failed)';
               try {
                 const {percent} = read(id);

@@ -11,7 +11,7 @@ CI は PR と main の全変更で動作します。パスによる省略やセ�
 | Web | Vitest + V8、アプリケーションコード | lines 80%以上 |
 | PDF 抽出器 | coverage.py、テストコードを除く scripts | statements 80%以上 |
 | 実 MySQL 結合テスト | 結合テストだけの Go 実行範囲 | 実測値を報告 |
-| ブラウザー E2E | 実際の画面操作で実行されたソースの範囲 | 実測値を報告 |
+| ブラウザー E2E | Chromium の画面操作で実行されたソースの範囲を V8 で計測 | 実測値を報告 |
 
 単体テストの合算値と結合・E2E 単独の実行範囲は別の指標です。後者の値を単体カバレッジと合算したり、操作が通っただけで100%と見なしたりしません。行カバレッジだけで全分岐の正しさは保証されないため、未認証・状態不一致・他ユーザー・不正パス・失効・障害時のケースもテストします。
 
@@ -30,6 +30,10 @@ Go の実 MySQL 結合テストとブラウザー E2E は CI 専用の MySQL 9.7
 ホームの完了チェックは、実際の Taskly Go サーバーの連携エンドポイント、GraphQL、MySQL の完了記録まで通します。CI はレビュー済みの Taskly コミットを固定して取得し、検証専用コマンド `apps/server/cmd/guidance-e2e` を起動します。OAuth の userinfo と introspection は同じ架空の数値ユーザー ID を返し、Taskly の通常の完了・取り消し操作とガイダンス側のチェックが同じ記録を参照することを確認します。フォームを開くだけではチェックが変わらず、見学シート用 PDF は実際に25ページ目が存在する26ページの架空資料を使います。
 
 Taskly 検証サーバーは loopback、検証フラグ、空の `taskly_guidance_e2e` DB を必須とし、本番モードでは起動しません。E2E ランナーはこの固定名の使い捨て DB を毎回作り直します。Taskly の本番 DB、セッション、認証情報は使用しません。Redis は検証プロセス内で起動し、別の常駐サービスは不要です。
+
+PDF の署名 URL を取得した後は現在のタブで資料へ移動します。Chromium の既存 E2E に加え、iPhone 設定の WebKit 専用プロジェクトで配布資料と見学シートを確認します。`window.open` を禁止しても実際の署名 URL へ移動でき、署名の取得が401・503の場合はアプリの画面に留まることを、実 Go API と検証用認証サーバーで確認します。ネイティブの PDF ビューアーが開くエンジンでは「戻る」、ダウンロード扱いになるヘッドレスエンジンではアプリに留まることを検証し、再読み込み後の認証も確認します。これは WebKit エンジンの検証で、実機の Google アプリや Safari 自体の動作確認とは区別します。
+
+WebKit の実行結果は同じ Playwright レポートに別プロジェクトとして記録します。WebKit は V8 のカバレッジ API を持たないため、行カバレッジは Chromium の測定値だけを表示し、WebKit の成功件数をカバレッジへ換算・合算しません。CI は全変更で両エンジンをインストールし、両プロジェクトを実行します。
 
 ## PR に表示するレポート
 
@@ -50,4 +54,4 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 
 実 MySQL テストは使い捨ての専用 DB を用意し、`MYSQL_TEST_DSN` を渡して `go test -race -run '^TestMySQLIntegration$' ./internal/server` を実行します。テストはスキーマを準備し、架空データを書き込みます。稼働データを含む DB の DSN を使わないでください。
 
-ブラウザー E2E は `E2E_MYSQL_PASSWORD` と `E2E_MYSQL_DATABASE` に別の使い捨て DB の接続先を指定し、`E2E_TASKLY_DIR` にレビュー済み Taskly チェックアウトのルートを指定します。MySQL アカウントには固定名 `taskly_guidance_e2e` の作成・削除権限も必要です。Chromium をインストールしてから `node scripts/e2e-run.mjs` を実行すると、スクリプトが架空データの取り込み、ローカル OAuth サーバー、両サービスの Go API、Next.js 静的本番ビルドの配信を準備します。詳細な出力先はスクリプトと `apps/web/e2e` を参照してください。
+ブラウザー E2E は `E2E_MYSQL_PASSWORD` と `E2E_MYSQL_DATABASE` に別の使い捨て DB の接続先を指定し、`E2E_TASKLY_DIR` にレビュー済み Taskly チェックアウトのルートを指定します。MySQL アカウントには固定名 `taskly_guidance_e2e` の作成・削除権限も必要です。`npm --prefix apps/web exec -- playwright install --with-deps chromium webkit` で両ブラウザーをインストールしてから `node scripts/e2e-run.mjs` を実行すると、スクリプトが架空データの取り込み、ローカル OAuth サーバー、両サービスの Go API、Next.js 静的本番ビルドの配信を準備します。詳細な出力先はスクリプトと `apps/web/e2e` を参照してください。
