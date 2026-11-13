@@ -39,7 +39,8 @@ jobs:
               throw new Error('This exact main commit has not passed CI');
             core.setOutput('sha', sha);
   web:
-    needs: release
+    # The old UI works with the new API; publish consumers of new routes last.
+    needs: [release, api]
     runs-on: ubuntu-latest
     environment: production-ui
     env:

@@ -219,12 +219,22 @@ test("Map booths open shareable company details and detail links highlight the b
 test("Signed PDFs open directly without cookies and expire on logout", async ({ page, request }) => {
   await login(page, "documents", "/?view=map");
   const popupPromise = page.waitForEvent("popup");
+  // Headless Chromium may download a PDF instead of committing a viewer page.
+  // Observe the real top-level navigation, whose URL is identical in both cases.
+  const navigationPromise = page.context().waitForEvent("request", {
+    predicate: navigation => {
+      const url = new URL(navigation.url());
+      return navigation.isNavigationRequest() && url.origin === API && url.pathname === "/documents/guide";
+    },
+  });
   await page.getByRole("button", { name: "検証用ガイドPDF", exact: true }).click();
-  const popup = await popupPromise;
-  await popup.waitForURL(url => url.origin === API && url.pathname === "/documents/guide");
-  const signed = popup.url();
+  const [popup, navigation] = await Promise.all([popupPromise, navigationPromise]);
+  expect(navigation.frame()).toBe(popup.mainFrame());
+  expect(navigation.resourceType()).toBe("document");
+  const signed = navigation.url();
   expect(new URL(signed).searchParams.get("token")).toBeTruthy();
   expect(signed.startsWith("blob:")).toBe(false);
+  expect((await request.storageState()).cookies).toEqual([]);
   const document = await request.get(signed);
   expect(document.status()).toBe(200);
   expect(document.headers()["content-type"]).toBe("application/pdf");
@@ -236,7 +246,7 @@ test("Signed PDFs open directly without cookies and expire on logout", async ({ 
   const wrongDocument = new URL(signed);
   wrongDocument.pathname = "/documents/floor-a";
   expect((await request.get(wrongDocument.href)).status()).toBe(403);
-  await popup.close();
+  if (!popup.isClosed()) await popup.close();
   await page.getByRole("button", { name: "ログアウト", exact: true }).click();
   await expect(page.getByRole("button", { name: "Tasklyでログイン" })).toBeVisible();
   expect((await request.get(signed)).status()).toBe(403);

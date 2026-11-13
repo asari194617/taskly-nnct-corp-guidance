@@ -30,6 +30,8 @@ confidential client、既存利用者、認証の移行フラグは変更しま�
 
 [Deploy production](../.github/workflows/deploy.yml) は、main の最新コミットがその SHA で CI に合格済みであることを検証します。PR の成功だけでは本番へ配備しません。手動実行でも同じ main・CI 検査を行います。
 
+API の配備・readiness・未認証アクセスの拒否を確認してから UI を配備します。新しい API ルートを使う画面が、旧 API より先に公開されることを防ぎます。
+
 | 環境 | 種別 | 名前 |
 | --- | --- | --- |
 | production-ui | secrets | R2_ACCOUNT_ID、R2_ACCESS_KEY_ID、R2_SECRET_ACCESS_KEY |
