@@ -868,7 +868,7 @@ describe("shareable routes and venue navigation", () => {
     await ready();
     const first = dataset.companies[0],
       second = dataset.companies[1];
-    const panel = screen.getByRole("region", { name: first.name });
+    const panel = await screen.findByRole("region", { name: first.name });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(panel).not.toHaveAttribute("aria-modal");
     const zoom = screen.getByRole("button", {
