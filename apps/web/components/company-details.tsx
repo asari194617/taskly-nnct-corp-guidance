@@ -71,7 +71,6 @@ type DetailProps = {
   onSave: () => Promise<void>;
   titleId: string;
   notification?: ReactNode;
-  closeAction?: ReactNode;
   headingRef?: Ref<HTMLHeadingElement>;
 };
 
@@ -82,7 +81,6 @@ export function CompanyDetailContent({
   onSave,
   titleId,
   notification,
-  closeAction,
   headingRef,
 }: DetailProps) {
   return (
@@ -102,7 +100,6 @@ export function CompanyDetailContent({
           >
             {company.name}
           </h2>
-          {closeAction}
         </div>
         <div className="industry-tags">
           {company.industries.map((value) => (
@@ -132,7 +129,7 @@ export function MapCompanyPanel({
   focusOnOpen,
   onClose,
   returnFocus,
-}: Omit<DetailProps, "titleId" | "closeAction" | "headingRef"> & {
+}: Omit<DetailProps, "titleId" | "headingRef"> & {
   focusOnOpen: boolean;
   onClose: () => void;
   returnFocus: () => void;
@@ -170,17 +167,17 @@ export function MapCompanyPanel({
           titleId="map-company-title"
           notification={notification}
           headingRef={heading}
-          closeAction={
-            <IconButton
-              size="small"
-              variant="neutral"
-              aria-label="企業情報を閉じる"
-              onClick={onClose}
-            >
-              <Icon name="close" />
-            </IconButton>
-          }
         />
+      </div>
+      <div className="map-company-close">
+        <IconButton
+          size="small"
+          variant="neutral"
+          aria-label="企業情報を閉じる"
+          onClick={onClose}
+        >
+          <Icon name="close" />
+        </IconButton>
       </div>
     </section>
   );

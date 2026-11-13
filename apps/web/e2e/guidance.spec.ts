@@ -2236,3 +2236,111 @@ test("Search controls stay balanced and company links change only text across sy
     );
   }
 });
+
+for (const width of [320, 1440]) {
+  test(`The map card close action floats independently of one-line and wrapped company headings at ${width}px`, async ({
+    page,
+  }) => {
+    const shortName = "検証企業";
+    const longName = "検証用の長い企業名と研究開発部門を含む株式会社";
+    await page.route("**/api/guidance", async (route) => {
+      const response = await route.fetch();
+      const catalog = await response.json();
+      catalog.companies.find(
+        (company: { id: string }) => company.id === "AM-1",
+      ).name = shortName;
+      catalog.companies.find(
+        (company: { id: string }) => company.id === "AM-2",
+      ).name = longName;
+      await route.fulfill({ response, json: catalog });
+    });
+    await page.setViewportSize({ width, height: 900 });
+    await login(page, "map", "/map/?session=AM");
+    const full = page.locator('.venue-map[data-mode="fullscreen"]');
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      for (const [index, name] of [shortName, longName].entries()) {
+        const booth = full.getByRole("button", {
+          name: `午前 ブース ${index + 1} ${name}`,
+          exact: true,
+        });
+        await booth.focus();
+        await page.keyboard.press("Enter");
+        const panel = page.getByRole("region", { name, exact: true });
+        const heading = panel.getByRole("heading", { name, exact: true });
+        const close = panel.getByRole("button", {
+          name: "企業情報を閉じる",
+          exact: true,
+        });
+        await expect(panel).toBeVisible();
+        const geometry = await panel.evaluate((node) => {
+          const title = node.querySelector("h2")!;
+          const row = node.querySelector(".company-detail-heading")!;
+          const button = node.querySelector(".map-company-close > button")!;
+          const industry = node.querySelector(".industry-tags")!;
+          const frame = node.getBoundingClientRect(),
+            titleBox = title.getBoundingClientRect(),
+            rowBox = row.getBoundingClientRect(),
+            buttonBox = button.getBoundingClientRect(),
+            industryBox = industry.getBoundingClientRect();
+          return {
+            titleHeight: titleBox.height,
+            lineHeight: parseFloat(getComputedStyle(title).lineHeight),
+            rowHeight: rowBox.height,
+            buttonHeight: buttonBox.height,
+            rightInset: frame.right - buttonBox.right,
+            topInset: buttonBox.top - frame.top,
+            titleRight: titleBox.right,
+            buttonLeft: buttonBox.left,
+            industryGap: industryBox.top - titleBox.bottom,
+          };
+        });
+        // The company heading follows its own typography rather than the 44px action.
+        expect(geometry.rowHeight).toBeCloseTo(geometry.titleHeight, 1);
+        if (index === 0) {
+          expect(geometry.titleHeight).toBeCloseTo(geometry.lineHeight, 1);
+          expect(geometry.titleHeight).toBeLessThan(geometry.buttonHeight);
+        } else {
+          expect(geometry.titleHeight).toBeGreaterThan(geometry.lineHeight);
+        }
+        expect(geometry.industryGap).toBeCloseTo(12, 1);
+        expect(geometry.rightInset).toBeCloseTo(17, 1);
+        expect(geometry.topInset).toBeCloseTo(17, 1);
+        expect(geometry.titleRight).toBeLessThan(geometry.buttonLeft);
+        await expectUnobstructed(close);
+        // The floating action remains usable on a touch-sized viewport and returns focus to the booth.
+        await close.click();
+        await expect(panel).not.toBeVisible();
+        await expect(booth).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(heading).toBeFocused();
+        await close.focus();
+        await page.keyboard.press("Enter");
+        await expect(panel).not.toBeVisible();
+        await expect(booth).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(heading).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(panel).not.toBeVisible();
+        await expect(booth).toBeFocused();
+      }
+    }
+    await nav(page, "一覧").click();
+    await page.getByRole("link", { name: shortName, exact: true }).click();
+    const directoryDialog = page.getByRole("dialog", {
+      name: shortName,
+      exact: true,
+    });
+    await expect(directoryDialog).toBeVisible();
+    await expect(
+      directoryDialog.getByRole("button", {
+        name: "企業情報を閉じる",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await directoryDialog
+      .getByRole("button", { name: "閉じる", exact: true })
+      .click();
+    await expect(directoryDialog).not.toBeVisible();
+  });
+}
