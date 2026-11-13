@@ -675,6 +675,8 @@ h2 {
   color: var(--color-text-accent-primary);
 }
 .timeline-item[aria-current="time"] {
+  margin-inline: -8px;
+  padding-inline: 8px;
   border-radius: 8px;
   background: var(--color-surface-accent-primary-light);
   outline: 2px solid var(--color-border-accent-primary);
