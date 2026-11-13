@@ -69,6 +69,21 @@ for (const [name, change] of [
   });
 }
 
+for (const duplicate of ['manifest.json', config]) {
+  test(`rejects a second ${duplicate} archive entry`, () => {
+    const f = fixture();
+    try {
+      const append = spawnSync('tar', ['-rf', join(f.root, 'input.tar'), '-C', join(f.root, 'files'), duplicate], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+      assert.equal(append.status, 0, append.stderr?.toString());
+      writeFileSync(f.input, gzipSync(readFileSync(join(f.root, 'input.tar'))));
+      const result = f.validate();
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(result.stderr, /duplicate archive path/);
+      assert.equal(existsSync(f.output), false);
+    } finally { f.close(); }
+  });
+}
+
 test('isolated Docker daemon keeps a pre-existing unrelated tag unchanged on rejection', { skip: !dockerAvailable() && !process.env.CI }, () => {
   const root = mkdtempSync(join(tmpdir(), 'nnct-docker-archive-'));
   const sentinel = `nnct-archive-test-sentinel:${process.pid}`;
