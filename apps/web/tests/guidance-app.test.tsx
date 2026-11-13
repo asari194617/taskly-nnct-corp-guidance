@@ -94,6 +94,49 @@ function popTo(path: string) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
 }
+function installNextHistoryBridge(initialURL: string, flag: "__NA" | "_N") {
+  const nativeReplace = window.history.replaceState.bind(window.history);
+  nativeReplace(
+    { [flag]: true, __PRIVATE_NEXTJS_INTERNALS_TREE: "fixture" },
+    "",
+    initialURL,
+  );
+  let canonicalURL = window.location.href;
+  vi.spyOn(window.history, "replaceState").mockImplementation(
+    (data, unused, url) => {
+      // Next distinguishes application writes from its own internal history writes.
+      // Application writes synchronize the router, then inherit framework metadata.
+      const internal = data && (data.__NA || data._N);
+      if (!internal)
+        canonicalURL = new URL(
+          url == null ? window.location.href : String(url),
+          window.location.href,
+        ).href;
+      const previous = window.history.state;
+      nativeReplace(
+        internal
+          ? data
+          : {
+              ...data,
+              ...(previous?.__NA ? { __NA: previous.__NA } : {}),
+              ...(previous?.__PRIVATE_NEXTJS_INTERNALS_TREE
+                ? {
+                    __PRIVATE_NEXTJS_INTERNALS_TREE:
+                      previous.__PRIVATE_NEXTJS_INTERNALS_TREE,
+                  }
+                : {}),
+            },
+        unused,
+        url,
+      );
+    },
+  );
+  return {
+    commitFrameworkURL: () =>
+      nativeReplace(window.history.state, "", canonicalURL),
+  };
+}
+
 function holdBookmarkWrites(ids: string[]) {
   const original = fetchMock.getMockImplementation()! as (
     input: RequestInfo | URL,
@@ -138,7 +181,8 @@ function holdBookmarkWrites(ids: string[]) {
   };
 }
 beforeEach(() => {
-  window.history.replaceState(null, "", "/");
+  // Company workflows start on their dedicated page; Home routing is explicit below.
+  window.history.replaceState(null, "", "/search/");
   window.sessionStorage.clear();
   dataset = fixture();
   saved = new Set();
@@ -161,6 +205,12 @@ beforeEach(() => {
         },
       });
     if (path === "/api/guidance") return json(dataset);
+    if (path === "/api/home")
+      return json({
+        event_id: "synthetic-event",
+        roster_configured: rosterNumber !== null,
+        tasks: [],
+      });
     if (path === "/api/preferences") {
       if (init?.method === "PUT") {
         const number = JSON.parse(String(init.body)).roster_number;
@@ -318,7 +368,7 @@ describe("account menu", () => {
     expect(trigger).toHaveFocus();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     await openAccount();
-    await userEvent.click(screen.getByRole("heading", { name: "一覧" }));
+    await userEvent.click(screen.getByRole("heading", { name: "探す" }));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(([url]) =>
@@ -515,9 +565,7 @@ describe("Ec4 first-visit preferences", () => {
     expect(rosterNumber).toBe(8);
     await expectAccountNumber(8);
     await userEvent.click(nav("気になる"));
-    const assignments = screen
-      .getByRole("heading", { name: "指定企業" })
-      .closest("section")!;
+    const assignments = screen.getByRole("region", { name: "指定企業" });
     expect(within(assignments).getAllByRole("link")[0]).toHaveTextContent(
       dataset.companies[1].name,
     );
@@ -534,9 +582,7 @@ describe("Ec4 first-visit preferences", () => {
       }),
     );
     await userEvent.click(nav("気になる"));
-    const assignments = screen
-      .getByRole("heading", { name: "指定企業" })
-      .closest("section")!;
+    const assignments = screen.getByRole("region", { name: "指定企業" });
     await userEvent.click(
       within(assignments).getByRole("button", { name: "名簿番号を設定" }),
     );
@@ -610,25 +656,21 @@ describe("shareable routes and venue navigation", () => {
       ),
     ).not.toBeInTheDocument();
   });
-  it("shows the company list first and exposes search through a separate shareable page", async () => {
+  it("opens Home at the root and keeps company search on its own shareable page", async () => {
+    window.history.replaceState(null, "", "/");
     await ready();
     expect(
-      screen.getByRole("heading", { level: 1, name: "一覧" }),
+      screen.getByRole("heading", { level: 1, name: "ホーム" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(
-      dataset.companies.length,
-    );
+    expect(
+      screen.getByRole("heading", { name: "やること" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("group", { name: "参加時間帯" }),
     ).not.toBeInTheDocument();
-    const heading = screen.getByRole("heading", {
-      name: "一覧",
-    }).parentElement!;
-    expect(
-      within(heading).queryByRole("link", { name: "探す" }),
-    ).not.toBeInTheDocument();
+    expect(nav("ホーム")).toHaveAttribute("href", "/");
+    expect(nav("ホーム")).toHaveAttribute("aria-current", "page");
     const search = nav("探す");
     expect(search).toHaveAttribute("href", "/search/");
     await userEvent.click(search);
@@ -637,11 +679,18 @@ describe("shareable routes and venue navigation", () => {
       screen.getByRole("heading", { level: 1, name: "探す" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("searchbox")).toBeInTheDocument();
-    await userEvent.click(nav("一覧"));
+    expect(screen.getAllByRole("article")).toHaveLength(
+      dataset.companies.length,
+    );
+    await userEvent.click(nav("ホーム"));
+    expect(locationURL().pathname).toBe("/");
     expect(locationURL().searchParams.has("view")).toBe(false);
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "ホーム" }),
+    ).toBeInTheDocument();
   });
-  it("does not hide list entries behind filters that are only visible on the search page", async () => {
+  it("keeps Home available when the search filters have no matching companies", async () => {
     window.history.replaceState(
       null,
       "",
@@ -651,15 +700,185 @@ describe("shareable routes and venue navigation", () => {
     expect(
       screen.getByRole("heading", { name: "条件に合う企業が見つかりません" }),
     ).toBeInTheDocument();
-    await userEvent.click(nav("一覧"));
+    await userEvent.click(nav("ホーム"));
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "ホーム" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "おすすめ" }),
+    ).toBeInTheDocument();
+  });
+  it("keeps company browsing available when Home tasks cannot be loaded", async () => {
+    window.history.replaceState(null, "", "/");
+    failures.set("/api/home", 503);
+    await ready();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "やることを取得できませんでした",
+    );
+    await userEvent.click(nav("探す"));
+    expect(
+      screen.getByRole("heading", { name: "探す", level: 1 }),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("article")).toHaveLength(
       dataset.companies.length,
     );
     expect(
-      screen.getByRole("heading", { level: 1, name: "一覧" }),
+      screen.queryByRole("button", { name: "Tasklyでログイン" }),
+    ).not.toBeInTheDocument();
+  });
+  it("expires the guidance session when Home discovers a revoked login", async () => {
+    window.history.replaceState(null, "", "/");
+    failures.set("/api/home", 401);
+    render(<GuidanceApp />);
+    await screen.findByRole("button", { name: "Tasklyでログイン" });
+    expect(
+      screen.queryByRole("heading", { name: "ホーム" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("keeps refreshed Home tasks for the new roster when an old poll finishes late", async () => {
+    window.history.replaceState(null, "", "/");
+    const original = fetchMock.getMockImplementation()! as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    let reads = 0;
+    let finishOldPoll!: (response: Response) => void;
+    const responseFor = (number: number) => ({
+      event_id: "synthetic-event",
+      roster_configured: true,
+      tasks: [
+        {
+          id: "assigned-visit-1",
+          kind: "assigned_visit",
+          title: `検証名簿${number}番の指定企業`,
+          completed: false,
+          completion_disabled: false,
+          taskly_url: "https://taskly.example.test/tasks/assigned-visit-1",
+          company_id: number === 7 ? "AM-1" : "AM-2",
+          term: 1,
+        },
+      ],
+    });
+    fetchMock.mockImplementation(async (input, init) => {
+      if (new URL(String(input)).pathname !== "/api/home")
+        return original(input, init);
+      reads++;
+      if (reads === 2)
+        return new Promise<Response>((resolve) => {
+          finishOldPoll = resolve;
+        });
+      return json(responseFor(rosterNumber!));
+    });
+    await ready();
+    await screen.findByRole("checkbox", { name: "検証名簿7番の指定企業" });
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(reads).toBe(2));
+    await accountAction("名簿番号の設定");
+    const dialog = await screen.findByRole("dialog", {
+      name: "名簿番号の設定",
+    });
+    const number = within(dialog).getByRole("spinbutton", { name: "名簿番号" });
+    await userEvent.clear(number);
+    await userEvent.type(number, "8");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "保存する" }),
+    );
+    await screen.findByRole("checkbox", { name: "検証名簿8番の指定企業" });
+    await act(async () => finishOldPoll(json(responseFor(7))));
+    expect(
+      screen.getByRole("checkbox", { name: "検証名簿8番の指定企業" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: "検証名簿7番の指定企業" }),
+    ).not.toBeInTheDocument();
+    await expectAccountNumber(8);
+  });
+  it("shares an optimistic interest from a Home recommendation with its company detail", async () => {
+    window.history.replaceState(null, "", "/");
+    const company = {
+      ...dataset.companies[0],
+      id: "AM-3",
+      name: "未指定の検証ソフト",
+      booth: 3,
+    };
+    dataset.companies.push(company);
+    await ready();
+    const requests = holdBookmarkWrites([company.id]);
+    const save = screen.getByRole("button", {
+      name: `${company.name}を気になるに追加`,
+    });
+    fireEvent.click(save);
+    expect(save).toHaveAttribute("aria-pressed", "true");
+    expect(save).toBeDisabled();
+    expect(nav("気になる")).toHaveTextContent("1");
+    await userEvent.click(screen.getByRole("link", { name: company.name }));
+    const dialog = await screen.findByRole("dialog", { name: company.name });
+    const sameInterest = within(dialog).getByRole("button", {
+      name: `${company.name}を気になるから解除`,
+    });
+    expect(sameInterest).toHaveAttribute("aria-pressed", "true");
+    expect(sameInterest).toBeDisabled();
+    await act(async () => requests.finish(company.id));
+    await waitFor(() => expect(sameInterest).toBeEnabled());
+    expect(saved.has(company.id)).toBe(true);
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "閉じる" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "ホーム", level: 1 }),
     ).toBeInTheDocument();
   });
+  it.each(["__NA", "_N"] as const)(
+    "keeps typed search parameters when the framework commits after a favorite update (%s)",
+    async (flag) => {
+      const framework = installNextHistoryBridge("/search/", flag);
+      await ready();
+      const input = screen.getByRole("searchbox");
+      await userEvent.type(input, "機械");
+      expect(locationURL().searchParams.get("q")).toBe("機械");
+      const company = dataset.companies[1];
+      await userEvent.click(
+        within(card(company.name)).getByRole("button", {
+          name: `${company.name}を気になるに追加`,
+        }),
+      );
+      await waitFor(() => expect(saved.has(company.id)).toBe(true));
+      act(() => framework.commitFrameworkURL());
+      expect(locationURL().pathname).toBe("/search/");
+      expect(locationURL().searchParams.get("q")).toBe("機械");
+      expect(input).toHaveValue("機械");
+      expect(window.history.state.__PRIVATE_NEXTJS_INTERNALS_TREE).toBe(
+        "fixture",
+      );
+    },
+  );
+  it.each(["__NA", "_N"] as const)(
+    "keeps legacy URL normalization when the framework commits after a favorite update (%s)",
+    async (flag) => {
+      const framework = installNextHistoryBridge(
+        "/index.html?view=companies&q=機械#results",
+        flag,
+      );
+      await ready();
+      expect(locationURL().pathname).toBe("/search/");
+      const company = dataset.companies[1];
+      await userEvent.click(
+        within(card(company.name)).getByRole("button", {
+          name: `${company.name}を気になるに追加`,
+        }),
+      );
+      await waitFor(() => expect(saved.has(company.id)).toBe(true));
+      act(() => framework.commitFrameworkURL());
+      expect(locationURL().pathname).toBe("/search/");
+      expect(locationURL().searchParams.get("q")).toBe("機械");
+      expect(locationURL().searchParams.has("view")).toBe(false);
+      expect(locationURL().hash).toBe("#results");
+      expect(screen.getByRole("searchbox")).toHaveValue("機械");
+    },
+  );
   it("opens a shared company detail after authentication without requiring prior navigation", async () => {
     window.history.replaceState(null, "", "/?view=companies&company=AM-1");
     await ready();
@@ -706,12 +925,13 @@ describe("shareable routes and venue navigation", () => {
       "/?view=unknown&company=not-present&session=invalid",
     );
     await ready();
-    expect(screen.getByRole("heading", { name: "一覧" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "ホーム" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "一覧へ戻る" }));
+    await userEvent.click(screen.getByRole("button", { name: "閉じる" }));
     expect(locationURL().searchParams.has("company")).toBe(false);
   });
   it("restores the saved company link after returning from Taskly login", async () => {
+    window.history.replaceState(null, "", "/");
     window.sessionStorage.setItem(
       "guidance-return-route",
       "/index.html?view=map&company=PM-1&session=PM#booth",
@@ -733,11 +953,14 @@ describe("shareable routes and venue navigation", () => {
   ])(
     "discards an unsafe or malformed saved login destination: %s",
     async (destination) => {
+      window.history.replaceState(null, "", "/");
       window.sessionStorage.setItem("guidance-return-route", destination);
       await ready();
       expect(locationURL().pathname).toBe("/");
       expect(locationURL().search).toBe("");
-      expect(screen.getByRole("heading", { name: "一覧" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "ホーム" }),
+      ).toBeInTheDocument();
     },
   );
   it("still opens a directly requested page when session storage is unavailable", async () => {
@@ -780,7 +1003,7 @@ describe("shareable routes and venue navigation", () => {
     expect(locationURL().pathname).toBe("/");
     expect(locationURL().search).toBe("");
     expect(
-      screen.getByRole("heading", { name: "一覧", level: 1 }),
+      screen.getByRole("heading", { name: "ホーム", level: 1 }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("region", { name: "操作できる会場マップ" }),
@@ -793,8 +1016,9 @@ describe("shareable routes and venue navigation", () => {
       once: true,
     });
     await userEvent.click(link);
+    expect(locationURL().pathname).toBe("/search/");
     expect(locationURL().searchParams.has("view")).toBe(false);
-    expect(screen.getByRole("heading", { name: "一覧" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "探す" })).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/schedule/");
   });
   it("keeps map filters, booth selection and session changes in shareable query routes", async () => {
@@ -846,14 +1070,12 @@ describe("shareable routes and venue navigation", () => {
     window.history.replaceState(
       null,
       "",
-      "/?q=一致しない企業&industry=存在しない業種&saved=1&assigned=1",
+      "/search/?company=AM-1&q=一致しない企業&industry=存在しない業種&saved=1&assigned=1",
     );
     await ready();
     const company = dataset.companies[0];
-    await userEvent.click(companyLink(company.name));
-    const link = await expandDetailMap(
-      screen.getByRole("dialog", { name: company.name }),
-    );
+    const dialog = await screen.findByRole("dialog", { name: company.name });
+    const link = await expandDetailMap(dialog);
     const target = new URL(link.getAttribute("href")!, window.location.origin);
     for (const key of ["q", "industry", "saved", "assigned"])
       expect(target.searchParams.has(key)).toBe(false);
@@ -1380,7 +1602,7 @@ describe("company filtering and persistent bookmarks", () => {
       window.history.replaceState(null, "", path);
       await ready();
       const company = dataset.companies[0];
-      const details = screen.getByRole(role, { name: company.name });
+      const details = await screen.findByRole(role, { name: company.name });
       const identity = within(details).getByRole("group", {
         name: company.name,
       });
@@ -1750,6 +1972,7 @@ describe("incremental catalog integration", () => {
       within(dialog).getByRole("button", { name: "閉じる" }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(48);
+    await userEvent.click(nav("ホーム"));
     await userEvent.click(nav("探す"));
     expect(screen.getAllByRole("article")).toHaveLength(24);
     await userEvent.click(screen.getByRole("button", { name: "もっと見る" }));
@@ -1768,6 +1991,48 @@ describe("incremental catalog integration", () => {
       within(group).getByRole("button", { name: "ソフトウェア" }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(24);
+  });
+});
+
+describe("personal-plan sections", () => {
+  it("keeps interest and assignment headings outside company cards at the same heading level", async () => {
+    saved.add("AM-1");
+    window.history.replaceState(null, "", "/favorites/");
+    await ready();
+    const interests = screen.getByRole("heading", {
+      name: "気になる 1",
+      level: 2,
+    });
+    const assigned = screen.getByRole("heading", {
+      name: "指定企業",
+      level: 2,
+    });
+    expect(interests.closest("article")).toBeNull();
+    expect(assigned.closest("article")).toBeNull();
+    expect(
+      interests.compareDocumentPosition(assigned) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    const assignments = screen.getByRole("region", { name: "指定企業" });
+    expect(assignments).not.toContainElement(assigned);
+    expect(within(assignments).queryByRole("article")).not.toBeInTheDocument();
+    expect(within(assignments).getAllByRole("link")).toHaveLength(
+      dataset.assignments[0].visits.length,
+    );
+    expect(
+      within(assignments)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(
+      dataset.assignments[0].visits.map(
+        (visit) =>
+          dataset.companies.find((company) => company.id === visit.company_id)!
+            .name,
+      ),
+    );
+    expect(
+      within(interests.closest("section")!).getAllByRole("article"),
+    ).toHaveLength(1);
   });
 });
 
@@ -1796,7 +2061,7 @@ describe("retained interest cards", () => {
       }),
     ).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector(".saved-count")).toBeNull();
-    await userEvent.click(nav("一覧"));
+    await userEvent.click(nav("ホーム"));
     await userEvent.click(nav("気になる"));
     expect(
       within(card(company.name)).getByRole("button", {

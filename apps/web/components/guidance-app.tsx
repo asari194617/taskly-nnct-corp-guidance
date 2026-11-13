@@ -30,6 +30,7 @@ import VenueMap from "./venue-map";
 import HeaderActions from "./header-actions";
 import IncrementalCompanyList from "./incremental-company-list";
 import IndustryChips from "./industry-chips";
+import HomeDashboard from "./home-dashboard";
 import { useEventTime } from "./use-event-time";
 import { formatScheduleTime, type EventTimeState } from "../lib/event-time";
 import {
@@ -39,11 +40,10 @@ import {
   MapCompanyPanel,
 } from "./company-details";
 
-const EC4 = { department: "電子制御工学科", grade: 4 };
 const returnKey = "guidance-return-route";
 const navigation: { id: View; title: string; short: string; icon: IconName }[] =
   [
-    { id: "companies", title: "一覧", short: "一覧", icon: "building" },
+    { id: "home", title: "ホーム", short: "ホーム", icon: "home" },
     { id: "search", title: "探す", short: "探す", icon: "search" },
     { id: "schedule", title: "スケジュール", short: "予定", icon: "calendar" },
     { id: "map", title: "会場マップ", short: "マップ", icon: "map" },
@@ -123,7 +123,7 @@ type BookmarkState = {
 };
 
 export default function GuidanceApp({
-  initialView = "companies",
+  initialView = "home",
 }: {
   initialView?: View;
 }) {
@@ -202,8 +202,9 @@ export default function GuidanceApp({
       };
       const href = routeHref(next);
       if (href !== window.location.pathname + window.location.search) {
-        if (replace)
-          window.history.replaceState(window.history.state, "", href);
+        // Fresh state lets Next synchronize its canonical URL before copying
+        // its internal history flags; reusing history.state bypasses that sync.
+        if (replace) window.history.replaceState({}, "", href);
         else window.history.pushState({}, "", href);
       }
       routeRef.current = next;
@@ -240,7 +241,7 @@ export default function GuidanceApp({
       target !==
       window.location.pathname + window.location.search + window.location.hash
     ) {
-      window.history.replaceState(window.history.state, "", target);
+      window.history.replaceState({}, "", target);
     }
     const sync = () => {
       const current = readRoute(
@@ -258,7 +259,7 @@ export default function GuidanceApp({
     const title =
       route.view === "info"
         ? "配布資料の案内"
-        : navigation.find((item) => item.id === route.view)?.title || "一覧";
+        : navigation.find((item) => item.id === route.view)?.title || "ホーム";
     document.title = `${title} | 企業ガイダンス | Taskly`;
   }, [route.view]);
   const expireSession = useCallback(() => {
@@ -426,8 +427,8 @@ export default function GuidanceApp({
   );
   const assignment = data?.assignments.find(
     (item) =>
-      item.department === EC4.department &&
-      item.grade === EC4.grade &&
+      item.department === preferences?.department &&
+      item.grade === preferences?.grade &&
       item.number === preferences?.roster_number,
   );
   const assignedIDs = useMemo(
@@ -443,8 +444,7 @@ export default function GuidanceApp({
             session:
               (route.view === "map"
                 ? data?.companies.find(
-                    (company) =>
-                      company.id === (route.company || route.focus),
+                    (company) => company.id === (route.company || route.focus),
                   )?.session
                 : undefined) ||
               eventTime.automaticSession ||
@@ -503,7 +503,7 @@ export default function GuidanceApp({
       <header className="topbar">
         <div className="header-brand">
           <Brand
-            homeHref={routeHref({ ...route, view: "companies", company: "" })}
+            homeHref={routeHref({ ...route, view: "home", company: "" })}
           />
         </div>
         {ready && menu(false)}
@@ -582,10 +582,26 @@ export default function GuidanceApp({
             {route.company && !selected && (
               <div className="top-error">
                 <Message error>企業が見つかりません。</Message>
-                <TextButton onClick={closeCompany}>一覧へ戻る</TextButton>
+                <TextButton onClick={closeCompany}>閉じる</TextButton>
               </div>
             )}
-            {(route.view === "companies" || route.view === "search") && (
+            {route.view === "home" && (
+              <HomeDashboard
+                key={`${user.sub}:${preferences.department}:${preferences.grade}:${preferences.roster_number}:${data.event.date}`}
+                data={data}
+                preferences={preferences}
+                assignment={assignment}
+                savedIDs={saved}
+                route={effectiveRoute}
+                eventTime={eventTime}
+                onRouteChange={changeRoute}
+                onSelectCompany={openCompany}
+                onSaveCompany={toggleSave}
+                onConfigure={() => setSettingNumber(true)}
+                onExpired={expireSession}
+              />
+            )}
+            {route.view === "search" && (
               <Companies
                 data={data}
                 saved={saved}
@@ -887,96 +903,89 @@ function Companies({
       ].sort((a, b) => a.localeCompare(b, "ja")),
     [data],
   );
-  const searching = route.view === "search";
   const filtered = useMemo(
     () =>
-      !searching
-        ? data.companies
-        : data.companies.filter(
-            (company) =>
-              (route.session === "all" || company.session === route.session) &&
-              (!route.industries.length ||
-                route.industries.some((industry) =>
-                  company.industries.includes(industry),
-                )) &&
-              (!route.saved || saved.has(company.id)) &&
-              (!route.q.trim() ||
-                normalized(
-                  `${company.name} ${company.booth} ${company.industries.join(" ")}`,
-                ).includes(normalized(route.q))),
-          ),
-    [data, route, saved, searching],
+      data.companies.filter(
+        (company) =>
+          (route.session === "all" || company.session === route.session) &&
+          (!route.industries.length ||
+            route.industries.some((industry) =>
+              company.industries.includes(industry),
+            )) &&
+          (!route.saved || saved.has(company.id)) &&
+          (!route.q.trim() ||
+            normalized(
+              `${company.name} ${company.booth} ${company.industries.join(" ")}`,
+            ).includes(normalized(route.q))),
+      ),
+    [data, route, saved],
   );
   const ordered = useMemo(
     () => [...filtered].sort((a, b) => a.name.localeCompare(b.name, "ja")),
     [filtered],
   );
-  const listKey = searching
-    ? JSON.stringify([
-        "search",
-        route.q,
-        route.session,
-        [...route.industries].sort(),
-        route.saved,
-      ])
-    : "directory";
+  const listKey = JSON.stringify([
+    "search",
+    route.q,
+    route.session,
+    [...route.industries].sort(),
+    route.saved,
+  ]);
   return (
     <>
       <div className="view-heading">
-        <h1>{searching ? "探す" : "一覧"}</h1>
+        <h1>探す</h1>
       </div>
-      {searching && (
-        <section className="company-search" aria-label="企業の検索と絞り込み">
-          <div className="search-row">
-            <label className="search-field">
-              <span className="sr-only">企業名・業種・ブース番号で検索</span>
-              <span className="company-search-icon" aria-hidden="true">
-                <Icon name="search" size={20} />
-              </span>
-              <TextField
-                id="company-search"
-                type="search"
-                placeholder="企業名・業種・ブース番号で検索"
-                value={route.q}
-                onChange={(event) =>
-                  onRouteChange({ q: event.target.value }, true)
-                }
-              />
-            </label>
-            <IndustryFilter
-              options={industries}
-              selected={route.industries}
-              onChange={(industries) => onRouteChange({ industries })}
+      <section className="company-search" aria-label="企業の検索と絞り込み">
+        <div className="search-row">
+          <label className="search-field">
+            <span className="sr-only">企業名・業種・ブース番号で検索</span>
+            <span className="company-search-icon" aria-hidden="true">
+              <Icon name="search" size={20} />
+            </span>
+            <TextField
+              id="company-search"
+              type="search"
+              placeholder="企業名・業種・ブース番号で検索"
+              value={route.q}
+              onChange={(event) =>
+                onRouteChange({ q: event.target.value }, true)
+              }
             />
+          </label>
+          <IndustryFilter
+            options={industries}
+            selected={route.industries}
+            onChange={(industries) => onRouteChange({ industries })}
+          />
+        </div>
+        <div className="filter-row">
+          <fieldset className="session-tabs">
+            <legend>参加時間帯</legend>
+            <SegmentedControl
+              selectedId={route.session}
+              options={[
+                { id: "all", label: "すべて" },
+                { id: "AM", label: "午前の部" },
+                { id: "PM", label: "午後の部" },
+              ]}
+              onClick={(_, session) =>
+                onRouteChange({ session: session as RouteState["session"] })
+              }
+            />
+          </fieldset>
+          <div className="saved-filter">
+            <Checkbox
+              checked={route.saved}
+              onChange={(event) =>
+                onRouteChange({ saved: event.target.checked })
+              }
+            >
+              気になるのみ
+            </Checkbox>
           </div>
-          <div className="filter-row">
-            <fieldset className="session-tabs">
-              <legend>参加時間帯</legend>
-              <SegmentedControl
-                selectedId={route.session}
-                options={[
-                  { id: "all", label: "すべて" },
-                  { id: "AM", label: "午前の部" },
-                  { id: "PM", label: "午後の部" },
-                ]}
-                onClick={(_, session) =>
-                  onRouteChange({ session: session as RouteState["session"] })
-                }
-              />
-            </fieldset>
-            <div className="saved-filter">
-              <Checkbox
-                checked={route.saved}
-                onChange={(event) =>
-                  onRouteChange({ saved: event.target.checked })
-                }
-              >
-                気になるのみ
-              </Checkbox>
-            </div>
-          </div>
-        </section>
-      )}
+        </div>
+      </section>
       <div className="results-label" aria-live="polite">
         <span>
           <strong>{filtered.length}</strong> 社
@@ -1482,8 +1491,13 @@ function Plan({
           </Empty>
         )}
       </section>
-      <section className="assignment-panel">
-        <h2>指定企業</h2>
+      <div className="section-heading">
+        <h2 id="favorites-assigned-heading">指定企業</h2>
+      </div>
+      <section
+        className="assigned-companies"
+        aria-labelledby="favorites-assigned-heading"
+      >
         {assignment ? (
           <div className="assignment-visits">
             {assignment.visits.map((visit) => {

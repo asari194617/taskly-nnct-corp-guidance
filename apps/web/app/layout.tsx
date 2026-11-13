@@ -8,7 +8,7 @@ import "./globals.css";
 const title = "企業ガイダンス | Taskly";
 const description =
   "企業情報、見学スケジュール、指定企業、会場マップを確認できます。";
-const ogImage = "https://cdn.taskly.iy0306.com/assets/thumbnail-dark.webp";
+const ogImage = "/ogp.jpg";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://nnct-corp-guidance-2026.taskly.iy0306.com"),
@@ -30,13 +30,13 @@ export const metadata: Metadata = {
     description,
     url: "/",
     locale: "ja_JP",
-    images: [{ url: ogImage, type: "image/webp" }],
+    images: [{ url: ogImage, type: "image/jpeg", width: 1920, height: 1080 }],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
-    images: [ogImage],
+    images: [{ url: ogImage, type: "image/jpeg", width: 1920, height: 1080 }],
   },
 };
 

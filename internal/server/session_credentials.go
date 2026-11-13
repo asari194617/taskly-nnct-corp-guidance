@@ -139,21 +139,26 @@ func (s *Server) invalidateSession(ctx context.Context, hash string, credentials
 }
 
 func (s *Server) sessionIdentity(ctx context.Context, hash string) (User, *sessionFailure) {
+	user, _, failure := s.sessionIdentityWithToken(ctx, hash)
+	return user, failure
+}
+
+func (s *Server) sessionIdentityWithToken(ctx context.Context, hash string) (User, string, *sessionFailure) {
 	encrypted, expiry, err := s.store.Session(ctx, hash)
 	if errors.Is(err, ErrNotFound) || (err == nil && !expiry.After(time.Now())) {
-		return User{}, &sessionFailure{401, "authentication_required"}
+		return User{}, "", &sessionFailure{401, "authentication_required"}
 	}
 	if err != nil {
-		return User{}, &sessionFailure{503, "session_unavailable"}
+		return User{}, "", &sessionFailure{503, "session_unavailable"}
 	}
 	credentials, err := s.decryptCredentials(encrypted)
 	if err != nil {
-		return User{}, &sessionFailure{503, "session_unavailable"}
+		return User{}, "", &sessionFailure{503, "session_unavailable"}
 	}
 	if credentials.RefreshToken != "" && !credentials.AccessExpiry.After(time.Now().Add(refreshWindow)) {
 		store, ok := s.store.(SessionCredentialStore)
 		if !ok {
-			return User{}, &sessionFailure{503, "session_unavailable"}
+			return User{}, "", &sessionFailure{503, "session_unavailable"}
 		}
 		refreshAttempted := false
 		// Completing rotation must not depend on whether the user closes a tab.
@@ -207,29 +212,29 @@ func (s *Server) sessionIdentity(ctx context.Context, hash string) (User, *sessi
 				if failure.status == 401 && !refreshAttempted {
 					s.invalidateSession(ctx, hash, credentials)
 				}
-				return User{}, failure
+				return User{}, "", failure
 			}
 			if errors.Is(err, ErrNotFound) {
-				return User{}, &sessionFailure{401, "authentication_required"}
+				return User{}, "", &sessionFailure{401, "authentication_required"}
 			}
-			return User{}, &sessionFailure{503, "session_unavailable"}
+			return User{}, "", &sessionFailure{503, "session_unavailable"}
 		}
 		credentials, err = s.decryptCredentials(encrypted)
 		if err != nil {
-			return User{}, &sessionFailure{503, "session_unavailable"}
+			return User{}, "", &sessionFailure{503, "session_unavailable"}
 		}
 	}
 	user, status, err := s.userinfo(ctx, credentials.AccessToken)
 	if err != nil {
 		if status == 401 || status == 403 {
 			s.invalidateSession(ctx, hash, credentials)
-			return User{}, &sessionFailure{401, "authentication_required"}
+			return User{}, "", &sessionFailure{401, "authentication_required"}
 		}
-		return User{}, &sessionFailure{503, "identity_unavailable"}
+		return User{}, "", &sessionFailure{503, "identity_unavailable"}
 	}
 	if credentials.Subject != "" && user.Sub != credentials.Subject {
 		s.invalidateSession(ctx, hash, credentials)
-		return User{}, &sessionFailure{401, "authentication_required"}
+		return User{}, "", &sessionFailure{401, "authentication_required"}
 	}
-	return user, nil
+	return user, credentials.AccessToken, nil
 }

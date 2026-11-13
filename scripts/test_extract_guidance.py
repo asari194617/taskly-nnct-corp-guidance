@@ -7,6 +7,7 @@ from unittest.mock import patch
 from extract_guidance import (
     assignment_row, booth_rectangles, company_rows, extract, extract_map_booths,
     notice_sections, notice_text, recognize_booth_candidates, resolve_booth_numbers, schedule_rows, validate,
+    task_actions,
 )
 
 
@@ -108,6 +109,68 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(result[2]["blocks"][-1], {"type": "paragraph", "text": "(注)追記。"})
         self.assertEqual(notice_sections(["見出しがないページ\n本文"]), [])
 
+    def test_task_actions_extract_source_links_deadline_and_physical_sheet_page(self):
+        texts = [
+            "架空の表紙",
+            "−7−\n1社聴講終了ごとに架空シートを記入し、見学アンケートに回答してください。\n"
+            "キャリアガイダンス終了後は全体アンケートに回答してください。\n"
+            "本科3、4年生はP70-71の用紙を会場出口の箱に提出してください。\n"
+            "見学アンケート、全体アンケートの回答期限は６月１７日２４時です。",
+            "−9−\n【アンケート】\n【見学アンケート】\n〈 https://forms.example.test/visit-feedback 〉\n"
+            "【全体アンケート】\n〈 https://forms.example.test/event-feedback 〉",
+            "−70−\nキャリアガイダンス 見学企業シート\n"
+            "このチェックシートは終了後、出口の箱に切り取って提出してください。",
+            "−71−\n架空シートの裏面",
+        ]
+        actions = task_actions(texts, "2032-06-17")
+        self.assertEqual(actions["visit_survey"], {
+            "url": "https://forms.example.test/visit-feedback", "source_page": 9,
+            "due_at": "2032-06-18T00:00:00+09:00",
+            "instructions": "1社聴講終了ごとに架空シートを記入し、見学アンケートに回答してください。",
+        })
+        self.assertEqual(actions["overall_survey"]["due_at"], "2032-06-18T00:00:00+09:00")
+        self.assertEqual(actions["overall_survey"]["instructions"], "キャリアガイダンス終了後は全体アンケートに回答してください。")
+        self.assertEqual(actions["sheet_submission"], {
+            "document_id": "guidebook", "page": 4, "source_page": 70,
+            "instructions": "本科3、4年生はP70-71の用紙を会場出口の箱に提出してください。",
+        })
+        self.assertNotIn("due_at", actions["sheet_submission"])
+
+    def test_task_actions_do_not_invent_missing_links_or_a_clock_deadline(self):
+        self.assertEqual(task_actions(["アンケートは当日中に回答する。"], "2032-06-17"), {})
+        actions = task_actions(["【見学アンケート】\nhttps://forms.example.test/visit-feedback\n回答期限は当日です。"], "2032-06-17")
+        self.assertEqual(actions, {"visit_survey": {"url": "https://forms.example.test/visit-feedback"}})
+        fallback = task_actions([
+            "キャリアガイダンス 見学企業シート\nこのチェックシートは出口に提出してください。",
+        ], "2032-06-17")["sheet_submission"]
+        self.assertEqual(fallback["page"], 1)
+        self.assertEqual(fallback["instructions"], "このチェックシートは出口に提出してください。")
+        self.assertNotIn("source_page", fallback)
+        no_instruction = task_actions(["見学企業シート このチェックシートは未完の文"], "2032-06-17")
+        self.assertNotIn("instructions", no_instruction["sheet_submission"])
+
+    def test_task_actions_reject_unsafe_missing_and_ambiguous_source_urls(self):
+        for link in ["http://forms.example.test/visit", "https://user:secret@forms.example.test/visit",
+                     "https://forms.example.test/one https://forms.example.test/two", "URLなし"]:
+            with self.subTest(link=link), self.assertRaises(ValueError):
+                task_actions(["【見学アンケート】\n" + link], "2032-06-17")
+        with self.assertRaisesRegex(ValueError, "Conflicting questionnaire URLs"):
+            task_actions(["【見学アンケート】https://forms.example.test/one",
+                          "【見学アンケート】https://forms.example.test/two"], "2032-06-17")
+        repeated = task_actions(["【見学アンケート】https://forms.example.test/one"] * 2, "2032-06-17")
+        self.assertEqual(repeated["visit_survey"]["url"], "https://forms.example.test/one")
+
+    def test_task_actions_deadline_preserves_source_year_minutes_and_rejects_conflicts(self):
+        heading = "【全体アンケート】https://forms.example.test/event-feedback"
+        actions = task_actions([heading, "回答期限は2033年2月3日17時30分です。"], "2032-06-17")
+        self.assertEqual(actions["overall_survey"]["due_at"], "2033-02-03T17:30:00+09:00")
+        for value in ["回答期限は6月17日25時", "回答期限は6月17日24時1分", "回答期限は6月17日17時60分",
+                      "回答期限は2月30日17時"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                task_actions([heading, value], "2032-06-17")
+        with self.assertRaisesRegex(ValueError, "Conflicting questionnaire deadlines"):
+            task_actions([heading, "回答期限は6月17日23時", "回答期限は6月18日23時"], "2032-06-17")
+
     def test_invalid_and_duplicate_company_references_rejected(self):
         dataset = {
             "companies": [{"id": "AM-1", "session": "AM", "booth": 1}, {"id": "PM-1", "session": "PM", "booth": 1}],
@@ -132,6 +195,9 @@ class ExtractionTests(unittest.TestCase):
             "名簿 番号\n①ターム ③ターム ⑤ターム ⑥ターム\n架空学科 3年生 1 架空会社A 1 架空会社A 1 架空会社B 1 架空会社B 1",
             "−1−\nブース配置図(架空階)",
             "−2−\n昼食休憩室案内図(架空階)",
+            "−9−\n【見学アンケート】https://forms.example.test/visit-feedback\n"
+            "【全体アンケート】https://forms.example.test/event-feedback\n回答期限は1月2日24時です。",
+            "−70−\nキャリアガイダンス 見学企業シート\nこのチェックシートは出口に提出してください。",
         ]
 
         class Writer:
@@ -162,6 +228,9 @@ class ExtractionTests(unittest.TestCase):
             output = Path(directory) / "private"
             result = extract(source, output)
             self.assertEqual(result["event"]["date"], "2030-01-02")
+            self.assertEqual(result["event"]["task_actions"]["visit_survey"]["url"], "https://forms.example.test/visit-feedback")
+            self.assertEqual(result["event"]["task_actions"]["overall_survey"]["due_at"], "2030-01-03T00:00:00+09:00")
+            self.assertEqual(result["event"]["task_actions"]["sheet_submission"]["page"], 8)
             self.assertEqual(len(result["companies"]), 2)
             self.assertEqual(len(result["assignments"]), 1)
             self.assertEqual(len(result["documents"]), 5)

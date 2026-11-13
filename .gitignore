@@ -38,3 +38,5 @@ python-coverage.json
 /integration.json
 /e2e.json
 *.tsbuildinfo
+/apps/web/test-results/
+/.e2e/

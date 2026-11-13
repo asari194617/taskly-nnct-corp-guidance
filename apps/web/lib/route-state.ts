@@ -1,5 +1,4 @@
-export type View =
-  "companies" | "search" | "schedule" | "map" | "plan" | "info";
+export type View = "home" | "search" | "schedule" | "map" | "plan" | "info";
 export type RouteState = {
   view: View;
   company: string;
@@ -12,7 +11,7 @@ export type RouteState = {
   assigned: boolean;
 };
 const paths: Record<View, string> = {
-  companies: "/",
+  home: "/",
   search: "/search/",
   schedule: "/schedule/",
   map: "/map/",
@@ -20,7 +19,7 @@ const paths: Record<View, string> = {
   info: "/documents/",
 };
 export const defaultRoute: RouteState = {
-  view: "companies",
+  view: "home",
   company: "",
   focus: "",
   session: "all",
@@ -48,9 +47,11 @@ export function readRoute(search: string, pathname = "/"): RouteState {
     ([, value]) => value === path,
   )?.[0];
   const view =
-    path === "/" && legacy && Object.keys(paths).includes(legacy)
-      ? (legacy as View)
-      : fromPath || "companies";
+    path === "/" && legacy === "companies"
+      ? "search"
+      : path === "/" && legacy && Object.keys(paths).includes(legacy)
+        ? (legacy as View)
+        : fromPath || "home";
   const session = query.get("session");
   return {
     view,

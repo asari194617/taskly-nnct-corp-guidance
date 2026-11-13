@@ -7,7 +7,7 @@ import {
 } from "../lib/route-state";
 
 const paths = {
-  companies: "/",
+  home: "/",
   search: "/search/",
   schedule: "/schedule/",
   map: "/map/",
@@ -16,11 +16,11 @@ const paths = {
 } as const;
 
 describe("shareable guidance pages", () => {
-  it("uses the clean listing page by default", () => {
+  it("uses the clean home page by default", () => {
     expect(readRoute("")).toEqual(defaultRoute);
     expect(routeHref(defaultRoute)).toBe("/");
     expect(readRoute("?view=companies&session=all&saved=0&assigned=0")).toEqual(
-      { ...defaultRoute, sessionExplicit: true },
+      { ...defaultRoute, view: "search", sessionExplicit: true },
     );
   });
 
@@ -58,6 +58,21 @@ describe("shareable guidance pages", () => {
       expect(url.searchParams.has("view")).toBe(false);
     },
   );
+
+  it("keeps legacy listing company links usable on the actual search page", () => {
+    const legacy = readRoute(
+      "?view=companies&company=AM-2&industry=機械&saved=1",
+    );
+    expect(legacy).toMatchObject({
+      view: "search",
+      company: "AM-2",
+      industries: ["機械"],
+      saved: true,
+    });
+    expect(routeHref(legacy)).toBe(
+      "/search/?company=AM-2&industry=%E6%A9%9F%E6%A2%B0&saved=1",
+    );
+  });
 
   it("lets a dedicated page take precedence over an obsolete view parameter", () => {
     expect(readRoute("?view=map", "/search/").view).toBe("search");
@@ -162,7 +177,7 @@ describe("shareable guidance pages", () => {
     );
     expect(routeHref(route)).toBe("/favorites/?saved=1");
     expect(defaultRoute).toEqual({
-      view: "companies",
+      view: "home",
       company: "",
       focus: "",
       session: "all",
