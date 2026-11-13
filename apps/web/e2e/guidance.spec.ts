@@ -1540,6 +1540,66 @@ test("Account actions, interest labels and document guidance are available witho
   );
 });
 
+test("Brand spacing groups the logo and title before the desktop menu", async ({
+  page,
+}) => {
+  await login(page, "presentation");
+  for (const viewport of [
+    { width: 320, height: 700 },
+    { width: 1024, height: 900 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const metrics = await page.getByRole("banner").evaluate((header) => {
+      const brand = header.querySelector<HTMLElement>(".brand")!;
+      const logo = brand.querySelector("img")!.getBoundingClientRect();
+      const caption = brand
+        .querySelector(".brand-caption")!
+        .getBoundingClientRect();
+      const brandBounds = brand.getBoundingClientRect();
+      const navigation = header.querySelector<HTMLElement>(
+        ".desktop-navigation",
+      )!;
+      const navBounds = navigation.getBoundingClientRect();
+      const actions = header
+        .querySelector(".header-right")!
+        .getBoundingClientRect();
+      const bounds = header.getBoundingClientRect();
+      const style = getComputedStyle(header);
+      const tokenPixels = (name: string) => {
+        const probe = document.createElement("span");
+        probe.style.cssText = `position:absolute;visibility:hidden;width:var(${name});height:0;padding:0;border:0`;
+        header.append(probe);
+        const pixels = probe.getBoundingClientRect().width;
+        probe.remove();
+        return pixels;
+      };
+      return {
+        logoTitleGap: caption.left - logo.right,
+        titleMenuGap: navBounds.left - brandBounds.right,
+        smallGap: tokenPixels("--spacing-relative-spacing-lv2"),
+        largeGap: tokenPixels("--spacing-relative-spacing-lv7"),
+        navigationVisible: getComputedStyle(navigation).display !== "none",
+        headerHeight: bounds.height,
+        actionsRight: actions.right,
+        expectedActionsRight: bounds.right - parseFloat(style.paddingRight),
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    expect(metrics.logoTitleGap).toBeCloseTo(metrics.smallGap, 1);
+    expect(metrics.overflow).toBe(false);
+    expect(metrics.actionsRight).toBeCloseTo(metrics.expectedActionsRight, 1);
+    expect(metrics.headerHeight).toBe(viewport.width < 1024 ? 60 : 64);
+    if (viewport.width >= 1024) {
+      expect(metrics.navigationVisible).toBe(true);
+      expect(metrics.titleMenuGap).toBeCloseTo(metrics.largeGap, 1);
+      expect(metrics.titleMenuGap).toBeGreaterThan(metrics.logoTitleGap);
+    } else {
+      expect(metrics.navigationVisible).toBe(false);
+    }
+  }
+});
+
 test("Long company names align left without underlines and schedule markers align with titles", async ({
   page,
 }) => {
