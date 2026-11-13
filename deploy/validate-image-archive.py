@@ -124,7 +124,11 @@ def validate(source_path, output_path, sha):
                     data = json.load(source, object_pairs_hook=object_pairs)
                 except (ValueError, UnicodeError):
                     continue  # Layer contents are opaque to this validator.
-                if isinstance(data, dict) and data.get("mediaType") == "application/vnd.oci.image.manifest.v1+json" and not data.get("artifactType"):
+                # Docker save can omit mediaType or use Docker's media type,
+                # depending on the image store. Shape and references matter.
+                if (isinstance(data, dict) and data.get("schemaVersion") == 2
+                        and "config" in data and "layers" in data
+                        and not data.get("artifactType") and not data.get("subject")):
                     image_manifests.append(data)
         if len(image_manifests) != 1:
             raise InvalidArchive("expected one OCI image")

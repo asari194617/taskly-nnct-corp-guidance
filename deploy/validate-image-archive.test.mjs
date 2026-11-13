@@ -123,21 +123,37 @@ test('isolated Docker daemon keeps a pre-existing unrelated tag unchanged on rej
     const invalid = join(root, 'invalid.tar.gz');
     const output = join(root, 'validated.tar');
     writeFileSync(invalid, gzipSync(readFileSync(valid)));
+    const useEntrypoint = spawnSync('flock', ['--version'], { stdio: 'ignore' }).status === 0;
+    if (useEntrypoint) {
+      const entrypoint = readFileSync(resolve('deploy/deploy-entrypoint.sh'), 'utf8')
+        .replace('/home/ubuntu/taskly-nnct-corp-guidance', root);
+      writeFileSync(join(root, 'deploy-entrypoint.sh'), entrypoint, { mode: 0o700 });
+      writeFileSync(join(root, 'validate-image-archive.py'), readFileSync(validator));
+      writeFileSync(join(root, 'remote-deploy.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    }
+    const attempt = (archive, requested) => useEntrypoint
+      ? spawnSync('bash', [join(root, 'deploy-entrypoint.sh')], {
+          cwd: root, input: readFileSync(archive), encoding: 'utf8',
+          env: { ...process.env, SSH_ORIGINAL_COMMAND: `deploy ${requested}` },
+        })
+      : spawnSync('python3', [validator, archive, output, requested], { encoding: 'utf8' });
     for (const [name, archive, requested] of [
       ['unrelated repository', unrelated, sha],
       ['additional image', extra, sha],
       ['different requested SHA', invalid, other],
       ['revision mismatch', wrongRevision, sha],
     ]) {
-      const rejected = spawnSync('python3', [validator, archive, output, requested], { encoding: 'utf8' });
+      const rejected = attempt(archive, requested);
       assert.equal(rejected.status, 2, `${name}: ${rejected.stderr}`);
       assert.equal(existsSync(output), false, name);
       assert.equal(dockerId(sentinel), original, name);
     }
-    const accepted = spawnSync('python3', [validator, invalid, output, sha], { encoding: 'utf8' });
+    const accepted = attempt(invalid, sha);
     assert.equal(accepted.status, 0, accepted.stderr);
-    const load = spawnSync('docker', ['load', '-i', output], { encoding: 'utf8' });
-    assert.equal(load.status, 0, load.stderr);
+    if (!useEntrypoint) {
+      const load = spawnSync('docker', ['load', '-i', output], { encoding: 'utf8' });
+      assert.equal(load.status, 0, load.stderr);
+    }
     assert.equal(dockerId(sentinel), original);
   } finally {
     spawnSync('docker', ['image', 'rm', '-f', sentinel, target]);
