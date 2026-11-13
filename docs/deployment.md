@@ -6,6 +6,7 @@
 - UI の HTTPS は R2 custom domain が管理する証明書を使用。Cloudflare の URL rewrite で `/` は `/index.html`、`/search/`・`/favorites/`・`/schedule/`・`/documents/`・`/map/` はそれぞれの `index.html` を取得し、外部URLとクエリを保持する。対象ページの末尾スラッシュなしURLは308で補完し、旧 `/index.html` はクエリ保持302で `/` へ転送する。旧 `?view=` は画面側で実ページへ正規化する。
 - API の DNS は `api.nnct-corp-guidance-2026.taskly.iy0306.com`、DNS-only。mirai-sv の Nginx が専用 Let's Encrypt 証明書で HTTPS を終端し、`127.0.0.1:3071` の Go コンテナへ転送する。
 - API は既存 Docker network `infra_default` の MySQL 8.4 を使用する。専用 database `taskly_nnct_corp_guidance`、専用ユーザー `nnct_guidance` はこの DB の読み書きだけを許可する。
+- 開発・CI の MySQL は 9.7.4 LTS。本番の `infra-db-1` は taskly 本体や認証サービスと共有しているため、このリポジトリの Compose や API 配備では更新されない。共有 DB の更新には利用する全サービスの互換性確認、バックアップ、切り戻し手順が必要。
 - 作業ディレクトリは `/home/ubuntu/taskly-nnct-corp-guidance`。外側のディレクトリ0700、`.env.production` は0600。API は資料のファイルを読み込まず、非公開R2 bucketのオブジェクトへの一時URLだけを発行する。APIコンテナへPDF・PNGや私有 `data` ディレクトリをマウントしない。
 
 ## 認証とデータの境界
