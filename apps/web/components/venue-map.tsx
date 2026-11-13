@@ -477,22 +477,58 @@ export default function VenueMap({
       else if (selectedBounds.top >= bounds.bottom)
         element.scrollTop += selectedBounds.bottom - bounds.bottom + padding;
 
+      const intersects = (first: DOMRect, second: DOMRect) =>
+        first.right > second.left &&
+        first.left < second.right &&
+        first.bottom > second.top &&
+        first.top < second.bottom;
       const panelBounds = panel?.getBoundingClientRect();
-      if (!panelBounds?.width || !panelBounds.height) return;
       selectedBounds = target.getBoundingClientRect();
-      const overlaps =
-        selectedBounds.right > panelBounds.left &&
-        selectedBounds.left < panelBounds.right &&
-        selectedBounds.bottom > panelBounds.top &&
-        selectedBounds.top < panelBounds.bottom;
-      if (!overlaps) return;
-      const sidePane =
-        panelBounds.left > bounds.left + bounds.width * 0.35 &&
-        panelBounds.width < bounds.width * 0.75;
-      if (sidePane)
-        element.scrollLeft += selectedBounds.right - panelBounds.left + padding;
-      else
-        element.scrollTop += selectedBounds.bottom - panelBounds.top + padding;
+      if (
+        panelBounds?.width &&
+        panelBounds.height &&
+        intersects(selectedBounds, panelBounds)
+      ) {
+        const sidePane =
+          panelBounds.left > bounds.left + bounds.width * 0.35 &&
+          panelBounds.width < bounds.width * 0.75;
+        if (sidePane)
+          element.scrollLeft +=
+            selectedBounds.right - panelBounds.left + padding;
+        else
+          element.scrollTop +=
+            selectedBounds.bottom - panelBounds.top + padding;
+      }
+      // The right-hand map controls can cover a booth that is otherwise beside
+      // or above the company pane. Reveal it above that stack, without zooming.
+      const controls = element
+        .closest(".venue-map")
+        ?.querySelector<HTMLElement>(".venue-map-bottom-right");
+      if (controls) {
+        selectedBounds = target.getBoundingClientRect();
+        const covered = Array.from(controls.children).some((child) => {
+          const controlBounds = child.getBoundingClientRect();
+          return (
+            controlBounds.width &&
+            controlBounds.height &&
+            intersects(selectedBounds, controlBounds)
+          );
+        });
+        if (covered) {
+          const controlBounds = controls.getBoundingClientRect();
+          const moveUp = selectedBounds.bottom - controlBounds.top + padding;
+          const moveLeft = selectedBounds.right - controlBounds.left + padding;
+          if (selectedBounds.top - moveUp >= bounds.top + padding)
+            element.scrollTop += moveUp;
+          else if (selectedBounds.left - moveLeft >= bounds.left + padding)
+            element.scrollLeft += moveLeft;
+          else
+            element.scrollTop += Math.min(
+              moveUp,
+              Math.max(0, selectedBounds.top - bounds.top - padding),
+            );
+        }
+      }
     };
     reveal();
     if (panel && typeof ResizeObserver !== "undefined") {

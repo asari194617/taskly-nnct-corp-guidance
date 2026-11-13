@@ -524,9 +524,121 @@ test("Fullscreen maps keep blue selection and a non-modal company panel while ma
   await expect(zoom).toHaveText("200%");
   await expect(panel).toBeVisible();
   await full.getByRole("button", { name: "マップを縮小", exact: true }).click();
+  await page.setViewportSize({ width: 844, height: 390 });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const mapBounds = (await viewport.boundingBox())!;
+    const landscapeHeader = (await header.boundingBox())!;
+    const landscapeNav = (await mobileNavigation.boundingBox())!;
+    const landscapePanel = (await panel.boundingBox())!;
+    expect(mapBounds.y).toBeCloseTo(
+      landscapeHeader.y + landscapeHeader.height,
+      0,
+    );
+    expect(mapBounds.y + mapBounds.height).toBeCloseTo(landscapeNav.y, 0);
+    expect(landscapePanel.y).toBeGreaterThanOrEqual(mapBounds.y);
+    expect(landscapePanel.y + landscapePanel.height).toBeLessThanOrEqual(
+      landscapeNav.y,
+    );
+    for (const name of [
+      "マップを拡大",
+      "拡大率を100パーセントに戻す",
+      "マップを縮小",
+      "検証1階マップ",
+      "検証2階マップ",
+    ]) {
+      const control = full.getByRole("button", { name, exact: true });
+      const bounds = (await control.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(mapBounds.x);
+      expect(bounds.y).toBeGreaterThanOrEqual(mapBounds.y);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(
+        mapBounds.x + mapBounds.width,
+      );
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(landscapePanel.y);
+      expect(
+        await control.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return node.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          );
+        }),
+      ).toBe(true);
+    }
+    await full
+      .getByRole("button", { name: "マップを拡大", exact: true })
+      .click();
+    await expect(zoom).toHaveText("200%");
+    await full
+      .getByRole("button", { name: "マップを縮小", exact: true })
+      .click();
+    await expect(zoom).toHaveText("175%");
+    await expect(panel).toBeVisible();
+  }
+  await page.emulateMedia({ colorScheme: "light" });
   await panel
     .getByRole("button", { name: "企業情報を閉じる", exact: true })
     .click();
+  await full.getByRole("button", { name: /^表示中の一覧/ }).click();
+  const landscapeResults = full.getByRole("region", {
+    name: "表示中の一覧",
+    exact: true,
+  });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const sheetBounds = (await landscapeResults.boundingBox())!;
+    const mapBounds = (await viewport.boundingBox())!;
+    expect(sheetBounds.y).toBeGreaterThanOrEqual(mapBounds.y);
+    expect(sheetBounds.y + sheetBounds.height).toBeLessThanOrEqual(
+      mapBounds.y + mapBounds.height,
+    );
+    for (const control of [
+      landscapeResults.getByRole("button", {
+        name: "企業詳細 架空あおばソフト",
+        exact: true,
+      }),
+      landscapeResults.getByRole("button", { name: "閉じる", exact: true }),
+    ]) {
+      await expect(control).toBeVisible();
+      const bounds = (await control.boundingBox())!;
+      expect(bounds.y).toBeGreaterThanOrEqual(sheetBounds.y);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
+        sheetBounds.y + sheetBounds.height,
+      );
+      expect(
+        await control.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return node.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          );
+        }),
+      ).toBe(true);
+    }
+    await test.info().attach(`landscape-map-results-${colorScheme}`, {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await full
+    .getByRole("button", { name: "検証2階マップ", exact: true })
+    .click();
+  await expect(
+    full.getByRole("img", { name: "検証2階マップ", exact: true }),
+  ).toBeVisible();
+  await expect(landscapeResults).toBeVisible();
+  await full
+    .getByRole("button", { name: "検証1階マップ", exact: true })
+    .click();
+  await landscapeResults
+    .getByRole("button", { name: "閉じる", exact: true })
+    .click();
+  await expect(landscapeResults).not.toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(zoom).toHaveText("175%");
   await full.getByRole("button", { name: /^表示中の一覧/ }).click();
@@ -910,8 +1022,12 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
     .getByRole("region", { name: "操作できる会場マップ", exact: true });
   const bounds = (await canvas.boundingBox())!;
   expect(bounds.width).toBe(320);
-  expect(bounds.height).toBe(844);
-  await page.getByRole("link", { name: /一覧/ }).first().click();
+  const mapHeader = (await page.getByRole("banner").boundingBox())!;
+  const mapNavigation = (await mobile.boundingBox())!;
+  expect(bounds.y).toBeCloseTo(mapHeader.y + mapHeader.height, 0);
+  expect(bounds.y + bounds.height).toBeCloseTo(mapNavigation.y, 0);
+  await expect(mobile).toBeVisible();
+  await mobile.getByRole("link", { name: "一覧", exact: true }).click();
   await mobile.getByRole("link", { name: "気になる", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "指定企業", exact: true }),

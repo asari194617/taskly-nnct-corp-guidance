@@ -291,7 +291,8 @@ describe("interactive private venue map", () => {
           if (this.classList.contains("venue-map-viewport"))
             return rectangle(0, 0, 1200, 800);
           if (this.classList.contains("map-company-panel")) return panelBounds;
-          return selectedBounds;
+          if (this.classList.contains("venue-map-booth")) return selectedBounds;
+          return rectangle(0, 0, 0, 0);
         },
       );
       const options = props(),
@@ -340,6 +341,74 @@ describe("interactive private venue map", () => {
       ).toHaveTextContent("100%");
     },
   );
+
+  it("reveals a selected booth above right controls after avoiding the company pane", async () => {
+    const rectangle = (
+      left: number,
+      top: number,
+      width: number,
+      height: number,
+    ) => ({
+      x: left,
+      y: top,
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      toJSON: () => ({}),
+    });
+    let area: HTMLElement | null = null;
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(775);
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element) {
+        if (this.classList.contains("venue-map-viewport"))
+          return rectangle(0, 0, 320, 775);
+        if (this.classList.contains("map-company-panel"))
+          return rectangle(0, 465, 320, 310);
+        if (this.classList.contains("venue-map-bottom-right"))
+          return rectangle(160, 300, 148, 174);
+        if (this.classList.contains("venue-map-zoom"))
+          return rectangle(264, 300, 44, 120);
+        if (this.classList.contains("venue-map-floors"))
+          return rectangle(160, 430, 148, 44);
+        if (this.classList.contains("venue-map-booth"))
+          return rectangle(200, 450 - ((area?.scrollTop ?? 100) - 100), 20, 20);
+        return rectangle(0, 0, 0, 0);
+      },
+    );
+    const options = props();
+    const view = render(
+      <VenueMap
+        {...options}
+        documents={[{ ...documents[0], image_width: 1000, image_height: 1000 }]}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    area = screen.getByRole("region", { name: "操作できる会場マップ" });
+    area.scrollTop = 100;
+    view.rerender(
+      <VenueMap
+        {...options}
+        documents={[{ ...documents[0], image_width: 1000, image_height: 1000 }]}
+        selectedCompanyId="AM-1"
+        detailPanelOpen
+        detailPanel={
+          <section className="map-company-panel" aria-label="検証企業情報" />
+        }
+      />,
+    );
+    expect(area.scrollTop).toBe(286);
+    const selected = screen.getByRole("button", {
+      name: "午前 ブース 1 架空あおば",
+    });
+    expect(selected.getBoundingClientRect().bottom).toBe(284);
+    expect(
+      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+    ).toHaveTextContent("100%");
+  });
 
   it("supports zoom boundaries and resets the view to the selected company's floor", async () => {
     const options = props();
@@ -709,6 +778,18 @@ describe("interactive private venue map", () => {
             bottom: 70,
             width: 20,
             height: 20,
+            toJSON: () => ({}),
+          };
+        if (!this.classList.contains("venue-map-booth"))
+          return {
+            x: 0,
+            y: 0,
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 0,
+            height: 0,
             toJSON: () => ({}),
           };
         return {
