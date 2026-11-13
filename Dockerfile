@@ -7,7 +7,7 @@ COPY internal/ ./internal/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/api ./cmd/api && \
     CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/import-guidance ./cmd/import-guidance
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates && addgroup -g 10001 app && adduser -D -u 10001 -G app app
 COPY --from=build /out/api /usr/local/bin/api
 COPY --from=build /out/import-guidance /usr/local/bin/import-guidance
