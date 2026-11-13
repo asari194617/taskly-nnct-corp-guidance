@@ -30,6 +30,8 @@ import VenueMap from "./venue-map";
 import HeaderActions from "./header-actions";
 import IncrementalCompanyList from "./incremental-company-list";
 import IndustryChips from "./industry-chips";
+import { useEventTime } from "./use-event-time";
+import { formatScheduleTime, type EventTimeState } from "../lib/event-time";
 import {
   CompanyDetailContent,
   FavoriteButton,
@@ -52,9 +54,13 @@ const navigation: { id: View; title: string; short: string; icon: IconName }[] =
       icon: "bookmark",
     },
   ];
-function Brand() {
+function Brand({ homeHref }: { homeHref: string }) {
   return (
-    <a className="brand" href="/" aria-label="Taskly 企業ガイダンス ホーム">
+    <a
+      className="brand"
+      href={homeHref}
+      aria-label="Taskly 企業ガイダンス ホーム"
+    >
       <img
         className="brand-logo"
         src="/taskly-logo.svg"
@@ -66,6 +72,7 @@ function Brand() {
     </a>
   );
 }
+
 function Message({
   children,
   error = false,
@@ -100,7 +107,7 @@ function intercept(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
   action();
 }
 function timeLabel(value: string) {
-  return value.includes("T") ? value.slice(11, 16) : value;
+  return formatScheduleTime(value);
 }
 function sessionLabel(value: string) {
   return value === "AM" ? "午前" : value === "PM" ? "午後" : value;
@@ -123,6 +130,7 @@ export default function GuidanceApp({
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<Guidance | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const eventTime = useEventTime(data?.event.date, data?.schedule);
   const [status, setStatus] = useState<
     "loading" | "signed-out" | "ready" | "error"
   >("loading");
@@ -185,7 +193,13 @@ export default function GuidanceApp({
   }, []);
   const changeRoute = useCallback(
     (patch: Partial<RouteState>, replace = false) => {
-      const next = { ...routeRef.current, ...patch };
+      const next = {
+        ...routeRef.current,
+        ...patch,
+        ...(patch.session !== undefined && patch.sessionExplicit === undefined
+          ? { sessionExplicit: true }
+          : {}),
+      };
       const href = routeHref(next);
       if (href !== window.location.pathname + window.location.search) {
         if (replace)
@@ -420,6 +434,24 @@ export default function GuidanceApp({
     () => new Set(assignment?.visits.map((visit) => visit.company_id) || []),
     [assignment],
   );
+  const effectiveRoute = useMemo<RouteState>(
+    () =>
+      route.sessionExplicit
+        ? route
+        : {
+            ...route,
+            session:
+              (route.view === "map"
+                ? data?.companies.find(
+                    (company) =>
+                      company.id === (route.company || route.focus),
+                  )?.session
+                : undefined) ||
+              eventTime.automaticSession ||
+              "all",
+          },
+    [route, eventTime.automaticSession, data?.companies],
+  );
   function menu(mobile: boolean) {
     return (
       <nav
@@ -470,7 +502,9 @@ export default function GuidanceApp({
       </a>
       <header className="topbar">
         <div className="header-brand">
-          <Brand />
+          <Brand
+            homeHref={routeHref({ ...route, view: "companies", company: "" })}
+          />
         </div>
         {ready && menu(false)}
         <div className="header-right">
@@ -482,7 +516,7 @@ export default function GuidanceApp({
               currentView={route.view}
               onConfigure={() => setSettingNumber(true)}
               onInformation={() => {
-                changeRoute({ ...defaultRoute, view: "info" });
+                changeRoute({ view: "info", company: "" });
                 window.scrollTo({ top: 0, behavior: "instant" });
               }}
               onLogout={() => void logout()}
@@ -556,7 +590,7 @@ export default function GuidanceApp({
                 data={data}
                 saved={saved}
                 assignedIDs={assignedIDs}
-                route={route}
+                route={effectiveRoute}
                 onRouteChange={changeRoute}
                 onSave={toggleSave}
                 onSelect={openCompany}
@@ -569,13 +603,14 @@ export default function GuidanceApp({
                 route={route}
                 onSelect={openCompany}
                 onInformation={() => navigate("info")}
+                eventTime={eventTime}
               />
             )}
             {route.view === "map" && (
               <VenueMap
                 documents={data.documents}
                 companies={data.companies}
-                session={route.session === "PM" ? "PM" : "AM"}
+                session={effectiveRoute.session === "PM" ? "PM" : "AM"}
                 selectedCompanyId={route.company || route.focus}
                 search={route.q}
                 industries={route.industries}
@@ -614,7 +649,11 @@ export default function GuidanceApp({
                     mapReturnFocus.current = active;
                   panelKeyboardFocus.current =
                     mapInteraction.current === "keyboard";
-                  changeRoute({ company: company.id, focus: company.id });
+                  changeRoute({
+                    company: company.id,
+                    focus: company.id,
+                    session: company.session,
+                  });
                 }}
                 onSessionChange={(session) =>
                   changeRoute({ session, company: "", focus: "" })
@@ -635,7 +674,12 @@ export default function GuidanceApp({
                 onSelect={openCompany}
                 onConfigure={() => setSettingNumber(true)}
                 onFind={() => {
-                  changeRoute({ ...defaultRoute, view: "search" });
+                  changeRoute({
+                    ...defaultRoute,
+                    view: "search",
+                    session: routeRef.current.session,
+                    sessionExplicit: routeRef.current.sessionExplicit,
+                  });
                   window.scrollTo({ top: 0, behavior: "instant" });
                 }}
               />
@@ -1080,6 +1124,7 @@ function CompanyDialog({
     company: "",
     focus: company.id,
     session: company.session,
+    sessionExplicit: true,
     q: "",
     industries: [],
     saved: false,
@@ -1152,12 +1197,14 @@ function Schedule({
   route,
   onSelect,
   onInformation,
+  eventTime,
 }: {
   data: Guidance;
   assignment?: Assignment;
   route: RouteState;
   onSelect: (company: Company) => void;
   onInformation: () => void;
+  eventTime: EventTimeState;
 }) {
   return (
     <>
@@ -1171,6 +1218,38 @@ function Schedule({
           配布資料の案内
         </TextLink>
       </div>
+      {eventTime.isEventDay && (
+        <div
+          className="schedule-live-status"
+          role="status"
+          aria-label="現在のスケジュール"
+        >
+          <span>
+            現在時刻 <time>{eventTime.timeLabel}</time>
+          </span>
+          {eventTime.currentSlotId && (
+            <strong>
+              {
+                data.schedule.find(
+                  (slot) => slot.id === eventTime.currentSlotId,
+                )?.title
+              }
+            </strong>
+          )}
+          {!eventTime.currentSlotId && eventTime.nextSlotId && (
+            <span>
+              次は{" "}
+              {timeLabel(
+                data.schedule.find((slot) => slot.id === eventTime.nextSlotId)!
+                  .start,
+              )}
+            </span>
+          )}
+          {eventTime.phase === "ended" && (
+            <span>本日のスケジュールは終了しました</span>
+          )}
+        </div>
+      )}
       <section className="timeline" aria-label="ガイダンススケジュール">
         {data.schedule.map((slot) => {
           const visit = assignment?.visits.find(
@@ -1183,6 +1262,18 @@ function Schedule({
             <article
               key={slot.id}
               className={`timeline-item ${slot.term ? "is-term" : ""}`}
+              aria-current={
+                eventTime.currentSlotId === slot.id ? "time" : undefined
+              }
+              data-state={
+                eventTime.currentSlotId === slot.id
+                  ? "current"
+                  : eventTime.endedSlotIds.includes(slot.id)
+                    ? "ended"
+                    : eventTime.nextSlotId === slot.id
+                      ? "next"
+                      : undefined
+              }
             >
               <div className="timeline-time">
                 <b>{timeLabel(slot.start)}</b>
@@ -1194,6 +1285,15 @@ function Schedule({
               <div className="timeline-content">
                 <div>
                   <h2>{slot.title}</h2>
+                  {eventTime.currentSlotId === slot.id && (
+                    <span className="schedule-current-badge">現在</span>
+                  )}
+                  {eventTime.nextSlotId === slot.id && (
+                    <span className="schedule-next-badge">次</span>
+                  )}
+                  {eventTime.endedSlotIds.includes(slot.id) && (
+                    <span className="sr-only">終了</span>
+                  )}
                   {slot.term && (
                     <span
                       className={`term-badge ${slot.required_grades.includes(4) ? "required" : ""}`}
@@ -1224,6 +1324,7 @@ function Schedule({
     </>
   );
 }
+
 function Information({
   data,
   onExpired,
