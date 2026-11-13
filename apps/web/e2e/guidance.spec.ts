@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
+import { largeFixture } from "../tests/fixtures";
 
 const API = "http://127.0.0.1:3371";
 const ISSUER = "http://127.0.0.1:3372";
@@ -9,6 +10,10 @@ const nav = (page: Page, name: string) =>
   page
     .getByRole("navigation", { name: "メインナビゲーション" })
     .getByRole("link", { name, exact: false });
+const documentLink = (page: Page) =>
+  page
+    .getByRole("banner")
+    .getByRole("link", { name: "配布資料の案内", exact: true });
 const rosterDialog = (page: Page) =>
   page.getByRole("dialog", { name: "名簿番号の設定" });
 
@@ -355,7 +360,7 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
   await expect(
     page.getByRole("heading", { name: "見学前の準備", exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("link", { name: "配布資料の案内", exact: true }).click();
+  await documentLink(page).click();
   await expect(
     page.getByRole("heading", { name: "配布資料の案内", level: 1 }),
   ).toBeVisible();
@@ -430,10 +435,12 @@ test("Fullscreen maps preserve zoom when selecting companies and offer embedded 
     exact: true,
   });
   await expect(mapLink).toHaveAttribute("href", /^\/map\/\?/);
-  await embedded.getByRole("button", {
-    name: "午前 ブース 2 架空いろは機械",
-    exact: true,
-  }).click();
+  await embedded
+    .getByRole("button", {
+      name: "午前 ブース 2 架空いろは機械",
+      exact: true,
+    })
+    .click();
   const updatedDialog = page.getByRole("dialog", {
     name: "架空いろは機械",
     exact: true,
@@ -441,13 +448,17 @@ test("Fullscreen maps preserve zoom when selecting companies and offer embedded 
   await expect(updatedDialog).toBeVisible();
   expect(new URL(page.url()).searchParams.get("focus")).toBe("AM-2");
   expect(new URL(page.url()).searchParams.get("session")).toBe("AM");
-  await updatedDialog.getByRole("button", { name: "閉じる", exact: true }).click();
+  await updatedDialog
+    .getByRole("button", { name: "閉じる", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await expect(updatedDialog).not.toBeVisible();
-  await expect(full.getByRole("button", {
-    name: "午前 ブース 2 架空いろは機械",
-    exact: true,
-  })).toHaveAttribute("data-selected", "true");
+  await expect(
+    full.getByRole("button", {
+      name: "午前 ブース 2 架空いろは機械",
+      exact: true,
+    }),
+  ).toHaveAttribute("data-selected", "true");
   await expect(first).toHaveAttribute("aria-pressed", "false");
   await expect(zoom).toHaveText("175%");
   await full.getByRole("button", { name: /^表示中の一覧/ }).click();
@@ -731,6 +742,37 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
     name: "モバイルナビゲーション",
   });
   await expect(mobile).toBeVisible();
+  expect(
+    (await page.getByRole("banner").boundingBox())!.height,
+  ).toBeLessThanOrEqual(60);
+  const current = mobile.getByRole("link", { name: "一覧", exact: true });
+  await expect(current).toHaveAttribute("aria-current", "page");
+  await expect(current.locator("svg")).toHaveAttribute("data-filled", "true");
+  expect(
+    await current
+      .locator("svg")
+      .evaluate((node) =>
+        [...node.querySelectorAll("path,circle,rect")].some(
+          (shape) => getComputedStyle(shape).fill !== "none",
+        ),
+      ),
+  ).toBe(true);
+  expect(
+    await current.evaluate((node) => {
+      const style = getComputedStyle(node.closest("li")!, "::before");
+      return (
+        style.content !== "none" &&
+        style.display !== "none" &&
+        parseFloat(style.height) > 0
+      );
+    }),
+  ).toBe(false);
+  expect(
+    await mobile
+      .getByRole("link", { name: "探す", exact: true })
+      .locator("svg")
+      .getAttribute("data-filled"),
+  ).not.toBe("true");
   expect(await mobile.evaluate((node) => getComputedStyle(node).position)).toBe(
     "fixed",
   );
@@ -755,6 +797,15 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
     await expect(link.locator("svg").first()).toBeVisible();
   }
   await mobile.getByRole("link", { name: "探す", exact: true }).click();
+  await expect(
+    mobile.getByRole("link", { name: "探す", exact: true }).locator("svg"),
+  ).toHaveAttribute("data-filled", "true");
+  expect(
+    await mobile
+      .getByRole("link", { name: "一覧", exact: true })
+      .locator("svg")
+      .getAttribute("data-filled"),
+  ).not.toBe("true");
   await verifyLongIndustryFits(page);
   await page.setViewportSize({ width: 320, height: 844 });
   await expect
@@ -781,6 +832,19 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
     name: "メインナビゲーション",
   });
   await expect(desktop).toBeVisible();
+  expect(
+    (await page.getByRole("banner").boundingBox())!.height,
+  ).toBeLessThanOrEqual(64);
+  const selected = desktop.getByRole("link", {
+    name: "気になる",
+    exact: false,
+  });
+  await expect(selected).toHaveAttribute("aria-current", "page");
+  expect(
+    await selected.evaluate((node) =>
+      parseFloat(getComputedStyle(node.closest("li")!).borderBottomWidth),
+    ),
+  ).toBe(0);
   expect(
     await desktop.evaluate((node) => Boolean(node.closest("header"))),
   ).toBe(true);
@@ -877,7 +941,17 @@ test("Account actions, interest labels and document guidance are available witho
   await expect(
     page.getByRole("menuitem", { name: "ログアウト", exact: true }),
   ).toHaveCount(0);
+  const guideLink = documentLink(page);
+  await expect(guideLink).toHaveAttribute("href", "/documents/");
+  await expect(guideLink.locator("svg")).toBeVisible();
+  const guideBounds = (await guideLink.boundingBox())!;
   const triggerBounds = (await trigger.boundingBox())!;
+  expect(guideBounds.x + guideBounds.width).toBeLessThanOrEqual(
+    triggerBounds.x,
+  );
+  expect(
+    (await page.getByRole("banner").boundingBox())!.height,
+  ).toBeLessThanOrEqual(64);
   expect(triggerBounds.width).toBeLessThanOrEqual(44);
   expect(triggerBounds.height).toBeLessThanOrEqual(44);
   const icon = (await trigger.locator("svg").boundingBox())!;
@@ -898,6 +972,10 @@ test("Account actions, interest labels and document guidance are available witho
   ).toBeLessThanOrEqual(3);
   const menu = await openAccount(page);
   await expect(menu).toContainText("検証ユーザー menu");
+  await expect(menu.getByRole("menuitem")).toHaveCount(2);
+  await expect(
+    menu.getByRole("menuitem", { name: "配布資料の案内", exact: true }),
+  ).toHaveCount(0);
   const roster = menu.getByRole("menuitem", {
     name: "名簿番号の設定",
     exact: true,
@@ -918,11 +996,12 @@ test("Account actions, interest labels and document guidance are available witho
   await openAccount(page);
   await page.getByRole("heading", { name: "一覧", exact: true }).click();
   await expect(menu).not.toBeVisible();
-  await accountAction(page, "配布資料の案内");
+  await documentLink(page).click();
   await expect(
     page.getByRole("heading", { name: "配布資料の案内", level: 1 }),
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/documents/");
+  await expect(documentLink(page)).toHaveAttribute("aria-current", "page");
   await page.goBack();
   await expect(
     page.getByRole("heading", { name: "一覧", exact: true }),
@@ -1065,4 +1144,53 @@ test("A month-long session rotates short-lived access credentials and still revo
       ).json()
     ).count,
   ).toBe(0);
+});
+
+test("A large synthetic catalog renders incrementally on real scrolling without resetting an open detail", async ({
+  page,
+}) => {
+  // This case isolates the rendering cost with synthetic data. All other
+  // E2E cases continue through the real Go API and MySQL catalog unchanged.
+  const catalog = largeFixture();
+  await page.route("**/api/guidance", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(catalog),
+    }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, "presentation");
+  await assertCompanyCount(page, 24);
+  const first = page.getByRole("link", {
+    name: catalog.companies[0].name,
+    exact: true,
+  });
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await assertCompanyCount(page, 48);
+  await first.click();
+  const dialog = page.getByRole("dialog", {
+    name: catalog.companies[0].name,
+    exact: true,
+  });
+  await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+  await assertCompanyCount(page, 48);
+  for (const expected of [72, 96, 120, 125]) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await assertCompanyCount(page, expected);
+  }
+  await expect(
+    page.getByRole("button", { name: "もっと見る", exact: true }),
+  ).toHaveCount(0);
+  await nav(page, "探す").click();
+  await assertCompanyCount(page, 24);
+  const search = page.getByRole("searchbox", {
+    name: "企業名・業種・ブース番号で検索",
+  });
+  await search.fill("検証企業 0001");
+  await assertCompanyCount(page, 1);
+  await expect(
+    page.getByRole("button", { name: "もっと見る", exact: true }),
+  ).toHaveCount(0);
+  await search.fill("");
+  await assertCompanyCount(page, 24);
 });

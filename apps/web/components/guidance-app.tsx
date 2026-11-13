@@ -27,7 +27,8 @@ import type {
 } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 import VenueMap from "./venue-map";
-import AccountMenu from "./account-menu";
+import HeaderActions from "./header-actions";
+import IncrementalCompanyList from "./incremental-company-list";
 
 const EC4 = { department: "電子制御工学科", grade: 4 };
 const returnKey = "guidance-return-route";
@@ -337,7 +338,15 @@ export default function GuidanceApp({
               <TextLink
                 href={routeHref({ ...route, view: item.id, company: "" })}
                 variant={route.view === item.id ? undefined : "subtle"}
-                icon={mobile ? <Icon name={item.icon} size={23} /> : undefined}
+                icon={
+                  mobile ? (
+                    <Icon
+                      name={item.icon}
+                      size={23}
+                      filled={route.view === item.id}
+                    />
+                  ) : undefined
+                }
                 aria-current={route.view === item.id ? "page" : undefined}
                 onClick={(event) => intercept(event, () => navigate(item.id))}
               >
@@ -370,12 +379,16 @@ export default function GuidanceApp({
           {ready && menu(false)}
           <div className="header-right">
             {ready && (
-              <AccountMenu
+              <HeaderActions
                 name={user.name}
                 rosterNumber={preferences.roster_number}
                 busy={busy}
+                currentView={route.view}
                 onConfigure={() => setSettingNumber(true)}
-                onInformation={() => navigate("info")}
+                onInformation={() => {
+                  changeRoute({ ...defaultRoute, view: "info" });
+                  window.scrollTo({ top: 0, behavior: "instant" });
+                }}
                 onLogout={() => void logout()}
               />
             )}
@@ -489,12 +502,16 @@ export default function GuidanceApp({
                   </div>
                 }
                 topRight={
-                  <AccountMenu
+                  <HeaderActions
                     name={user.name}
                     rosterNumber={preferences.roster_number}
                     busy={busy}
+                    currentView={route.view}
                     onConfigure={() => setSettingNumber(true)}
-                    onInformation={() => navigate("info")}
+                    onInformation={() => {
+                      changeRoute({ ...defaultRoute, view: "info" });
+                      window.scrollTo({ top: 0, behavior: "instant" });
+                    }}
                     onLogout={() => void logout()}
                   />
                 }
@@ -718,6 +735,19 @@ function Companies({
           ),
     [data, route, saved, searching],
   );
+  const ordered = useMemo(
+    () => [...filtered].sort((a, b) => a.name.localeCompare(b.name, "ja")),
+    [filtered],
+  );
+  const listKey = searching
+    ? JSON.stringify([
+        "search",
+        route.q,
+        route.session,
+        [...route.industries].sort(),
+        route.saved,
+      ])
+    : "directory";
   return (
     <>
       <div className="view-heading">
@@ -819,21 +849,19 @@ function Companies({
         </span>
       </div>
       {filtered.length ? (
-        <div className="company-grid">
-          {[...filtered]
-            .sort((a, b) => a.name.localeCompare(b.name, "ja"))
-            .map((company) => (
-              <CompanyCard
-                key={company.id}
-                company={company}
-                saved={saved.has(company.id)}
-                assigned={assignedIDs.has(company.id)}
-                route={route}
-                onSave={() => onSave(company)}
-                onSelect={() => onSelect(company)}
-              />
-            ))}
-        </div>
+        <IncrementalCompanyList companies={ordered} resetKey={listKey}>
+          {(company) => (
+            <CompanyCard
+              key={company.id}
+              company={company}
+              saved={saved.has(company.id)}
+              assigned={assignedIDs.has(company.id)}
+              route={route}
+              onSave={() => onSave(company)}
+              onSelect={() => onSelect(company)}
+            />
+          )}
+        </IncrementalCompanyList>
       ) : (
         <Empty title="条件に合う企業が見つかりません">
           <Button
@@ -1305,8 +1333,8 @@ function Plan({
         </h2>
       </div>
       {companies.length ? (
-        <div className="company-grid">
-          {companies.map((company) => (
+        <IncrementalCompanyList companies={companies} resetKey="favorites">
+          {(company) => (
             <CompanyCard
               key={company.id}
               company={company}
@@ -1316,8 +1344,8 @@ function Plan({
               onSave={() => onSave(company)}
               onSelect={() => onSelect(company)}
             />
-          ))}
-        </div>
+          )}
+        </IncrementalCompanyList>
       ) : (
         <Empty title="まだ追加されていません">
           <Button variant="outlined" onClick={onFind}>

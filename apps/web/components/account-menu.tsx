@@ -10,7 +10,6 @@ type Props = {
   rosterNumber: number | null;
   busy: boolean;
   onConfigure: () => void;
-  onInformation: () => void;
   onLogout: () => void;
 };
 
@@ -19,7 +18,6 @@ export default function AccountMenu({
   rosterNumber,
   busy,
   onConfigure,
-  onInformation,
   onLogout,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -137,15 +135,6 @@ export default function AccountMenu({
             }}
           >
             <DropdownMenu.Title>名簿番号の設定</DropdownMenu.Title>
-          </DropdownMenu.ListItem>
-          <DropdownMenu.ListItem
-            icon={<Icon name="info" />}
-            onClick={() => {
-              close();
-              onInformation();
-            }}
-          >
-            <DropdownMenu.Title>配布資料の案内</DropdownMenu.Title>
           </DropdownMenu.ListItem>
           <DropdownMenu.ListItem
             icon={<Icon name="logout" />}
