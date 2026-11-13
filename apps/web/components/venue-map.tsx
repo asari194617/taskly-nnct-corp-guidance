@@ -107,6 +107,8 @@ export default function VenueMap({
   );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const [previewCompanyId, setPreviewCompanyId] = useState<string | null>(null);
   const componentId = useId();
   const embedded = mode === "embedded";
   const panelOpen = detailPanelOpen && !embedded;
@@ -141,6 +143,8 @@ export default function VenueMap({
   } | null>(null);
   const highlighted = useRef<HTMLButtonElement | null>(null);
   const viewport = useRef<HTMLDivElement | null>(null);
+  const mapRoot = useRef<HTMLElement | null>(null);
+  const bottomControls = useRef<HTMLDivElement | null>(null);
   const zoomValue = useRef(zoom);
   const zoomAnchor = useRef<{ left: number; top: number } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -321,7 +325,7 @@ export default function VenueMap({
     if (!point) setDragging(false);
   }
   const current = images.find((item) => item.id === floor);
-  const selected = companies.find((item) => item.id === selectedCompanyId);
+  const previewCompany = companies.find((item) => item.id === previewCompanyId);
   const imageWidth = current?.image_width || imageSize?.width || 0;
   const imageHeight = current?.image_height || imageSize?.height || 0;
   const fittedWidth =
@@ -408,6 +412,31 @@ export default function VenueMap({
     filters.assigned && "指定企業",
   ].filter(Boolean);
 
+  // Reserve the actual control stack height, including wrapped floor names.
+  // The controls keep their right-bottom anchor when a company pane opens.
+  useLayoutEffect(() => {
+    const controls = bottomControls.current;
+    const root = mapRoot.current;
+    if (!controls || !root) return;
+    const measure = () => {
+      const bounds = controls.getBoundingClientRect();
+      root.style.setProperty("--map-controls-height", `${bounds.height}px`);
+      root.style.setProperty("--map-controls-width", `${bounds.width}px`);
+    };
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(controls);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [current?.id, embedded]);
+
+  useEffect(() => {
+    setPreviewCompanyId(null);
+  }, [session]);
+
   useEffect(() => {
     if (!selectedCompanyId) return;
     const arena = images.find((item) => item.booths?.length);
@@ -415,6 +444,7 @@ export default function VenueMap({
   }, [selectedCompanyId, images]);
 
   useEffect(() => {
+    setPreviewCompanyId(null);
     if (!floor) return;
     const controller = new AbortController();
     setURL("");
@@ -538,10 +568,12 @@ export default function VenueMap({
     viewportSize,
     filtersOpen,
     resultsOpen,
+    legendOpen,
   ]);
 
   return (
     <section
+      ref={mapRoot}
       className="venue-map"
       data-mode={mode}
       data-detail-open={panelOpen ? "true" : undefined}
@@ -555,18 +587,39 @@ export default function VenueMap({
               <label className="sr-only" htmlFor={`${componentId}-search`}>
                 マップの企業名
               </label>
-              <div className="venue-map-search-input">
-                <span className="venue-map-search-icon" aria-hidden="true">
-                  <Icon name="search" size={20} />
-                </span>
-                <TextField
-                  id={`${componentId}-search`}
-                  aria-label="マップの企業名"
-                  type="search"
-                  placeholder="名前・ブース番号"
-                  value={filters.q}
-                  onChange={(event) => changeFilters({ q: event.target.value })}
-                />
+              <div className="venue-map-search-row">
+                <div className="venue-map-search-input">
+                  <span className="venue-map-search-icon" aria-hidden="true">
+                    <Icon name="search" size={20} />
+                  </span>
+                  <TextField
+                    id={`${componentId}-search`}
+                    aria-label="マップの企業名"
+                    type="search"
+                    placeholder="名前・ブース番号"
+                    value={filters.q}
+                    onChange={(event) =>
+                      changeFilters({ q: event.target.value })
+                    }
+                  />
+                </div>
+                {booths.length > 0 && (
+                  <IconButton
+                    size="small"
+                    variant={activeFilters.length ? "lighted" : "neutral"}
+                    aria-label="絞り込み"
+                    aria-description={`指定条件${activeFilters.length}件`}
+                    aria-pressed={activeFilters.length > 0}
+                    aria-expanded={filtersOpen}
+                    aria-controls={`${componentId}-filters`}
+                    onClick={() => {
+                      setFiltersOpen((value) => !value);
+                      setResultsOpen(false);
+                    }}
+                  >
+                    <Icon name="filter" size={20} />
+                  </IconButton>
+                )}
               </div>
               {booths.length > 0 && (
                 <div className="venue-map-search-actions">
@@ -581,31 +634,16 @@ export default function VenueMap({
                     }
                   />
                   <TextButton
-                    aria-label="絞り込み"
-                    aria-expanded={filtersOpen}
-                    aria-controls={`${componentId}-filters`}
+                    aria-expanded={resultsOpen}
+                    aria-controls={`${componentId}-results`}
                     onClick={() => {
-                      setFiltersOpen((value) => !value);
-                      setResultsOpen(false);
+                      setResultsOpen((value) => !value);
+                      setFiltersOpen(false);
                     }}
-                    icon={<Icon name="grid" size={18} />}
                   >
-                    絞り込み
-                    {activeFilters.length ? `（${activeFilters.length}）` : ""}
+                    表示中の一覧（{matching.length}社）
                   </TextButton>
                 </div>
-              )}
-              {booths.length > 0 && (
-                <TextButton
-                  aria-expanded={resultsOpen}
-                  aria-controls={`${componentId}-results`}
-                  onClick={() => {
-                    setResultsOpen((value) => !value);
-                    setFiltersOpen(false);
-                  }}
-                >
-                  表示中の一覧（{matching.length}社）
-                </TextButton>
               )}
             </div>
           )}
@@ -674,15 +712,17 @@ export default function VenueMap({
                     .sort((a, b) => a.booth - b.booth)
                     .map((company) => (
                       <li key={company.id}>
-                        <TextButton
-                          aria-label={`企業詳細 ${company.name}`}
-                          onClick={() => {
-                            onSelectCompany(company);
-                            setResultsOpen(false);
-                          }}
-                        >
-                          ブース {company.booth}　{company.name}
-                        </TextButton>
+                        <span className="company-name-link">
+                          <TextButton
+                            aria-label={`企業詳細 ${company.name}`}
+                            onClick={() => {
+                              onSelectCompany(company);
+                              setResultsOpen(false);
+                            }}
+                          >
+                            ブース {company.booth}　{company.name}
+                          </TextButton>
+                        </span>
                       </li>
                     ))}
                 </ul>
@@ -691,7 +731,7 @@ export default function VenueMap({
               )}
             </section>
           )}
-          <div className="venue-map-bottom-right">
+          <div ref={bottomControls} className="venue-map-bottom-right">
             <div
               className="venue-map-zoom venue-map-floating"
               aria-label="マップの拡大縮小"
@@ -743,23 +783,51 @@ export default function VenueMap({
               </div>
             )}
           </div>
-          <div className="venue-map-bottom-left">
-            {!panelOpen &&
-              selected &&
-              selected.session === session &&
-              matchedIds.has(selected.id) &&
-              booths.length > 0 && (
-                <div
-                  className="venue-map-selection venue-map-floating"
-                  role="status"
-                >
-                  <Icon name="location" size={18} />
-                  <span>
-                    ブース {selected.booth}　{selected.name}
-                  </span>
+          {!embedded &&
+            previewCompany &&
+            previewCompany.session === session &&
+            matchedIds.has(previewCompany.id) && (
+              <div
+                className="venue-map-preview venue-map-floating"
+                role="status"
+                aria-label="ポイント中の企業"
+              >
+                <Icon name="location" size={18} />
+                <div>
+                  <strong>{previewCompany.name}</strong>
+                  <span>ブース {previewCompany.booth}</span>
                 </div>
-              )}
-          </div>
+              </div>
+            )}
+          {!embedded && (
+            <div className="venue-map-bottom-left">
+              <div className="venue-map-legend venue-map-floating">
+                <TextButton
+                  aria-expanded={legendOpen}
+                  aria-controls={`${componentId}-legend`}
+                  onClick={() => setLegendOpen((value) => !value)}
+                >
+                  凡例
+                </TextButton>
+                {legendOpen && (
+                  <ul id={`${componentId}-legend`} aria-label="マップの凡例">
+                    <li>
+                      <span data-key="selected" aria-hidden="true" />
+                      選択中
+                    </li>
+                    <li>
+                      <span data-key="assigned" aria-hidden="true" />
+                      指定企業
+                    </li>
+                    <li>
+                      <span data-key="saved" aria-hidden="true" />
+                      気になる
+                    </li>
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
           <div
             className="venue-map-viewport"
             ref={viewport}
@@ -853,7 +921,21 @@ export default function VenueMap({
                         aria-label={`${session === "AM" ? "午前" : "午後"} ブース ${booth.booth} ${company?.name || "出展なし"}`}
                         aria-pressed={isSelected}
                         tabIndex={booth.booth === tabBooth ? 0 : -1}
-                        onFocus={() => setFocusedBooth(booth.booth)}
+                        onFocus={(event) => {
+                          setFocusedBooth(booth.booth);
+                          if (event.currentTarget.matches(":focus-visible"))
+                            setPreviewCompanyId(company?.id ?? null);
+                        }}
+                        onBlur={() => setPreviewCompanyId(null)}
+                        onPointerEnter={(event) => {
+                          if (event.pointerType === "mouse")
+                            setPreviewCompanyId(company?.id ?? null);
+                        }}
+                        onPointerLeave={() => setPreviewCompanyId(null)}
+                        onPointerDown={(event) => {
+                          if (event.pointerType === "touch")
+                            setPreviewCompanyId(null);
+                        }}
                         onKeyDown={(event) => {
                           const keys = [
                             "ArrowLeft",

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { deflateSync } from "node:zlib";
 import { mkdtemp, readFile, writeFile, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -213,10 +214,57 @@ try {
       },
     ],
   };
-  const pixel = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iB2kAAAAASUVORK5CYII=",
-    "base64",
-  );
+  // Synthetic white paper and black booth numerals allow the browser tests to
+  // verify the rendered dark drawing, independently of CSS filter declarations.
+  const crc32 = (bytes) => {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++)
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const name = Buffer.from(type),
+      size = Buffer.alloc(4),
+      checksum = Buffer.alloc(4);
+    size.writeUInt32BE(data.length);
+    checksum.writeUInt32BE(crc32(Buffer.concat([name, data])));
+    return Buffer.concat([size, name, data, checksum]);
+  };
+  const width = 100,
+    height = 100;
+  const raster = Buffer.alloc(height * (width * 3 + 1), 255);
+  for (let y = 0; y < height; y++) raster[y * (width * 3 + 1)] = 0;
+  for (const [center, glyph] of [
+    [20, ["010", "110", "010", "010", "111"]],
+    [65, ["111", "001", "111", "100", "111"]],
+  ]) {
+    for (let row = 0; row < glyph.length; row++)
+      for (let column = 0; column < 3; column++) {
+        if (glyph[row][column] !== "1") continue;
+        for (let dy = 0; dy < 2; dy++)
+          for (let dx = 0; dx < 2; dx++) {
+            const offset =
+              (15 + row * 2 + dy) * (width * 3 + 1) +
+              1 +
+              (center - 3 + column * 2 + dx) * 3;
+            raster.fill(0, offset, offset + 3);
+          }
+      }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const pixel = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(raster)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
   // A small, valid synthetic PDF lets Chromium exercise native PDF navigation.
   const stream = "BT /F1 12 Tf 20 100 Td (Synthetic E2E document) Tj ET";
   const objects = [
