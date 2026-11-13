@@ -9,6 +9,7 @@ export async function startServices(output) {
   const requests = new Map(),
     codes = new Map(),
     tokens = new Map();
+  const subjects = ["alice", "bob", "onboarding", "routing", "map", "outage", "mobile", "documents", "presentation"];
   let unavailable = false;
   const json = (res, status, body) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -39,13 +40,13 @@ export async function startServices(output) {
         requests.set(id, Object.fromEntries(q));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         return res.end(
-          `<html lang="ja"><head><title>検証用ログイン</title></head><body><h1>検証用ログイン</h1><form method="POST" action="/mock/login"><input type="hidden" name="id" value="${id}"><label>検証アカウント<select name="subject"><option value="alice">Alice</option><option value="bob">Bob</option></select></label><button type="submit">検証用アカウントで続ける</button></form></body></html>`,
+          `<html lang="ja"><head><title>検証用ログイン</title></head><body><h1>検証用ログイン</h1><form method="POST" action="/mock/login"><input type="hidden" name="id" value="${id}"><label>検証アカウント<select name="subject">${subjects.map(subject => `<option value="${subject}">${subject}</option>`).join("")}</select></label><button type="submit">検証用アカウントで続ける</button></form></body></html>`,
         );
       }
       if (url.pathname === "/mock/login" && req.method === "POST") {
         const q = await form(req),
           request = requests.get(q.get("id"));
-        if (!request || !["alice", "bob"].includes(q.get("subject")))
+        if (!request || !subjects.includes(q.get("subject")))
           return json(res, 400, { error: "invalid_login" });
         requests.delete(q.get("id"));
         const code = token();

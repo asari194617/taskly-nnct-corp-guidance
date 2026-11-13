@@ -53,12 +53,12 @@ func TestMySQLIntegration(t *testing.T) {
 			}
 		}
 	}
-	for _, table := range []string{"guidance_bookmarks", "guidance_sessions", "guidance_oauth_flows", "guidance_documents", "guidance_dataset"} {
+	for _, table := range []string{"guidance_preferences", "guidance_bookmarks", "guidance_sessions", "guidance_oauth_flows", "guidance_documents", "guidance_dataset"} {
 		if _, err := db.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatal(err)
 		}
 	}
-	payload := `{"event":{"title":"Synthetic integration event"},"companies":[{"id":"AM-1","name":"Example company","session":"AM","booth":1,"industries":[]}],"schedule":[],"assignments":[],"documents":[],"notices":[]}`
+	payload := `{"event":{"title":"Synthetic integration event"},"companies":[{"id":"AM-1","name":"Example company","session":"AM","booth":1,"industries":[]}],"schedule":[],"assignments":[{"department":"電子制御工学科","grade":4,"number":7,"visits":[]},{"department":"電子制御工学科","grade":4,"number":8,"visits":[]}],"documents":[],"notices":[]}`
 	if _, err := db.ExecContext(ctx, `INSERT INTO guidance_dataset(id,payload) VALUES(1,?)`, payload); err != nil {
 		t.Fatal(err)
 	}
@@ -122,23 +122,30 @@ func TestMySQLIntegration(t *testing.T) {
 	apiServer.Config.Handler = app.Handler()
 	apiServer.Start()
 	defer apiServer.Close()
-	request := func(client *http.Client, method, path string, status int) string {
+	request := func(client *http.Client, method, path string, status int, payload ...string) string {
 		t.Helper()
-		req, _ := http.NewRequest(method, apiOrigin+path, nil)
+		var body io.Reader
+		if len(payload) != 0 {
+			body = strings.NewReader(payload[0])
+		}
+		req, _ := http.NewRequest(method, apiOrigin+path, body)
 		req.Header.Set("Origin", cfg.UIOrigin)
+		if len(payload) != 0 {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
+		responseBody, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode != status {
-			t.Fatalf("%s %s: got %d want %d: %s", method, path, resp.StatusCode, status, body)
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, resp.StatusCode, status, responseBody)
 		}
 		if resp.Header.Get("Cache-Control") != "no-store" {
 			t.Fatal("private response cacheable")
 		}
-		return string(body)
+		return string(responseBody)
 	}
 	login := func(id string) *http.Client {
 		t.Helper()
@@ -179,15 +186,41 @@ func TestMySQLIntegration(t *testing.T) {
 		t.Fatal("identity mismatch")
 	}
 	request(alice, "GET", "/api/guidance", 200)
+	if !strings.Contains(request(alice, "GET", "/api/preferences", 200), `"roster_number":null`) {
+		t.Fatal("first visit unexpectedly configured")
+	}
+	request(alice, "PUT", "/api/preferences", 422, `{"roster_number":99}`)
+	request(alice, "PUT", "/api/preferences", 200, `{"roster_number":7}`)
+	if !strings.Contains(request(alice, "GET", "/api/preferences", 200), `"roster_number":7`) {
+		t.Fatal("roster preference not persisted")
+	}
 	if !strings.HasPrefix(request(alice, "GET", "/api/documents/example-map", 200), "%PDF") {
 		t.Fatal("document mismatch")
 	}
+	var aliceDocument struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(request(alice, "GET", "/api/documents/example-map/url", 200)), &aliceDocument); err != nil {
+		t.Fatal(err)
+	}
+	aliceDocumentPath := strings.TrimPrefix(aliceDocument.URL, apiOrigin)
+	if !strings.HasPrefix(request(http.DefaultClient, "GET", aliceDocumentPath, 200), "%PDF") {
+		t.Fatal("signed document did not open without browser credentials")
+	}
+	request(http.DefaultClient, "HEAD", aliceDocumentPath, 200)
 	request(alice, "PUT", "/api/bookmarks/AM-1", 204)
 	request(alice, "PUT", "/api/bookmarks/AM-1", 204)
 	if !strings.Contains(request(alice, "GET", "/api/bookmarks", 200), `"AM-1"`) {
 		t.Fatal("bookmark not saved")
 	}
 	bob := login("bob")
+	if !strings.Contains(request(bob, "GET", "/api/preferences", 200), `"roster_number":null`) {
+		t.Fatal("cross-user roster preference leak")
+	}
+	request(bob, "PUT", "/api/preferences", 200, `{"roster_number":8}`)
+	if !strings.Contains(request(alice, "GET", "/api/preferences", 200), `"roster_number":7`) {
+		t.Fatal("other user overwrote roster preference")
+	}
 	if strings.Contains(request(bob, "GET", "/api/bookmarks", 200), `"AM-1"`) {
 		t.Fatal("cross-user bookmark leak")
 	}
@@ -196,6 +229,9 @@ func TestMySQLIntegration(t *testing.T) {
 		t.Fatal("other user deleted bookmark")
 	}
 	aliceOtherDevice := login("alice")
+	if !strings.Contains(request(aliceOtherDevice, "GET", "/api/preferences", 200), `"roster_number":7`) {
+		t.Fatal("roster preference missing on other device")
+	}
 	if !strings.Contains(request(aliceOtherDevice, "GET", "/api/bookmarks", 200), `"AM-1"`) {
 		t.Fatal("bookmark missing on other device")
 	}
@@ -209,6 +245,7 @@ func TestMySQLIntegration(t *testing.T) {
 	mu.Unlock()
 	request(alice, "GET", "/api/guidance", 401)
 	request(aliceOtherDevice, "GET", "/api/documents/example-map", 401)
+	request(http.DefaultClient, "GET", aliceDocumentPath, 403)
 	expired := login("expired")
 	apiURL, _ := url.Parse(apiOrigin)
 	for _, cookie := range expired.Jar.Cookies(apiURL) {
@@ -219,5 +256,5 @@ func TestMySQLIntegration(t *testing.T) {
 		}
 	}
 	request(expired, "GET", "/api/me", 401)
-	t.Log("Real MySQL verified OAuth PKCE, documents, user isolation, cross-device bookmarks, logout and revocation")
+	t.Log("Real MySQL verified OAuth PKCE, signed documents, roster preferences, user isolation, cross-device bookmarks, logout and revocation")
 }

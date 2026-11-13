@@ -10,13 +10,15 @@ test('private documents and unknown types cannot be uploaded',()=> {
   assert.equal(metadata('_next/static/a.js').CacheControl,'public, max-age=31536000, immutable');
   assert.equal(metadata('index.html').CacheControl,'no-cache');
 });
-test('CSP hashes exact inline bootstrap bytes and permits authenticated document blobs',()=> {
+test('CSP hashes bootstrap bytes and permits only trusted signed document image origins',()=> {
   const script='self.__next_f.push([1,"synthetic"]);';
   const html=secureHTML(`<html><head><script>${script}</script><script src="/app.js"></script></head></html>`,'https://api.example.test');
   assert.ok(html.includes(`sha256-${createHash('sha256').update(script).digest('base64')}`));
   assert.ok(html.includes('connect-src https://api.example.test'));
-  assert.ok(html.includes("img-src 'self' https://cdn.taskly.iy0306.com blob:"));
-  assert.ok(html.includes("frame-src 'self' blob:"));
+  assert.ok(html.includes("img-src 'self' https://cdn.taskly.iy0306.com https://api.example.test"));
+  assert.ok(html.includes("frame-src 'none'"));
+  assert.ok(html.includes("object-src 'none'"));
+  assert.ok(!html.includes('blob:'));
   assert.throws(()=>secureHTML('<head>','http://api.example.test'));
   assert.throws(()=>secureHTML('<head>','https://api.example.test/path'));
 });

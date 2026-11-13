@@ -1,24 +1,41 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
 import { Checkbox } from "@openameba/spindle-ui/Form/Checkbox";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
 import { TextButton } from "@openameba/spindle-ui/TextButton";
+import { TextLink } from "@openameba/spindle-ui/TextLink";
 import { SegmentedControl } from "@openameba/spindle-ui/SegmentedControl";
-import { UnderlineTab } from "@openameba/spindle-ui/NavigationTab";
 import { TextField } from "@openameba/spindle-ui/Form/TextField";
 import { DropDown } from "@openameba/spindle-ui/Form/DropDown";
 import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
-import { api, APIError, API_URL, documentBlob } from "../lib/api";
-import type { Company, Document, Guidance, User } from "../lib/types";
+import { api, APIError, API_URL } from "../lib/api";
+import {
+  defaultRoute,
+  readRoute,
+  routeHref,
+  type RouteState,
+  type View,
+} from "../lib/route-state";
+import type {
+  Assignment,
+  Company,
+  Guidance,
+  Preferences,
+  User,
+} from "../lib/types";
 import { Icon, type IconName } from "./icons";
+import VenueMap from "./venue-map";
 
-type View = "companies" | "schedule" | "map" | "plan";
+const EC4 = { department: "電子制御工学科", grade: 4 };
 const selectLayout = { width: "100%", maxWidth: "100%", minWidth: 0 };
+const returnKey = "guidance-return-route";
 const navigation: { id: View; title: string; short: string; icon: IconName }[] =
   [
-    { id: "companies", title: "企業を探す", short: "企業", icon: "building" },
+    { id: "companies", title: "企業一覧", short: "企業", icon: "building" },
+    { id: "search", title: "企業を探す", short: "検索", icon: "search" },
     { id: "schedule", title: "スケジュール", short: "予定", icon: "calendar" },
     { id: "map", title: "会場マップ", short: "マップ", icon: "map" },
     {
@@ -46,7 +63,7 @@ function Message({
   children,
   error = false,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   error?: boolean;
 }) {
   return (
@@ -62,17 +79,18 @@ function Message({
     </InlineNotification.Frame>
   );
 }
-function dateLabel(value: string) {
-  const date = new Date(`${value.slice(0, 10)}T12:00:00+09:00`);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat("ja-JP", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        weekday: "short",
-        timeZone: "Asia/Tokyo",
-      }).format(date);
+function intercept(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  )
+    return;
+  event.preventDefault();
+  action();
 }
 function timeLabel(value: string) {
   return value.includes("T") ? value.slice(11, 16) : value;
@@ -87,20 +105,70 @@ function normalized(value: string) {
 export default function GuidanceApp() {
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<Guidance | null>(null);
+  const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [status, setStatus] = useState<
     "loading" | "signed-out" | "ready" | "error"
   >("loading");
   const [error, setError] = useState("");
-  const [view, setView] = useState<View>("companies");
+  const [route, setRoute] = useState<RouteState>({ ...defaultRoute });
+  const routeRef = useRef(route);
   const [saved, setSaved] = useState<Set<string>>(new Set());
-  const [selected, setSelected] = useState<Company | null>(null);
   const [busy, setBusy] = useState(false);
+  const [settingNumber, setSettingNumber] = useState(false);
   const bookmarkRequests = useRef(new Set<string>());
+  const changeRoute = useCallback(
+    (patch: Partial<RouteState>, replace = false) => {
+      const next = { ...routeRef.current, ...patch };
+      const href = routeHref(next);
+      if (href !== window.location.pathname + window.location.search) {
+        if (replace)
+          window.history.replaceState(window.history.state, "", href);
+        else window.history.pushState({}, "", href);
+      }
+      routeRef.current = next;
+      setRoute(next);
+    },
+    [],
+  );
+  useEffect(() => {
+    let target =
+      window.location.pathname + window.location.search + window.location.hash;
+    try {
+      const intent = window.sessionStorage.getItem(returnKey);
+      window.sessionStorage.removeItem(returnKey);
+      if (!window.location.search && intent) {
+        const intended = new URL(intent, window.location.origin);
+        if (
+          intended.origin === window.location.origin &&
+          ["/", "/index.html"].includes(intended.pathname)
+        )
+          target = routeHref(readRoute(intended.search)) + intended.hash;
+      }
+    } catch {
+      /* Browsing still works when session storage is unavailable. */
+    }
+    if (target.startsWith("/index.html"))
+      target = "/" + target.slice("/index.html".length);
+    if (
+      target !==
+      window.location.pathname + window.location.search + window.location.hash
+    )
+      window.history.replaceState(window.history.state, "", target);
+    const sync = () => {
+      const current = readRoute(window.location.search);
+      routeRef.current = current;
+      setRoute(current);
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
   const expireSession = useCallback(() => {
     setData(null);
     setUser(null);
+    setPreferences(null);
     setSaved(new Set());
-    setSelected(null);
+    setSettingNumber(false);
     setError("ログインの有効期限が切れました。もう一度ログインしてください。");
     setStatus("signed-out");
   }, []);
@@ -109,17 +177,21 @@ export default function GuidanceApp() {
     setError("");
     try {
       const identity = await api<{ user: User }>("/api/me");
-      const [guidance, bookmarks] = await Promise.all([
+      const [guidance, bookmarks, profile] = await Promise.all([
         api<Guidance>("/api/guidance"),
         api<{ company_ids: string[] }>("/api/bookmarks"),
+        api<Preferences>("/api/preferences"),
       ]);
       setSaved(new Set(bookmarks.company_ids));
       setUser(identity.user);
       setData(guidance);
+      setPreferences(profile);
+      setSettingNumber(profile.roster_number === null);
       setStatus("ready");
     } catch (cause) {
       setData(null);
       setUser(null);
+      setPreferences(null);
       if (cause instanceof APIError && cause.status === 401)
         setStatus("signed-out");
       else {
@@ -135,14 +207,6 @@ export default function GuidanceApp() {
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    const clearPrivateView = () => {
-      if (document.visibilityState === "hidden") setSelected(null);
-    };
-    document.addEventListener("visibilitychange", clearPrivateView);
-    return () =>
-      document.removeEventListener("visibilitychange", clearPrivateView);
-  }, []);
   async function toggleSave(company: Company) {
     if (bookmarkRequests.current.has(company.id)) return;
     bookmarkRequests.current.add(company.id);
@@ -183,8 +247,9 @@ export default function GuidanceApp() {
         throw new Error("ログアウトできませんでした。もう一度お試しください。");
       setData(null);
       setUser(null);
+      setPreferences(null);
       setSaved(new Set());
-      setSelected(null);
+      setSettingNumber(false);
       setStatus("signed-out");
     } catch (cause) {
       setError(
@@ -194,24 +259,104 @@ export default function GuidanceApp() {
       setBusy(false);
     }
   }
-  function navigate(next: View) {
-    setView(next);
+  function navigate(view: View) {
+    changeRoute({ view, company: "" });
     window.scrollTo({ top: 0, behavior: "instant" });
   }
-  const ready = status === "ready" && data && user;
+  function openCompany(company: Company) {
+    changeRoute({ company: company.id });
+  }
+  function closeCompany() {
+    changeRoute({ company: "" }, true);
+  }
+  function mapCompany(company: Company) {
+    changeRoute({
+      view: "map",
+      company: "",
+      focus: company.id,
+      session: company.session,
+      q: "",
+      industry: "",
+      saved: false,
+      assigned: false,
+    });
+  }
+  const ready = status === "ready" && data && user && preferences;
+  const selected = data?.companies.find(
+    (company) => company.id === route.company,
+  );
+  const assignment = data?.assignments.find(
+    (item) =>
+      item.department === EC4.department &&
+      item.grade === EC4.grade &&
+      item.number === preferences?.roster_number,
+  );
+  const assignedIDs = useMemo(
+    () => new Set(assignment?.visits.map((visit) => visit.company_id) || []),
+    [assignment],
+  );
+  function menu(mobile: boolean) {
+    return (
+      <nav
+        className={mobile ? "mobile-navigation" : "desktop-navigation"}
+        aria-label={mobile ? "モバイルナビゲーション" : "メインナビゲーション"}
+      >
+        <ul>
+          {navigation.map((item) => (
+            <li
+              key={item.id}
+              data-current={route.view === item.id ? "true" : undefined}
+            >
+              <TextLink
+                href={routeHref({ ...route, view: item.id, company: "" })}
+                variant={route.view === item.id ? undefined : "subtle"}
+                underline="hover"
+                icon={mobile ? <Icon name={item.icon} size={23} /> : undefined}
+                aria-current={route.view === item.id ? "page" : undefined}
+                onClick={(event) => intercept(event, () => navigate(item.id))}
+              >
+                {mobile ? item.short : item.title}
+                {item.id === "plan" && saved.size > 0 ? (
+                  <span
+                    className="saved-count"
+                    aria-label={`${saved.size}件保存`}
+                  >
+                    {saved.size}
+                  </span>
+                ) : null}
+              </TextLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    );
+  }
   return (
     <>
       <a className="skip-link" href="#main">
         本文へ移動
       </a>
       <header className="topbar">
-        <Brand />
+        <div className="header-brand">
+          <Brand />
+        </div>
+        {ready && menu(false)}
         <div className="header-right">
           {ready && (
             <>
-              <span className="user-name">
-                {user.name || "Taskly ユーザー"}
-              </span>
+              <span className="sr-only">{user.name || "Taskly ユーザー"}</span>
+              <TextButton
+                onClick={() => setSettingNumber(true)}
+                aria-label={
+                  preferences.roster_number === null
+                    ? "名簿番号を設定"
+                    : "名簿番号を変更"
+                }
+              >
+                {preferences.roster_number === null
+                  ? "番号設定"
+                  : `${preferences.roster_number}番`}
+              </TextButton>
               <IconButton
                 variant="neutral"
                 onClick={() => void logout()}
@@ -228,10 +373,6 @@ export default function GuidanceApp() {
         <main id="main" className="welcome-main">
           <section className="welcome-content" aria-labelledby="welcome-title">
             <h1 id="welcome-title">企業ガイダンス</h1>
-            <p className="welcome-lead">
-              企業情報・見学スケジュール・会場マップを確認できます。
-            </p>
-            <p>企業をチェックすると見学リストに保存できます。</p>
             <div className="welcome-action">
               {status === "loading" ? (
                 <div className="loading-line" role="status">
@@ -245,6 +386,12 @@ export default function GuidanceApp() {
                     <Button
                       size="large"
                       onClick={() => {
+                        try {
+                          window.sessionStorage.setItem(
+                            returnKey,
+                            routeHref(routeRef.current),
+                          );
+                        } catch {}
                         window.location.href = `${API_URL}/auth/start`;
                       }}
                     >
@@ -255,165 +402,233 @@ export default function GuidanceApp() {
                       もう一度接続する
                     </Button>
                   )}
-                  <p className="secure-note">
-                    <Icon name="lock" />
-                    企業情報・資料の閲覧にはログインが必要です
-                  </p>
                 </>
               )}
             </div>
           </section>
         </main>
       ) : (
-        <div className="app-layout">
-          <aside className="sidebar">
-            <p className="sidebar-label">ガイダンスメニュー</p>
-            <nav aria-label="メインナビゲーション">
-              {navigation.map((item) => (
-                <div
-                  className="nav-item"
-                  key={item.id}
-                  data-current={view === item.id ? "true" : undefined}
-                >
-                  <TextButton
-                    variant={view === item.id ? undefined : "subtle"}
-                    icon={<Icon name={item.icon} />}
-                    onClick={() => navigate(item.id)}
-                    aria-current={view === item.id ? "page" : undefined}
-                  >
-                    {item.title}
-                    {item.id === "plan" && saved.size > 0
-                      ? ` (${saved.size})`
-                      : ""}
-                  </TextButton>
-                </div>
-              ))}
-            </nav>
-            <div className="sidebar-event">
-              <h2>開催情報</h2>
-              <b>{data.event.title}</b>
-              <span>
-                <Icon name="calendar" size={16} />
-                {dateLabel(data.event.date)}
-              </span>
-              <span>
-                <Icon name="location" size={16} />
-                {data.event.venue}
-              </span>
-            </div>
-            <p className="sidebar-foot">Taskly · 企業ガイダンス</p>
-          </aside>
+        <>
           <main id="main" className="main-content">
             {error && (
               <div className="top-error">
                 <Message error>{error}</Message>
               </div>
             )}
-            {view === "companies" && (
+            {route.company && !selected && (
+              <div className="top-error">
+                <Message error>企業が見つかりません。</Message>
+                <TextButton onClick={closeCompany}>企業一覧へ戻る</TextButton>
+              </div>
+            )}
+            {(route.view === "companies" || route.view === "search") && (
               <Companies
                 data={data}
                 saved={saved}
+                assignedIDs={assignedIDs}
+                route={route}
+                onRouteChange={changeRoute}
                 onSave={toggleSave}
-                onSelect={setSelected}
-                onMap={() => navigate("map")}
+                onSelect={openCompany}
               />
             )}
-            {view === "schedule" && <Schedule data={data} />}
-            {view === "map" && (
-              <Maps documents={data.documents} onExpired={expireSession} />
+            {route.view === "schedule" && (
+              <Schedule
+                data={data}
+                assignment={assignment}
+                route={route}
+                onSelect={openCompany}
+              />
             )}
-            {view === "plan" && (
+            {route.view === "map" && (
+              <VenueMap
+                documents={data.documents}
+                companies={data.companies}
+                session={route.session === "PM" ? "PM" : "AM"}
+                selectedCompanyId={route.company || route.focus}
+                search={route.q}
+                industry={route.industry}
+                onlySaved={route.saved}
+                onlyAssigned={route.assigned}
+                onFiltersChange={(patch) =>
+                  changeRoute(
+                    patch,
+                    typeof patch.q === "string" &&
+                      Object.keys(patch).length === 1,
+                  )
+                }
+                savedCompanyIds={saved}
+                assignedCompanyIds={assignedIDs}
+                onSelectCompany={(company) => {
+                  changeRoute({ company: company.id, focus: company.id });
+                }}
+                onSessionChange={(session) =>
+                  changeRoute({ session, company: "", focus: "" })
+                }
+                onExpired={expireSession}
+              />
+            )}
+            {route.view === "plan" && (
               <Plan
                 data={data}
                 saved={saved}
+                assignment={assignment}
+                assignedIDs={assignedIDs}
+                rosterNumber={preferences.roster_number}
+                route={route}
                 onSave={toggleSave}
-                onSelect={setSelected}
+                onSelect={openCompany}
+                onConfigure={() => setSettingNumber(true)}
                 onFind={() => navigate("companies")}
               />
             )}
-            <footer className="content-footer">
-              <span>Taskly · 企業ガイダンス</span>
-              <span>
-                掲載情報は配布資料をもとにしています。変更は学校からの案内をご確認ください。
-              </span>
-            </footer>
           </main>
-          <nav
-            className="mobile-navigation"
-            aria-label="モバイルナビゲーション"
-          >
-            <UnderlineTab
-              key={view}
-              defaultSelectedId={view}
-              options={navigation.map((item) => ({
-                id: item.id,
-                label: item.short,
-              }))}
-              variant="fixed"
-              onClick={(_, id) => navigate(id as View)}
-            />
-          </nav>
-        </div>
+          {menu(true)}
+        </>
       )}
-      {selected && data && (
+      {ready && settingNumber && (
+        <RosterDialog
+          number={preferences.roster_number}
+          onClose={() => setSettingNumber(false)}
+          onExpired={expireSession}
+          onSaved={(profile) => {
+            setPreferences(profile);
+            setSettingNumber(false);
+          }}
+        />
+      )}
+      {ready && selected && !settingNumber && (
         <CompanyDialog
           company={selected}
           saved={saved.has(selected.id)}
-          onSave={() => toggleSave(selected)}
-          onClose={() => setSelected(null)}
-          onMap={() => {
-            setSelected(null);
-            navigate("map");
-          }}
+          assigned={assignedIDs.has(selected.id)}
+          route={route}
+          onSave={() => void toggleSave(selected)}
+          onClose={closeCompany}
+          onMap={() => mapCompany(selected)}
         />
-      )}{" "}
-      {!ready && (
-        <footer className="welcome-footer">
-          <span>Taskly · 企業ガイダンス</span>
-        </footer>
       )}
     </>
   );
 }
 
-function ViewHeading({
-  title,
-  description,
-  children,
+function RosterDialog({
+  number,
+  onClose,
+  onSaved,
+  onExpired,
 }: {
-  title: string;
-  description: string;
-  children?: React.ReactNode;
+  number: number | null;
+  onClose: () => void;
+  onSaved: (profile: Preferences) => void;
+  onExpired: () => void;
 }) {
+  const ref = useRef<HTMLDialogElement>(null),
+    input = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState(number === null ? "" : String(number)),
+    [pending, setPending] = useState(false),
+    [error, setError] = useState("");
+  useEffect(() => {
+    ref.current?.showModal();
+    input.current?.focus();
+    return () => ref.current?.close();
+  }, []);
+  async function save() {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 99) {
+      setError("名簿番号を確認してください。");
+      return;
+    }
+    setPending(true);
+    setError("");
+    try {
+      onSaved(
+        await api<Preferences>("/api/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roster_number: parsed }),
+        }),
+      );
+    } catch (cause) {
+      if (cause instanceof APIError && cause.status === 401) onExpired();
+      else
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "保存できませんでした。もう一度お試しください。",
+        );
+    } finally {
+      setPending(false);
+    }
+  }
   return (
-    <div className="view-heading">
-      <div>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      {children}
-    </div>
+    <dialog
+      ref={ref}
+      className="roster-dialog"
+      aria-labelledby="roster-title"
+      onCancel={(event) => {
+        if (pending) event.preventDefault();
+        else onClose();
+      }}
+    >
+      <form
+        className="dialog-inner"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+      >
+        <h2 id="roster-title">名簿番号の設定</h2>
+        <p className="roster-class">Ec4</p>
+        <label htmlFor="roster-number">名簿番号</label>
+        <TextField
+          ref={input}
+          id="roster-number"
+          type="number"
+          inputMode="numeric"
+          min="1"
+          max="99"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          required
+          disabled={pending}
+          hasError={Boolean(error)}
+          aria-describedby={error ? "roster-error" : undefined}
+        />
+        {error && (
+          <div id="roster-error">
+            <Message error>{error}</Message>
+          </div>
+        )}
+        <div className="dialog-actions">
+          <TextButton type="button" onClick={onClose} disabled={pending}>
+            {number === null ? "あとで" : "キャンセル"}
+          </TextButton>
+          <Button type="submit" disabled={pending}>
+            {pending ? "保存中" : "保存する"}
+          </Button>
+        </div>
+      </form>
+    </dialog>
   );
 }
 function Companies({
   data,
   saved,
+  assignedIDs,
+  route,
+  onRouteChange,
   onSave,
   onSelect,
-  onMap,
 }: {
   data: Guidance;
   saved: Set<string>;
+  assignedIDs: Set<string>;
+  route: RouteState;
+  onRouteChange: (patch: Partial<RouteState>, replace?: boolean) => void;
   onSave: (company: Company) => void;
   onSelect: (company: Company) => void;
-  onMap: () => void;
 }) {
-  const [search, setSearch] = useState("");
-  const [session, setSession] = useState("all");
-  const [industry, setIndustry] = useState("");
-  // Spindle DropDown owns its visible label; remount only when filters reset.
-  const [industryReset, setIndustryReset] = useState(0);
-  const [onlySaved, setOnlySaved] = useState(false);
   const industries = useMemo(
     () =>
       [
@@ -421,107 +636,122 @@ function Companies({
       ].sort((a, b) => a.localeCompare(b, "ja")),
     [data],
   );
+  // Spindle DropDown caches its visible option label. Remount only when an
+  // external change (history/reset) alters the value, preserving keyboard
+  // focus during normal selection.
+  const chosenIndustry = useRef(route.industry);
+  const [industryReset, setIndustryReset] = useState(0);
+  useEffect(() => {
+    if (chosenIndustry.current !== route.industry) {
+      chosenIndustry.current = route.industry;
+      setIndustryReset((previous) => previous + 1);
+    }
+  }, [route.industry]);
+  const searching = route.view === "search";
   const filtered = useMemo(
     () =>
-      data.companies.filter(
-        (company) =>
-          (session === "all" || company.session === session) &&
-          (!industry || company.industries.includes(industry)) &&
-          (!onlySaved || saved.has(company.id)) &&
-          (!search.trim() ||
-            normalized(
-              `${company.name} ${company.booth} ${company.industries.join(" ")}`,
-            ).includes(normalized(search))),
-      ),
-    [data, search, session, industry, onlySaved, saved],
+      !searching
+        ? data.companies
+        : data.companies.filter(
+            (company) =>
+              (route.session === "all" || company.session === route.session) &&
+              (!route.industry ||
+                company.industries.includes(route.industry)) &&
+              (!route.saved || saved.has(company.id)) &&
+              (!route.q.trim() ||
+                normalized(
+                  `${company.name} ${company.booth} ${company.industries.join(" ")}`,
+                ).includes(normalized(route.q))),
+          ),
+    [data, route, saved, searching],
   );
   return (
     <>
-      <ViewHeading
-        title="企業を探す"
-        description="企業名・業種・参加時間帯で検索できます。"
-      />
-      <div className="event-banner">
-        <div>
-          <span className="event-banner-label">{data.event.title}</span>
-          <p>
-            <span>
-              <Icon name="calendar" size={16} />
-              {dateLabel(data.event.date)}
-            </span>
-            <span>
-              <Icon name="location" size={16} />
-              {data.event.venue}
-            </span>
-          </p>
-        </div>
-        <TextButton
-          icon={<Icon name="arrow" />}
-          iconPosition="end"
-          onClick={onMap}
-        >
-          会場マップを見る
-        </TextButton>
+      <div className="view-heading">
+        <h1>{searching ? "企業を探す" : "企業一覧"}</h1>
+        {!searching && (
+          <TextLink
+            href={routeHref({ ...route, view: "search", company: "" })}
+            icon={<Icon name="search" />}
+            onClick={(event) =>
+              intercept(event, () =>
+                onRouteChange({ view: "search", company: "" }),
+              )
+            }
+          >
+            企業を探す
+          </TextLink>
+        )}
       </div>
-      <section className="company-search" aria-label="企業の検索と絞り込み">
-        <div className="search-row">
-          <label className="search-field">
-            <span className="sr-only">企業名・業種・ブース番号で検索</span>
-            <TextField
-              id="company-search"
-              type="search"
-              placeholder="企業名・業種・ブース番号で検索"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-          <div className="industry-select bounded-field">
-            <label className="sr-only" htmlFor="industry-filter">
-              業種で絞り込む
+      {searching && (
+        <section className="company-search" aria-label="企業の検索と絞り込み">
+          <div className="search-row">
+            <label className="search-field">
+              <span className="sr-only">企業名・業種・ブース番号で検索</span>
+              <TextField
+                id="company-search"
+                type="search"
+                placeholder="企業名・業種・ブース番号で検索"
+                value={route.q}
+                onChange={(event) =>
+                  onRouteChange({ q: event.target.value }, true)
+                }
+              />
             </label>
-            <DropDown
-              id="industry-filter"
-              key={industryReset}
-              style={selectLayout}
-              value={industry}
-              onChange={(event) => setIndustry(event.target.value)}
-              aria-label="業種で絞り込む"
-            >
-              <option value="">すべての業種</option>
-              {industries.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </DropDown>
+            <div className="industry-select bounded-field">
+              <label className="sr-only" htmlFor="industry-filter">
+                業種で絞り込む
+              </label>
+              <DropDown
+                key={industryReset}
+                id="industry-filter"
+                style={selectLayout}
+                value={route.industry}
+                onChange={(event) => {
+                  chosenIndustry.current = event.target.value;
+                  onRouteChange({ industry: event.target.value });
+                }}
+                aria-label="業種で絞り込む"
+              >
+                <option value="">すべての業種</option>
+                {industries.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </DropDown>
+            </div>
           </div>
-        </div>
-        <div className="filter-row">
-          <fieldset className="session-tabs">
-            <legend>参加時間帯</legend>
-            <SegmentedControl
-              selectedId={session}
-              options={[
-                { id: "all", label: "すべて" },
-                { id: "AM", label: "午前の部" },
-                { id: "PM", label: "午後の部" },
-              ]}
-              onClick={(_, id) => setSession(id)}
-            />
-          </fieldset>
-          <div className="saved-filter">
-            <Checkbox
-              checked={onlySaved}
-              onChange={(event) => setOnlySaved(event.target.checked)}
-            >
-              保存した企業
-            </Checkbox>
+          <div className="filter-row">
+            <fieldset className="session-tabs">
+              <legend>参加時間帯</legend>
+              <SegmentedControl
+                selectedId={route.session}
+                options={[
+                  { id: "all", label: "すべて" },
+                  { id: "AM", label: "午前の部" },
+                  { id: "PM", label: "午後の部" },
+                ]}
+                onClick={(_, session) =>
+                  onRouteChange({ session: session as RouteState["session"] })
+                }
+              />
+            </fieldset>
+            <div className="saved-filter">
+              <Checkbox
+                checked={route.saved}
+                onChange={(event) =>
+                  onRouteChange({ saved: event.target.checked })
+                }
+              >
+                保存した企業
+              </Checkbox>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
       <div className="results-label" aria-live="polite">
         <span>
           <strong>{filtered.length}</strong> 社の企業
         </span>
-        <span>企業名順</span>
       </div>
       {filtered.length ? (
         <div className="company-grid">
@@ -532,26 +762,25 @@ function Companies({
                 key={company.id}
                 company={company}
                 saved={saved.has(company.id)}
+                assigned={assignedIDs.has(company.id)}
+                route={route}
                 onSave={() => onSave(company)}
                 onSelect={() => onSelect(company)}
               />
             ))}
         </div>
       ) : (
-        <Empty
-          icon="search"
-          title="条件に合う企業が見つかりません"
-          text="キーワードを短くするか、絞り込み条件を変更してください。"
-        >
+        <Empty title="条件に合う企業が見つかりません">
           <Button
             variant="outlined"
-            onClick={() => {
-              setSearch("");
-              setSession("all");
-              setIndustry("");
-              setIndustryReset((previous) => previous + 1);
-              setOnlySaved(false);
-            }}
+            onClick={() =>
+              onRouteChange({
+                q: "",
+                session: "all",
+                industry: "",
+                saved: false,
+              })
+            }
           >
             条件をリセット
           </Button>
@@ -563,19 +792,25 @@ function Companies({
 function CompanyCard({
   company,
   saved,
+  assigned,
+  route,
   onSave,
   onSelect,
 }: {
   company: Company;
   saved: boolean;
+  assigned: boolean;
+  route: RouteState;
   onSave: () => void;
   onSelect: () => void;
 }) {
+  const href = routeHref({ ...route, company: company.id });
   return (
     <article className="company-card">
       <div className="company-card-top">
         <span className="session-badge">
-          {sessionLabel(company.session)}の部
+          {sessionLabel(company.session)}の部{" "}
+          {assigned && <span className="assignment-badge">指定</span>}
         </span>
         <Checkbox
           checked={saved}
@@ -587,7 +822,9 @@ function CompanyCard({
       </div>
       <div className="company-card-main">
         <h2>
-          <TextButton onClick={onSelect}>{company.name}</TextButton>
+          <TextLink href={href} onClick={(event) => intercept(event, onSelect)}>
+            {company.name}
+          </TextLink>
         </h2>
         <div className="industry-tags">
           {company.industries.map((value) => (
@@ -599,35 +836,22 @@ function CompanyCard({
         <span>
           ブース <b>{company.booth}</b>
         </span>
-        <TextButton
-          onClick={onSelect}
+        <TextLink
+          href={href}
           icon={<Icon name="arrow" />}
           iconPosition="end"
+          onClick={(event) => intercept(event, onSelect)}
         >
           詳細を見る
-        </TextButton>
+        </TextLink>
       </div>
     </article>
   );
 }
-function Empty({
-  icon,
-  title,
-  text,
-  children,
-}: {
-  icon: IconName;
-  title: string;
-  text: string;
-  children?: React.ReactNode;
-}) {
+function Empty({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="empty-state">
-      <span className="empty-icon">
-        <Icon name={icon} size={30} />
-      </span>
       <h2>{title}</h2>
-      <p>{text}</p>
       {children}
     </div>
   );
@@ -635,12 +859,16 @@ function Empty({
 function CompanyDialog({
   company,
   saved,
+  assigned,
+  route,
   onSave,
   onClose,
   onMap,
 }: {
   company: Company;
   saved: boolean;
+  assigned: boolean;
+  route: RouteState;
   onSave: () => void;
   onClose: () => void;
   onMap: () => void;
@@ -663,8 +891,9 @@ function CompanyDialog({
     >
       <div className="dialog-inner">
         <div className="dialog-top">
-          <span className={`session-badge ${company.session.toLowerCase()}`}>
-            {sessionLabel(company.session)}の部
+          <span className="session-badge">
+            {sessionLabel(company.session)}の部{" "}
+            {assigned && <span className="assignment-badge">指定</span>}
           </span>
           <IconButton
             variant="neutral"
@@ -683,20 +912,27 @@ function CompanyDialog({
         <div className="booth-detail">
           <Icon name="location" size={27} />
           <div>
-            <span>会場ブース番号</span>
+            <span>ブース</span>
             <strong>{company.booth}</strong>
           </div>
-          <TextButton
-            onClick={onMap}
-            icon={<Icon name="arrow" />}
-            iconPosition="end"
+          <TextLink
+            href={routeHref({
+              ...route,
+              view: "map",
+              company: "",
+              focus: company.id,
+              session: company.session,
+              q: "",
+              industry: "",
+              saved: false,
+              assigned: false,
+            })}
+            onClick={(event) => intercept(event, onMap)}
+            icon={<Icon name="map" />}
           >
             マップを確認
-          </TextButton>
+          </TextLink>
         </div>
-        <p className="detail-note">
-          同じブース番号でも、午前と午後で企業が入れ替わります。時間帯をご確認ください。
-        </p>
         <div className="detail-interest">
           <Checkbox
             checked={saved}
@@ -706,100 +942,104 @@ function CompanyDialog({
             気になる企業
           </Checkbox>
         </div>
-        <p className="source-note">
-          出典：配布PDF {company.source_page} ページ
-        </p>
       </div>
     </dialog>
   );
 }
-function Schedule({ data }: { data: Guidance }) {
-  const [grade, setGrade] = useState("4");
+function Schedule({
+  data,
+  assignment,
+  route,
+  onSelect,
+}: {
+  data: Guidance;
+  assignment?: Assignment;
+  route: RouteState;
+  onSelect: (company: Company) => void;
+}) {
   return (
     <>
-      <ViewHeading
-        title="スケジュール"
-        description="指定企業のタームと自由見学の時間を確認できます。"
-      />
-      <div className="schedule-toolbar">
-        <span>
-          <Icon name="calendar" />
-          {dateLabel(data.event.date)}
-        </span>
-        <div className="schedule-grade bounded-field">
-          <label htmlFor="schedule-grade">学年</label>
-          <DropDown
-            id="schedule-grade"
-            style={selectLayout}
-            value={grade}
-            onChange={(event) => setGrade(event.target.value)}
-            aria-label="スケジュールの学年"
-          >
-            <option value="3">本科3年</option>
-            <option value="4">本科4年</option>
-            <option value="5">専攻科1年</option>
-          </DropDown>
-        </div>
+      <div className="view-heading">
+        <h1>スケジュール</h1>
       </div>
       <section className="timeline" aria-label="ガイダンススケジュール">
-        {data.schedule.map((slot) => (
-          <article
-            key={slot.id}
-            className={`timeline-item ${slot.term ? "is-term" : ""}`}
-          >
-            <div className="timeline-time">
-              <b>{timeLabel(slot.start)}</b>
-              <span>{timeLabel(slot.end)}</span>
-            </div>
-            <div className="timeline-track">
-              <span />
-            </div>
-            <div className="timeline-content">
-              <div>
-                <h2>{slot.title}</h2>
-                {slot.term && (
-                  <span
-                    className={`term-badge ${slot.required_grades.includes(Number(grade)) ? "required" : ""}`}
+        {data.schedule.map((slot) => {
+          const visit = assignment?.visits.find(
+              (item) => item.term === slot.term,
+            ),
+            company = data.companies.find(
+              (item) => item.id === visit?.company_id,
+            );
+          return (
+            <article
+              key={slot.id}
+              className={`timeline-item ${slot.term ? "is-term" : ""}`}
+            >
+              <div className="timeline-time">
+                <b>{timeLabel(slot.start)}</b>
+                <span>{timeLabel(slot.end)}</span>
+              </div>
+              <div className="timeline-track">
+                <span />
+              </div>
+              <div className="timeline-content">
+                <div>
+                  <h2>{slot.title}</h2>
+                  {slot.term && (
+                    <span
+                      className={`term-badge ${slot.required_grades.includes(4) ? "required" : ""}`}
+                    >
+                      {slot.required_grades.includes(4)
+                        ? "指定企業"
+                        : "自由見学"}
+                    </span>
+                  )}
+                </div>
+                {company && (
+                  <TextLink
+                    href={routeHref({ ...route, company: company.id })}
+                    onClick={(event) =>
+                      intercept(event, () => onSelect(company))
+                    }
                   >
-                    {slot.required_grades.includes(Number(grade))
-                      ? "指定企業"
-                      : "自由見学"}
-                  </span>
+                    {company.name} · ブース{company.booth}
+                  </TextLink>
                 )}
               </div>
-              {slot.term ? (
-                <p>
-                  ターム {slot.term} · {sessionLabel(slot.session)}の部
-                </p>
-              ) : null}
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </section>
-      {data.notices.length > 0 && (
+      {(data.notice_sections?.length || data.notices.length) > 0 && (
         <section className="notices">
-          <h2>
-            <Icon name="info" />
-            当日のご案内
-          </h2>
-          <p className="notices-lead">
-            学校からの案内を、項目を開いて確認できます。
-          </p>
-          <div className="notice-sections">
-            {data.notices.map((notice, i) => {
-              const lines = notice.split("\n");
-              const title =
-                lines.find((line) => line.trim()) || `ご案内 ${i + 1}`;
-              return (
-                <details key={i}>
-                  <summary>
-                    {title.length > 70 ? `配布資料のご案内 ${i + 1}` : title}
-                  </summary>
-                  <p>{notice}</p>
-                </details>
-              );
-            })}
-          </div>
+          <details>
+            <summary>配布資料の案内</summary>
+            <div className="notice-sections">
+              {data.notice_sections?.length
+                ? data.notice_sections.map((section) => (
+                    <section
+                      key={section.id}
+                      aria-labelledby={`notice-${section.id}`}
+                    >
+                      <h2 id={`notice-${section.id}`}>{section.title}</h2>
+                      {section.blocks.map((block, index) =>
+                        block.type === "paragraph" ? (
+                          <p key={index}>{block.text}</p>
+                        ) : (
+                          <ul key={index}>
+                            {block.items.map((item, itemIndex) => (
+                              <li key={itemIndex}>{item}</li>
+                            ))}
+                          </ul>
+                        ),
+                      )}
+                    </section>
+                  ))
+                : data.notices.map((notice, index) => (
+                    <p key={index}>{notice}</p>
+                  ))}
+            </div>
+          </details>
         </section>
       )}
     </>
@@ -808,166 +1048,82 @@ function Schedule({ data }: { data: Guidance }) {
 function Plan({
   data,
   saved,
+  assignment,
+  assignedIDs,
+  rosterNumber,
+  route,
   onSave,
   onSelect,
+  onConfigure,
   onFind,
 }: {
   data: Guidance;
   saved: Set<string>;
+  assignment?: Assignment;
+  assignedIDs: Set<string>;
+  rosterNumber: number | null;
+  route: RouteState;
   onSave: (company: Company) => void;
   onSelect: (company: Company) => void;
+  onConfigure: () => void;
   onFind: () => void;
 }) {
-  const [department, setDepartment] = useState("");
-  const [grade, setGrade] = useState("4");
-  const [number, setNumber] = useState("");
-  const [lookup, setLookup] = useState<{
-    department: string;
-    grade: number;
-    number: number;
-  } | null>(null);
-  const departments = [
-    ...new Set(data.assignments.map((item) => item.department)),
-  ];
-  const assignment = lookup
-    ? data.assignments.find(
-        (item) =>
-          item.department === lookup.department &&
-          item.grade === lookup.grade &&
-          item.number === lookup.number,
-      )
-    : null;
   const companies = data.companies.filter((company) => saved.has(company.id));
   return (
     <>
-      <ViewHeading
-        title="自分の見学リスト"
-        description="指定企業と保存した企業を確認できます。"
-      />
-      <section className="assignment-panel">
-        <div className="panel-title">
-          <span className="panel-icon">
-            <Icon name="calendar" />
-          </span>
-          <div>
-            <h2>自分の指定企業を確認</h2>
-            <p>配布資料の割り振りを、学科・学年・出席番号から確認できます。</p>
-          </div>
-        </div>
-        <form
-          className="assignment-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setLookup({
-              department,
-              grade: Number(grade),
-              number: Number(number),
-            });
-          }}
+      <div className="view-heading">
+        <h1>自分の見学リスト</h1>
+        <TextButton
+          onClick={onConfigure}
+          aria-label={
+            rosterNumber === null ? "名簿番号を設定" : "名簿番号を変更"
+          }
         >
-          <div className="form-field bounded-field">
-            <label className="field-label" htmlFor="student-department">
-              学科
-            </label>
-            <DropDown
-              id="student-department"
-              style={selectLayout}
-              value={department}
-              onChange={(event) => setDepartment(event.target.value)}
-              required
-              aria-label="学科"
-            >
-              <option value="">学科を選択</option>
-              {departments.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </DropDown>
-          </div>
-          <div className="form-field bounded-field">
-            <label className="field-label" htmlFor="student-grade">
-              学年
-            </label>
-            <DropDown
-              id="student-grade"
-              style={selectLayout}
-              value={grade}
-              onChange={(event) => setGrade(event.target.value)}
-              aria-label="学年"
-            >
-              <option value="3">本科3年</option>
-              <option value="4">本科4年</option>
-            </DropDown>
-          </div>
-          <div className="form-field bounded-field">
-            <label className="field-label" htmlFor="student-number">
-              出席番号
-            </label>
-            <TextField
-              id="student-number"
-              type="number"
-              inputMode="numeric"
-              min="1"
-              max="99"
-              value={number}
-              onChange={(event) => setNumber(event.target.value)}
-              placeholder="番号"
-              required
-            />
-          </div>
-          <Button type="submit">確認する</Button>
-        </form>
-        {lookup && (
-          <div className="assignment-result" aria-live="polite">
-            {assignment ? (
-              <>
-                <p className="assignment-result-label">
-                  <Icon name="check" size={18} />
-                  {lookup.department} · {lookup.grade}年 · {lookup.number}番
-                </p>
-                <div className="assignment-visits">
-                  {assignment.visits.map((visit) => {
-                    const company = data.companies.find(
-                      (item) => item.id === visit.company_id,
-                    );
-                    const slot = data.schedule.find(
-                      (item) => item.term === visit.term,
-                    );
-                    return (
-                      <Button
-                        variant="neutral"
-                        layout="fullWidth"
-                        key={visit.term}
-                        onClick={() => company && onSelect(company)}
-                        disabled={!company}
-                      >
-                        <span>
-                          ターム {visit.term}
-                          <small>{slot ? timeLabel(slot.start) : ""}</small>
-                        </span>
-                        <b>{company?.name || "資料で確認してください"}</b>
-                        <span className="assignment-booth">
-                          {company ? `ブース ${company.booth}` : ""}
-                          <Icon name="arrow" size={17} />
-                        </span>
-                      </Button>
-                    );
-                  })}
+          {rosterNumber === null ? "名簿番号を設定" : `Ec4 · ${rosterNumber}番`}
+        </TextButton>
+      </div>
+      <section className="assignment-panel">
+        <h2>指定企業</h2>
+        {assignment ? (
+          <div className="assignment-visits">
+            {assignment.visits.map((visit) => {
+              const company = data.companies.find(
+                  (item) => item.id === visit.company_id,
+                ),
+                slot = data.schedule.find((item) => item.term === visit.term);
+              return company ? (
+                <div className="assignment-visit" key={visit.term}>
+                  <span>
+                    ターム {visit.term}
+                    <small>{slot ? timeLabel(slot.start) : ""}</small>
+                  </span>
+                  <TextLink
+                    href={routeHref({ ...route, company: company.id })}
+                    onClick={(event) =>
+                      intercept(event, () => onSelect(company))
+                    }
+                  >
+                    {company.name}
+                  </TextLink>
+                  <span className="assignment-booth">
+                    ブース {company.booth}
+                  </span>
                 </div>
-              </>
-            ) : (
-              <Message>
-                指定企業の登録が見つかりません。学科・学年・番号とガイドブックを確認してください。
-              </Message>
-            )}
+              ) : null;
+            })}
           </div>
+        ) : rosterNumber === null ? (
+          <TextButton onClick={onConfigure}>名簿番号を設定</TextButton>
+        ) : (
+          <Message>
+            指定企業が見つかりません。名簿番号を確認してください。
+          </Message>
         )}
       </section>
       <div className="section-heading">
         <h2>
-          <Icon name="bookmark" />
-          保存した企業<span>{companies.length}</span>
+          保存した企業 <span>{companies.length}</span>
         </h2>
-        <p>保存した企業は、同じTasklyアカウントで確認できます。</p>
       </div>
       {companies.length ? (
         <div className="company-grid">
@@ -976,225 +1132,20 @@ function Plan({
               key={company.id}
               company={company}
               saved
+              assigned={assignedIDs.has(company.id)}
+              route={route}
               onSave={() => onSave(company)}
               onSelect={() => onSelect(company)}
             />
           ))}
         </div>
       ) : (
-        <Empty
-          icon="bookmark"
-          title="保存した企業はありません"
-          text="企業の「気になる企業」にチェックすると、見学候補を追加できます。"
-        >
+        <Empty title="保存した企業はありません">
           <Button variant="outlined" onClick={onFind}>
             企業を探す
-            <Icon name="arrow" size={18} />
           </Button>
         </Empty>
       )}
-    </>
-  );
-}
-function Maps({
-  documents,
-  onExpired,
-}: {
-  documents: Document[];
-  onExpired: () => void;
-}) {
-  const images = documents.filter(
-    (item) => item.kind === "map" && item.mime_type.startsWith("image/"),
-  );
-  const [selected, setSelected] = useState(images[0]?.id || "");
-  const [url, setURL] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [zoom, setZoom] = useState(100);
-  const [opening, setOpening] = useState(false);
-  const current = images.find((item) => item.id === selected);
-  useEffect(() => {
-    if (!selected) return;
-    const controller = new AbortController();
-    let objectURL = "";
-    setLoading(true);
-    setError("");
-    setURL("");
-    setZoom(100);
-    void documentBlob(selected, controller.signal)
-      .then((blob) => {
-        objectURL = URL.createObjectURL(blob);
-        setURL(objectURL);
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) {
-          if (cause instanceof APIError && cause.status === 401) onExpired();
-          else
-            setError(
-              cause instanceof Error
-                ? cause.message
-                : "マップを読み込めませんでした。",
-            );
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => {
-      controller.abort();
-      if (objectURL) URL.revokeObjectURL(objectURL);
-    };
-  }, [selected, onExpired]);
-  async function openDocument(item: Document) {
-    const tab = window.open("about:blank", "_blank");
-    if (tab) tab.opener = null;
-    setOpening(true);
-    setError("");
-    try {
-      const blob = await documentBlob(item.id);
-      const objectURL = URL.createObjectURL(blob);
-      if (tab) tab.location.href = objectURL;
-      else {
-        URL.revokeObjectURL(objectURL);
-        throw new Error(
-          "資料を開くには、ブラウザーのポップアップを許可して再度お試しください。",
-        );
-      }
-      window.setTimeout(() => URL.revokeObjectURL(objectURL), 60000);
-    } catch (cause) {
-      tab?.close();
-      if (cause instanceof APIError && cause.status === 401) onExpired();
-      else
-        setError(
-          cause instanceof Error ? cause.message : "資料を開けませんでした。",
-        );
-    } finally {
-      setOpening(false);
-    }
-  }
-  return (
-    <>
-      <ViewHeading
-        title="会場マップ"
-        description="ブース配置と休憩室の位置を確認できます。"
-      />
-      <div className="map-tabs" aria-label="会場マップの切り替え">
-        {images.map((item) => (
-          <Button
-            key={item.id}
-            aria-pressed={selected === item.id}
-            variant={selected === item.id ? "lighted" : "neutral"}
-            onClick={() => setSelected(item.id)}
-          >
-            <Icon name="map" size={18} />
-            {item.title}
-          </Button>
-        ))}
-      </div>
-      {error && <Message error>{error}</Message>}
-      {current ? (
-        <section className="map-panel">
-          <div className="map-toolbar">
-            <span>
-              <Icon name="location" size={18} />
-              {current.title}
-            </span>
-            <div>
-              <IconButton
-                variant="neutral"
-                aria-label="マップを縮小"
-                disabled={zoom <= 50}
-                onClick={() => setZoom(Math.max(50, zoom - 25))}
-              >
-                <Icon name="minus" size={18} />
-              </IconButton>
-              <TextButton
-                onClick={() => setZoom(100)}
-                aria-label="拡大率を100パーセントに戻す"
-              >
-                {zoom}%
-              </TextButton>
-              <IconButton
-                variant="neutral"
-                aria-label="マップを拡大"
-                disabled={zoom >= 250}
-                onClick={() => setZoom(Math.min(250, zoom + 25))}
-              >
-                <Icon name="plus" size={18} />
-              </IconButton>
-            </div>
-          </div>
-          <div className="map-viewport">
-            {loading ? (
-              <div className="map-loading" role="status">
-                <span className="spinner" />
-                マップを読み込んでいます
-              </div>
-            ) : url ? (
-              <img
-                src={url}
-                alt={current.title}
-                style={{ width: `${zoom}%`, maxWidth: "none" }}
-              />
-            ) : (
-              <div className="map-loading">
-                {error ? (
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setSelected("");
-                      window.setTimeout(() => setSelected(current.id), 0);
-                    }}
-                  >
-                    再読み込み
-                  </Button>
-                ) : (
-                  "マップはまだ登録されていません"
-                )}
-              </div>
-            )}
-          </div>
-          <p className="map-hint">
-            <Icon name="info" size={16} />
-            拡大後は縦・横にスクロールして確認できます。
-          </p>
-        </section>
-      ) : (
-        <Empty
-          icon="map"
-          title="マップを準備しています"
-          text="登録され次第、ここから会場案内をご覧いただけます。"
-        />
-      )}
-      <section className="document-section">
-        <div className="section-heading">
-          <h2>配布資料</h2>
-          <p>原本のPDFを開いて確認できます。</p>
-        </div>
-        <div className="document-list">
-          {documents
-            .filter((item) => item.mime_type === "application/pdf")
-            .map((item) => (
-              <Button
-                variant="neutral"
-                layout="fullWidth"
-                key={item.id}
-                onClick={() => void openDocument(item)}
-                disabled={opening}
-              >
-                <span className="pdf-mark">PDF</span>
-                <span>
-                  <b>{item.title}</b>
-                  <small>
-                    配布PDF
-                    {item.source_page ? ` · ${item.source_page} ページ` : ""}
-                  </small>
-                </span>
-                <Icon name="external" size={20} />
-              </Button>
-            ))}
-        </div>
-      </section>
     </>
   );
 }

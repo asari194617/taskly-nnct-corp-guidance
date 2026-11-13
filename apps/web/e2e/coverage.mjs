@@ -9,6 +9,18 @@ import reports from "istanbul-reports";
 export default async function reportBrowserCoverage() {
   const output = resolve("coverage/e2e"),
     root = resolve("out");
+  // Measure all authored browser modules, including newly introduced routing,
+  // onboarding and map components, instead of silently keeping the initial scope.
+  async function modules(directory) {
+    const files = [];
+    for (const entry of await readdir(resolve(directory), { withFileTypes: true })) {
+      const name = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) files.push(...await modules(name));
+      else if (/\.[jt]sx?$/.test(name) && !name.endsWith(".d.ts") && name !== "lib/types.ts") files.push(name);
+    }
+    return files;
+  }
+  const expected = new Set([...await modules("components"), ...await modules("lib")]);
   const inputs = await readdir(resolve(output, "raw"));
   const sources = new Map(),
     processes = [];
@@ -42,19 +54,18 @@ export default async function reportBrowserCoverage() {
     await converter.load();
     converter.applyCoverage(entry.functions);
     for (const [name, data] of Object.entries(converter.toIstanbul())) {
-      const match = name
-        .replaceAll("\\", "/")
-        .match(/\/(components\/(?:guidance-app|icons)\.tsx|lib\/api\.ts)$/);
-      if (match) {
-        data.path = resolve(match[1]);
+      const normalized = name.replaceAll("\\", "/");
+      const relative = [...expected].find(file => normalized.endsWith(`/${file}`));
+      if (relative) {
+        data.path = resolve(relative);
         coverage.addFileCoverage(data);
       }
     }
   }
-  if (coverage.files().length !== 3)
-    throw Error(
-      `Expected all 3 authored browser modules in source coverage, found ${coverage.files().length}`,
-    );
+  const measured = new Set(coverage.files().map(file => file.replaceAll("\\", "/")));
+  const missing = [...expected].filter(file => !measured.has(resolve(file).replaceAll("\\", "/")));
+  if (missing.length)
+    throw Error(`Authored browser modules missing from source coverage: ${missing.join(", ")}`);
   await mkdir(output, { recursive: true });
   const context = libReport.createContext({
     dir: output,

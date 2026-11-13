@@ -23,7 +23,7 @@ export function secureHTML(html, apiOrigin) {
   const hashes=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter(([,attrs,body])=>! /\bsrc\s*=/i.test(attrs) && body.length)
     .map(([, ,body])=>`'sha256-${createHash('sha256').update(body).digest('base64')}'`);
-  const policy=`default-src 'none'; script-src 'self' ${[...new Set(hashes)].join(' ')}; style-src 'self' 'unsafe-inline'; connect-src ${api.origin}; img-src 'self' https://cdn.taskly.iy0306.com blob:; font-src 'self'; frame-src 'self' blob:; object-src blob:; base-uri 'none'; form-action 'self' ${api.origin}`;
+  const policy=`default-src 'none'; script-src 'self' ${[...new Set(hashes)].join(' ')}; style-src 'self' 'unsafe-inline'; connect-src ${api.origin}; img-src 'self' https://cdn.taskly.iy0306.com ${api.origin}; font-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self' ${api.origin}`;
   return html.replace(/<head>/i,`<head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer">`);
 }
 export async function prepare(root,apiOrigin) {

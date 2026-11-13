@@ -18,11 +18,13 @@ type fakeStore struct {
 	dataset                                                                      json.RawMessage
 	documents                                                                    map[string]Document
 	bookmarks                                                                    map[string]map[string]bool
+	preferences                                                                  map[string]int
 	pingErr, errorFlow, errorSession, errorDataset, errorDocument, errorBookmark error
+	errorPreference                                                              error
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{flows: map[string][]byte{}, sessions: map[string]fakeSession{}, dataset: json.RawMessage(`{"event":{"title":"Synthetic event"},"companies":[{"id":"AM-1","name":"Example company","session":"AM","booth":1,"industries":[]}],"documents":[]}`), documents: map[string]Document{}, bookmarks: map[string]map[string]bool{}}
+	return &fakeStore{flows: map[string][]byte{}, sessions: map[string]fakeSession{}, dataset: json.RawMessage(`{"event":{"title":"Synthetic event"},"companies":[{"id":"AM-1","name":"Example company","session":"AM","booth":1,"industries":[]}],"documents":[]}`), documents: map[string]Document{}, bookmarks: map[string]map[string]bool{}, preferences: map[string]int{}}
 }
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
 func (f *fakeStore) SaveFlow(_ context.Context, key string, value []byte, _ time.Time) error {
@@ -91,6 +93,27 @@ func (f *fakeStore) Document(_ context.Context, key string) (Document, error) {
 	return d, nil
 }
 func (f *fakeStore) Cleanup(context.Context) error { return nil }
+func (f *fakeStore) Preference(_ context.Context, sub string) (*int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errorPreference != nil {
+		return nil, f.errorPreference
+	}
+	value, ok := f.preferences[sub]
+	if !ok {
+		return nil, nil
+	}
+	return &value, nil
+}
+func (f *fakeStore) SetPreference(_ context.Context, sub string, value int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errorPreference != nil {
+		return f.errorPreference
+	}
+	f.preferences[sub] = value
+	return nil
+}
 func (f *fakeStore) Bookmarks(_ context.Context, sub string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
