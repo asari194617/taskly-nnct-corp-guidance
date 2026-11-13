@@ -17,6 +17,7 @@ export type IconName =
   | "minus"
   | "grid"
   | "user"
+  | "document"
   | "info";
 const paths: Record<IconName, React.ReactNode> = {
   building: (
@@ -89,6 +90,12 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
     </>
   ),
+  document: (
+    <>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
+      <path d="M14 3v6h6M8 13h8m-8 4h6" />
+    </>
+  ),
   info: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -96,14 +103,62 @@ const paths: Record<IconName, React.ReactNode> = {
     </>
   ),
 };
+const filledPaths: Partial<Record<IconName, React.ReactNode>> = {
+  building: (
+    <path
+      fill="currentColor"
+      stroke="none"
+      fillRule="evenodd"
+      d="m12 2 9 4v16h-7v-6h-4v6H3V6l9-4Zm-5 6v3h3V8H7Zm7 0v3h3V8h-3Z"
+    />
+  ),
+  calendar: (
+    <>
+      <path
+        fill="currentColor"
+        stroke="none"
+        fillRule="evenodd"
+        d="M5 4h14a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Zm0 7v8h14v-8H5Z"
+      />
+      <path d="M7 2v5m10-5v5M8 14h1m6 0h1m-8 3h1" strokeWidth="2.5" />
+    </>
+  ),
+  map: (
+    <path
+      fill="currentColor"
+      stroke="none"
+      d="m2 6 6-3v15l-6 3V6Zm8-3 4 2v16l-4-3V3Zm6 3 6-3v15l-6 3V6Z"
+    />
+  ),
+  bookmark: (
+    <path
+      fill="currentColor"
+      stroke="currentColor"
+      d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-6-4-6 4Z"
+    />
+  ),
+  search: (
+    <>
+      <path
+        fill="currentColor"
+        stroke="none"
+        fillRule="evenodd"
+        d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"
+      />
+      <path d="m16 16 5 5" strokeWidth="3.5" />
+    </>
+  ),
+};
 export function Icon({
   name,
   size = 20,
   style,
+  filled = false,
 }: {
   name: IconName;
   size?: number;
   style?: CSSProperties;
+  filled?: boolean;
 }) {
   return (
     <svg
@@ -116,9 +171,10 @@ export function Icon({
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      data-filled={filled || undefined}
       style={style}
     >
-      {paths[name]}
+      {filled && filledPaths[name] ? filledPaths[name] : paths[name]}
     </svg>
   );
 }

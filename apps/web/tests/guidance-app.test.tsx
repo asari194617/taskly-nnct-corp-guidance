@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GuidanceApp from "../components/guidance-app";
-import { fixture } from "./fixtures";
+import { fixture, largeFixture } from "./fixtures";
 import type { Guidance } from "../lib/types";
 
 let dataset: Guidance;
@@ -36,6 +36,11 @@ function nav(name: string) {
   return within(
     screen.getByRole("navigation", { name: "メインナビゲーション" }),
   ).getByRole("link", { name: new RegExp(name) });
+}
+function documentLink() {
+  return within(screen.getByRole("banner")).getByRole("link", {
+    name: "配布資料の案内",
+  });
 }
 function companyLink(name: string) {
   return within(card(name)).getByRole("link", { name });
@@ -250,9 +255,10 @@ describe("account menu", () => {
       name: "名簿番号の設定",
     });
     const logout = within(menu).getByRole("menuitem", { name: "ログアウト" });
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
     expect(
-      within(menu).getByRole("menuitem", { name: "配布資料の案内" }),
-    ).toBeInTheDocument();
+      within(menu).queryByRole("menuitem", { name: "配布資料の案内" }),
+    ).not.toBeInTheDocument();
     await userEvent.keyboard("{End}");
     expect(logout).toHaveFocus();
     await userEvent.keyboard("{Home}");
@@ -291,10 +297,17 @@ describe("account menu", () => {
     await userEvent.click(trigger);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
-  it("lets a keyboard-only user open the guide page from the account menu", async () => {
+  it("lets a keyboard-only user open the guide page from its header icon", async () => {
     await ready();
-    screen.getByRole("button", { name: "ユーザーメニュー" }).focus();
-    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    const link = documentLink();
+    const trigger = screen.getByRole("button", { name: "ユーザーメニュー" });
+    expect(link).toHaveAttribute("href", "/documents/");
+    expect(link.querySelector("svg")).not.toBeNull();
+    expect(
+      link.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    link.focus();
+    await userEvent.keyboard("{Enter}");
     expect(locationURL().pathname).toBe("/documents/");
     expect(
       screen.getByRole("heading", { name: "配布資料の案内", level: 1 }),
@@ -326,13 +339,13 @@ describe("account menu", () => {
       screen.queryByText(dataset.companies[0].name),
     ).not.toBeInTheDocument();
   });
-  it("opens roster settings and the dedicated guide page through menu actions", async () => {
+  it("keeps roster settings in the menu and guide navigation in the header", async () => {
     await ready();
     await accountAction("名簿番号の設定");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "名簿番号" })).toHaveValue(7);
     await userEvent.click(screen.getByRole("button", { name: "キャンセル" }));
-    await accountAction("配布資料の案内");
+    await userEvent.click(documentLink());
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(locationURL().pathname).toBe("/documents/");
     expect(
@@ -931,7 +944,7 @@ describe("structured guide notices", () => {
     expect(
       screen.queryByRole("heading", { name: "検証用の準備" }),
     ).not.toBeInTheDocument();
-    const link = screen.getByRole("link", { name: "配布資料の案内" });
+    const link = documentLink();
     expect(link).toHaveAttribute("href", "/documents/");
     await userEvent.click(link);
     expect(locationURL().pathname).toBe("/documents/");
@@ -1321,5 +1334,65 @@ describe("company filtering and persistent bookmarks", () => {
         name: `${first.name}を気になるに追加`,
       }),
     ).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("incremental catalog integration", () => {
+  it("keeps the loaded favorite cards visible when one interest is removed", async () => {
+    dataset = largeFixture();
+    saved = new Set(dataset.companies.map((company) => company.id));
+    window.history.replaceState(null, "", "/favorites/");
+    vi.stubGlobal("IntersectionObserver", undefined);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "もっと見る" }));
+    expect(screen.getAllByRole("article")).toHaveLength(48);
+    const name = dataset.companies[0].name;
+    await userEvent.click(
+      within(card(name)).getByRole("button", {
+        name: `${name}を気になるから解除`,
+      }),
+    );
+    await waitFor(() => expect(saved.has(dataset.companies[0].id)).toBe(false));
+    expect(screen.getAllByRole("article")).toHaveLength(48);
+    expect(screen.getByRole("status")).toHaveTextContent("48 / 124社");
+  });
+
+  it("preserves revealed cards around details and starts a fresh page for new search or industry conditions", async () => {
+    dataset = largeFixture();
+    vi.stubGlobal("IntersectionObserver", undefined);
+    await ready();
+    expect(screen.getAllByRole("article")).toHaveLength(24);
+    await userEvent.click(screen.getByRole("button", { name: "もっと見る" }));
+    expect(screen.getAllByRole("article")).toHaveLength(48);
+    await userEvent.click(companyLink(dataset.companies[0].name));
+    const dialog = screen.getByRole("dialog", {
+      name: dataset.companies[0].name,
+    });
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "閉じる" }),
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(48);
+    await userEvent.click(nav("探す"));
+    expect(screen.getAllByRole("article")).toHaveLength(24);
+    await userEvent.click(screen.getByRole("button", { name: "もっと見る" }));
+    expect(screen.getAllByRole("article")).toHaveLength(48);
+    const search = screen.getByRole("searchbox");
+    await userEvent.type(search, "検証企業 0001");
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    await userEvent.clear(search);
+    expect(screen.getAllByRole("article")).toHaveLength(24);
+    const group = await expandIndustries();
+    await userEvent.click(
+      within(group).getByRole("checkbox", { name: "機械" }).closest("label")!,
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(24);
+    await userEvent.click(screen.getByRole("button", { name: "もっと見る" }));
+    expect(screen.getAllByRole("article")).toHaveLength(48);
+    await userEvent.click(
+      within(group)
+        .getByRole("checkbox", { name: "ソフトウェア" })
+        .closest("label")!,
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(24);
   });
 });

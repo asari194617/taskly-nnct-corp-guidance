@@ -113,3 +113,22 @@ export const guidance: Guidance = {
 export function fixture() {
   return structuredClone(guidance);
 }
+
+// Large, entirely synthetic catalog used only to verify incremental rendering.
+export function largeFixture(count = 125): Guidance {
+  const data = fixture();
+  data.companies.push(
+    ...Array.from(
+      { length: Math.max(0, count - data.companies.length) },
+      (_, index) => ({
+        id: `AM-${index + 3}`,
+        name: `検証企業 ${String(index + 1).padStart(4, "0")}`,
+        session: "AM" as const,
+        booth: index + 3,
+        industries: [index % 2 === 0 ? "ソフトウェア" : "機械"],
+        source_page: 2,
+      }),
+    ),
+  );
+  return data;
+}
