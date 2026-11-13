@@ -525,8 +525,11 @@ describe("Ec4 first-visit preferences", () => {
   it("offers number setup from an empty personal plan while browsing stays available", async () => {
     rosterNumber = null;
     await ready();
+    const onboarding = await screen.findByRole("dialog", {
+      name: "名簿番号の設定",
+    });
     await userEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
+      within(onboarding).getByRole("button", {
         name: "あとで",
       }),
     );
@@ -538,7 +541,7 @@ describe("Ec4 first-visit preferences", () => {
       within(assignments).getByRole("button", { name: "名簿番号を設定" }),
     );
     expect(
-      screen.getByRole("dialog", { name: "名簿番号の設定" }),
+      await screen.findByRole("dialog", { name: "名簿番号の設定" }),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "あとで" }));
     await userEvent.click(screen.getByRole("button", { name: "探す" }));
