@@ -189,9 +189,9 @@ describe("interactive private venue map", () => {
     await screen.findByRole("img", { name: "検証1階マップ" });
     await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
     const zoom = screen.getByRole("button", {
-      name: "拡大率を100パーセントに戻す",
+      name: "マップの表示をリセット",
     });
-    expect(zoom).toHaveTextContent("125%");
+    expect(zoom).toHaveAccessibleDescription("現在の倍率 125パーセント");
     view.rerender(
       <VenueMap
         {...options}
@@ -214,7 +214,7 @@ describe("interactive private venue map", () => {
     expect(selected).toHaveAttribute("data-selected", "true");
     expect(selected).toHaveAttribute("data-assigned", "true");
     expect(selected).toHaveAttribute("aria-pressed", "true");
-    expect(zoom).toHaveTextContent("125%");
+    expect(zoom).toHaveAccessibleDescription("現在の倍率 125パーセント");
     await userEvent.click(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
     );
@@ -222,7 +222,7 @@ describe("interactive private venue map", () => {
     view.rerender(<VenueMap {...options} selectedCompanyId="AM-1" />);
     expect(map).not.toHaveAttribute("data-detail-open");
     expect(screen.getByRole("status")).toHaveTextContent("ブース 1");
-    expect(zoom).toHaveTextContent("125%");
+    expect(zoom).toHaveAccessibleDescription("現在の倍率 125パーセント");
   });
 
   it("keeps embedded maps independent from fullscreen company-pane controls", async () => {
@@ -337,8 +337,8 @@ describe("interactive private venue map", () => {
       expect(area.scrollLeft).toBe(revealed.left);
       expect(area.scrollTop).toBe(revealed.top);
       expect(
-        screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-      ).toHaveTextContent("100%");
+        screen.getByRole("button", { name: "マップの表示をリセット" }),
+      ).toHaveAccessibleDescription("現在の倍率 100パーセント");
     },
   );
 
@@ -426,8 +426,8 @@ describe("interactive private venue map", () => {
       ).toBe(false);
     }
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("100%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
   });
 
   it.each([false, true])(
@@ -512,8 +512,8 @@ describe("interactive private venue map", () => {
           ).toBe(false);
       }
       expect(
-        screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-      ).toHaveTextContent("100%");
+        screen.getByRole("button", { name: "マップの表示をリセット" }),
+      ).toHaveAccessibleDescription("現在の倍率 100パーセント");
     },
   );
 
@@ -527,19 +527,19 @@ describe("interactive private venue map", () => {
     fireEvent.click(zoomOut);
     expect(zoomOut).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("50%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 50パーセント");
     for (let index = 0; index < 30; index++) fireEvent.click(zoomIn);
     expect(zoomIn).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("800%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 800パーセント");
     fireEvent.click(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
     );
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("100%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
     await userEvent.click(
       screen.getByRole("button", { name: "検証2階マップ" }),
     );
@@ -595,25 +595,26 @@ describe("interactive private venue map", () => {
     expect(image).toHaveAttribute("width", "1000");
     expect(image).toHaveAttribute("height", "1000");
     const reset = screen.getByRole("button", {
-      name: "拡大率を100パーセントに戻す",
+      name: "マップの表示をリセット",
     });
-    expect(reset).toHaveTextContent("100%");
+    expect(reset).toHaveAccessibleDescription("現在の倍率 100パーセント");
+    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
-    expect(reset).toHaveTextContent("125%");
+    expect(reset).toHaveAccessibleDescription("現在の倍率 125パーセント");
     view.rerender(
       <VenueMap {...options} documents={precise} selectedCompanyId="AM-2" />,
     );
-    expect(reset).toHaveTextContent("125%");
+    expect(reset).toHaveAccessibleDescription("現在の倍率 125パーセント");
     await userEvent.click(
       screen.getByRole("button", { name: "検証2階マップ" }),
     );
     await screen.findByRole("img", { name: "検証2階マップ" });
-    expect(reset).toHaveTextContent("125%");
+    expect(reset).toHaveAccessibleDescription("現在の倍率 125パーセント");
     view.rerender(
       <VenueMap {...options} documents={precise} selectedCompanyId="AM-1" />,
     );
     await screen.findByRole("img", { name: "検証1階マップ" });
-    expect(reset).toHaveTextContent("125%");
+    expect(reset).toHaveAccessibleDescription("現在の倍率 125パーセント");
   });
 
   it("provides a fullscreen canvas or compact embedded map without duplicate page controls", async () => {
@@ -692,18 +693,18 @@ describe("interactive private venue map", () => {
       screen.queryByRole("group", { name: "業種" }),
     ).not.toBeInTheDocument();
     await userEvent.click(toggle);
-    await userEvent.click(screen.getByRole("checkbox", { name: "製造" }));
+    await userEvent.click(screen.getByRole("button", { name: "製造" }));
     expect(
       screen.getByRole("button", { name: "午前 ブース 1 架空あおば" }),
     ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
     ).toBeDisabled();
-    await userEvent.click(screen.getByRole("checkbox", { name: "情報" }));
+    await userEvent.click(screen.getByRole("button", { name: "情報" }));
     expect(
       screen.getByRole("button", { name: "午前 ブース 2 架空いろは" }),
     ).toBeEnabled();
-    await userEvent.click(screen.getByRole("checkbox", { name: "製造" }));
+    await userEvent.click(screen.getByRole("button", { name: "製造" }));
     expect(
       screen.getByRole("button", { name: "午前 ブース 1 架空あおば" }),
     ).toBeDisabled();
@@ -814,17 +815,17 @@ describe("interactive private venue map", () => {
     expect(map.scrollLeft).toBe(240);
     expect(map.scrollTop).toBe(180);
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("200%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 200パーセント");
     fireEvent.keyDown(map, { key: "0" });
     expect(map.scrollLeft).toBe(160);
     expect(map.scrollTop).toBe(160);
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("100%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
     await userEvent.click(screen.getByRole("button", { name: "マップを縮小" }));
     await userEvent.click(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
     );
     expect(map.scrollLeft).toBe(160);
     expect(map.scrollTop).toBe(160);
@@ -925,16 +926,16 @@ describe("interactive private venue map", () => {
     expect(area.scrollLeft).toBe(216);
     expect(area.scrollTop).toBe(236);
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("100%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
     view.rerender(
       <VenueMap {...options} selectedCompanyId="AM-2" mode="embedded" />,
     );
     const image = screen.getByRole("img", { name: "検証1階マップ" });
     fireEvent.load(image);
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("100%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
   });
 
   it("pans by pointer and keyboard, suppresses drag clicks, and permits the next intentional tap", async () => {
@@ -966,8 +967,8 @@ describe("interactive private venue map", () => {
     fireEvent.keyDown(map, { key: "ArrowUp" });
     fireEvent.keyDown(map, { key: "+" });
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("125%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 125パーセント");
     fireEvent.keyDown(map, { key: "-" });
     fireEvent.keyDown(map, { key: "0" });
     fireEvent.keyDown(map, { key: "Enter" });
@@ -1002,8 +1003,8 @@ describe("interactive private venue map", () => {
     fireEvent(map, zoom);
     expect(zoom.defaultPrevented).toBe(true);
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("200%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 200パーセント");
     expect(map.scrollLeft).toBe(250);
     expect(map.scrollTop).toBe(125);
   });
@@ -1058,8 +1059,8 @@ describe("interactive private venue map", () => {
       clientY: 50,
     });
     expect(
-      screen.getByRole("button", { name: "拡大率を100パーセントに戻す" }),
-    ).toHaveTextContent("200%");
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 200パーセント");
     expect(map.scrollLeft).toBe(50);
     expect(map.scrollTop).toBe(50);
     fireEvent.pointerUp(map, { pointerId: 2, pointerType: "touch" });

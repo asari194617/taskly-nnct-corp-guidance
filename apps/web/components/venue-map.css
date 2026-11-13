@@ -143,22 +143,6 @@
 .venue-map-sheet-heading h2 {
   font-size: 1rem;
 }
-.venue-map-industry-options {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-  display: grid;
-  gap: 12px;
-}
-.venue-map-industry-options legend {
-  font-weight: bold;
-  margin-bottom: 12px;
-}
-.venue-map-industry-options label {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .venue-map-sheet ul {
   padding: 0;
   margin: 0;
@@ -328,11 +312,6 @@
   min-width: 36px;
   min-height: 36px;
   padding: 6px;
-}
-.venue-map-zoom > .spui-TextButton {
-  width: auto;
-  min-width: 44px;
-  font-size: 0.75rem;
 }
 .venue-map[data-mode="embedded"] .venue-map-bottom-right {
   right: 8px;

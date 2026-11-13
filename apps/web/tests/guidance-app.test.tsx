@@ -77,14 +77,14 @@ async function expandDetailMap(dialog: HTMLElement) {
   return within(dialog).findByRole("link", { name: "マップページを開く" });
 }
 async function expandIndustries() {
-  const details =
-    document.querySelector<HTMLDetailsElement>(".industry-filter")!;
-  if (!details.open)
+  if (!screen.queryByRole("group", { name: "業種" })) {
     await userEvent.click(
-      within(details).getByText(/^業種/, { selector: "summary" }),
+      screen.getByRole("button", { name: /^業種(?: · \d+件)?$/ }),
     );
-  return within(details).getByRole("group", { name: "業種" });
+  }
+  return screen.getByRole("group", { name: "業種" });
 }
+
 function locationURL() {
   return new URL(window.location.href);
 }
@@ -93,6 +93,49 @@ function popTo(path: string) {
     window.history.replaceState(null, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
+}
+function holdBookmarkWrites(ids: string[]) {
+  const original = fetchMock.getMockImplementation()! as (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
+  const pending = new Map<
+    string,
+    { resolve: (response: Response) => void; reject: (error: Error) => void }
+  >();
+  const promises = new Map<string, Promise<Response>>();
+  for (const id of ids) {
+    promises.set(
+      id,
+      new Promise<Response>((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+      }),
+    );
+  }
+  fetchMock.mockImplementation(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    const id = path.startsWith("/api/bookmarks/")
+      ? decodeURIComponent(path.split("/").pop()!)
+      : "";
+    const response = promises.get(id);
+    if (!response) return original(input, init);
+    promises.delete(id);
+    // Model the identity that accepted the request, even if the UI signs out
+    // and the fixture's current account changes before the response arrives.
+    const accountSaved = saved;
+    const result = await response;
+    if (result.ok) {
+      if (init?.method === "DELETE") accountSaved.delete(id);
+      else accountSaved.add(id);
+    }
+    return result;
+  });
+  return {
+    finish: (id: string, status = 204) =>
+      pending.get(id)!.resolve(new Response(null, { status })),
+    fail: (id: string, error = new Error("検証用の通信エラー")) =>
+      pending.get(id)!.reject(error),
+  };
 }
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
@@ -580,7 +623,10 @@ describe("shareable routes and venue navigation", () => {
     const heading = screen.getByRole("heading", {
       name: "一覧",
     }).parentElement!;
-    const search = within(heading).getByRole("link", { name: "探す" });
+    expect(
+      within(heading).queryByRole("link", { name: "探す" }),
+    ).not.toBeInTheDocument();
+    const search = nav("探す");
     expect(search).toHaveAttribute("href", "/search/");
     await userEvent.click(search);
     expect(locationURL().pathname).toBe("/search/");
@@ -908,10 +954,10 @@ describe("shareable routes and venue navigation", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(panel).not.toHaveAttribute("aria-modal");
     const zoom = screen.getByRole("button", {
-      name: "拡大率を100パーセントに戻す",
+      name: "マップの表示をリセット",
     });
     await userEvent.click(screen.getByRole("button", { name: "マップを拡大" }));
-    expect(zoom).toHaveTextContent("125%");
+    expect(zoom).toHaveAccessibleDescription("現在の倍率 125パーセント");
     const secondBooth = screen.getByRole("button", {
       name: `午前 ブース 2 ${second.name}`,
     });
@@ -920,7 +966,7 @@ describe("shareable routes and venue navigation", () => {
     expect(updated).toBe(panel);
     expect(locationURL().searchParams.get("company")).toBe(second.id);
     expect(locationURL().searchParams.get("focus")).toBe(second.id);
-    expect(zoom).toHaveTextContent("125%");
+    expect(zoom).toHaveAccessibleDescription("現在の倍率 125パーセント");
     await userEvent.click(
       within(updated).getByRole("button", { name: "企業情報を閉じる" }),
     );
@@ -1176,10 +1222,10 @@ describe("company filtering and persistent bookmarks", () => {
     await ready();
     const industries = await expandIndustries();
     await userEvent.click(
-      within(industries).getByRole("checkbox", { name: "ソフトウェア" }),
+      within(industries).getByRole("button", { name: "ソフトウェア" }),
     );
     await userEvent.click(
-      within(industries).getByRole("checkbox", { name: "機械" }),
+      within(industries).getByRole("button", { name: "機械" }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(
@@ -1193,18 +1239,18 @@ describe("company filtering and persistent bookmarks", () => {
       "機械",
     ]);
     await userEvent.click(
-      within(industries).getByRole("checkbox", { name: "ソフトウェア" }),
+      within(industries).getByRole("button", { name: "ソフトウェア" }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(1);
     expect(locationURL().searchParams.getAll("industry")).toEqual(["機械"]);
     popTo("/search/?industry=通信&industry=研究");
     expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(
-      within(industries).getByRole("checkbox", { name: "通信" }),
-    ).toBeChecked();
+      within(industries).getByRole("button", { name: "通信" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(
-      within(industries).getByRole("checkbox", { name: "機械" }),
-    ).not.toBeChecked();
+      within(industries).getByRole("button", { name: "機械" }),
+    ).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(screen.getByRole("button", { name: "業種を解除" }));
     expect(locationURL().searchParams.getAll("industry")).toEqual([]);
     expect(screen.getAllByRole("article")).toHaveLength(
@@ -1229,7 +1275,7 @@ describe("company filtering and persistent bookmarks", () => {
     expect(locationURL().searchParams.get("session")).toBe("PM");
     expect(screen.getAllByRole("article")).toHaveLength(2);
     await userEvent.click(
-      within(await expandIndustries()).getByRole("checkbox", { name: "機械" }),
+      within(await expandIndustries()).getByRole("button", { name: "機械" }),
     );
     expect(
       screen.getByRole("heading", { name: "条件に合う企業が見つかりません" }),
@@ -1240,8 +1286,8 @@ describe("company filtering and persistent bookmarks", () => {
     expect(screen.getAllByRole("article")).toHaveLength(4);
     expect(locationURL().searchParams.getAll("industry")).toEqual([]);
     expect(
-      within(await expandIndustries()).getByRole("checkbox", { name: "機械" }),
-    ).not.toBeChecked();
+      within(await expandIndustries()).getByRole("button", { name: "機械" }),
+    ).toHaveAttribute("aria-pressed", "false");
     expect(locationURL().searchParams.has("q")).toBe(false);
   });
   it("supports native Spindle keyboard session radios and reversible interest buttons", async () => {
@@ -1275,7 +1321,7 @@ describe("company filtering and persistent bookmarks", () => {
     window.history.replaceState(null, "", "/search/");
     await ready();
     expect(document.querySelector("label label")).toBeNull();
-    const industry = within(await expandIndustries()).getByRole("checkbox", {
+    const industry = within(await expandIndustries()).getByRole("button", {
       name: longIndustry,
     });
     await userEvent.click(industry);
@@ -1426,6 +1472,191 @@ describe("company filtering and persistent bookmarks", () => {
   });
 });
 
+describe("optimistic interest changes", () => {
+  it("updates the card, navigation count and newly opened detail before the API replies", async () => {
+    await ready();
+    const first = dataset.companies[0];
+    const writes = holdBookmarkWrites([first.id]);
+    const button = within(card(first.name)).getByRole("button", {
+      name: `${first.name}を気になるに追加`,
+    });
+    fireEvent.click(button);
+    expect(saved.has(first.id)).toBe(false);
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeDisabled();
+    expect(document.querySelector(".saved-count")).toHaveTextContent("1");
+    await userEvent.click(companyLink(first.name));
+    const dialog = await screen.findByRole("dialog", { name: first.name });
+    const detailButton = within(dialog).getByRole("button", {
+      name: `${first.name}を気になるから解除`,
+    });
+    expect(detailButton).toHaveAttribute("aria-pressed", "true");
+    expect(detailButton).toHaveAttribute("aria-busy", "true");
+    expect(detailButton).toBeDisabled();
+    await userEvent.click(detailButton);
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).endsWith(`/api/bookmarks/${first.id}`),
+      ),
+    ).toHaveLength(1);
+    await act(async () => writes.finish(first.id));
+    expect(detailButton).toBeEnabled();
+    expect(detailButton).not.toHaveAttribute("aria-busy", "true");
+    expect(saved.has(first.id)).toBe(true);
+  });
+
+  it("immediately unchecks a retained favorite and rolls it back on a failed response", async () => {
+    saved.add("AM-1");
+    window.history.replaceState(null, "", "/favorites/");
+    await ready();
+    const first = dataset.companies[0];
+    const originalCard = card(first.name);
+    const writes = holdBookmarkWrites([first.id]);
+    const button = within(originalCard).getByRole("button", {
+      name: `${first.name}を気になるから解除`,
+    });
+    fireEvent.click(button);
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button).toBeDisabled();
+    expect(card(first.name)).toBe(originalCard);
+    expect(document.querySelector(".saved-count")).toBeNull();
+    expect(saved.has(first.id)).toBe(true);
+    await act(async () => writes.finish(first.id, 503));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toBeEnabled();
+    expect(card(first.name)).toBe(originalCard);
+    expect(document.querySelector(".saved-count")).toHaveTextContent("1");
+  });
+
+  it("keeps concurrent company changes independent and removes only a failed new retained card", async () => {
+    await ready();
+    const [first, second] = dataset.companies;
+    const writes = holdBookmarkWrites([first.id, second.id]);
+    fireEvent.click(
+      within(card(first.name)).getByRole("button", {
+        name: `${first.name}を気になるに追加`,
+      }),
+    );
+    const secondButton = within(card(second.name)).getByRole("button", {
+      name: `${second.name}を気になるに追加`,
+    });
+    expect(secondButton).toBeEnabled();
+    fireEvent.click(secondButton);
+    expect(secondButton).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelector(".saved-count")).toHaveTextContent("2");
+    await userEvent.click(nav("気になる"));
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    await act(async () => writes.finish(second.id));
+    expect(
+      within(card(second.name)).getByRole("button", {
+        name: `${second.name}を気になるから解除`,
+      }),
+    ).toBeEnabled();
+    await act(async () => writes.fail(first.id));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "検証用の通信エラー",
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(card(second.name)).toBeInTheDocument();
+    expect(
+      within(card(second.name)).getByRole("button", {
+        name: `${second.name}を気になるから解除`,
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelector(".saved-count")).toHaveTextContent("1");
+    expect(saved.has(first.id)).toBe(false);
+    expect(saved.has(second.id)).toBe(true);
+  });
+
+  it("applies and rolls back the map's saved-only filter while its request is pending", async () => {
+    window.history.replaceState(null, "", "/map/?company=AM-1&saved=1");
+    await ready();
+    const first = dataset.companies[0];
+    const panel = await screen.findByRole("region", { name: first.name });
+    const booth = await screen.findByRole("button", {
+      name: `午前 ブース 1 ${first.name}`,
+    });
+    expect(booth).toBeDisabled();
+    const writes = holdBookmarkWrites([first.id]);
+    fireEvent.click(
+      within(panel).getByRole("button", {
+        name: `${first.name}を気になるに追加`,
+      }),
+    );
+    expect(booth).toBeEnabled();
+    expect(booth).toHaveAttribute("data-saved", "true");
+    expect(saved.has(first.id)).toBe(false);
+    await act(async () => writes.finish(first.id, 503));
+    expect(await within(panel).findByRole("alert")).toBeInTheDocument();
+    expect(booth).toBeDisabled();
+    expect(booth).not.toHaveAttribute("data-saved");
+  });
+
+  it("releases only the completed company's pending button when the map pane switches companies", async () => {
+    window.history.replaceState(null, "", "/map/?company=AM-1&session=AM");
+    await ready();
+    const [first, second] = dataset.companies;
+    const panel = await screen.findByRole("region", { name: first.name });
+    const writes = holdBookmarkWrites([first.id, second.id]);
+    fireEvent.click(
+      within(panel).getByRole("button", {
+        name: `${first.name}を気になるに追加`,
+      }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: `午前 ブース 2 ${second.name}`,
+      }),
+    );
+    const updated = screen.getByRole("region", { name: second.name });
+    expect(updated).toBe(panel);
+    const secondButton = within(updated).getByRole("button", {
+      name: `${second.name}を気になるに追加`,
+    });
+    expect(secondButton).toBeEnabled();
+    fireEvent.click(secondButton);
+    expect(secondButton).toHaveAttribute("aria-pressed", "true");
+    expect(secondButton).toBeDisabled();
+    await act(async () => writes.finish(first.id));
+    expect(secondButton).toBeDisabled();
+    expect(secondButton).toHaveAttribute("aria-busy", "true");
+    await act(async () => writes.finish(second.id, 503));
+    expect(await within(updated).findByRole("alert")).toBeInTheDocument();
+    expect(secondButton).toBeEnabled();
+    expect(secondButton).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByRole("button", {
+        name: `午前 ブース 1 ${first.name}`,
+      }),
+    ).toHaveAttribute("data-saved", "true");
+  });
+
+  it.each([503, 401])(
+    "ignores another late failure (%s) after a concurrent request expires the session",
+    async (status) => {
+      await ready();
+      const [first, second] = dataset.companies;
+      const writes = holdBookmarkWrites([first.id, second.id]);
+      for (const company of [first, second])
+        fireEvent.click(
+          within(card(company.name)).getByRole("button", {
+            name: `${company.name}を気になるに追加`,
+          }),
+        );
+      await act(async () => writes.finish(second.id, 401));
+      await screen.findByRole("button", { name: "Tasklyでログイン" });
+      await act(async () => writes.finish(first.id, status));
+      expect(screen.getByRole("alert")).toHaveTextContent("ログインの有効期限");
+      expect(screen.getByRole("alert")).not.toHaveTextContent(
+        "情報を取得できませんでした",
+      );
+      expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe("incremental catalog integration", () => {
   it("keeps the loaded favorite cards visible when one interest is removed", async () => {
     dataset = largeFixture();
@@ -1476,16 +1707,12 @@ describe("incremental catalog integration", () => {
     await userEvent.clear(search);
     expect(screen.getAllByRole("article")).toHaveLength(24);
     const group = await expandIndustries();
-    await userEvent.click(
-      within(group).getByRole("checkbox", { name: "機械" }).closest("label")!,
-    );
+    await userEvent.click(within(group).getByRole("button", { name: "機械" }));
     expect(screen.getAllByRole("article")).toHaveLength(24);
     await userEvent.click(screen.getByRole("button", { name: "もっと見る" }));
     expect(screen.getAllByRole("article")).toHaveLength(48);
     await userEvent.click(
-      within(group)
-        .getByRole("checkbox", { name: "ソフトウェア" })
-        .closest("label")!,
+      within(group).getByRole("button", { name: "ソフトウェア" }),
     );
     expect(screen.getAllByRole("article")).toHaveLength(24);
   });
@@ -1592,7 +1819,7 @@ describe("retained interest cards", () => {
       }),
     ).toHaveAttribute("aria-pressed", "true");
   });
-  it.each([204, 503])(
+  it.each([204, 503, 401])(
     "ignores a late bookmark response (%s) after logout",
     async (status) => {
       await ready();

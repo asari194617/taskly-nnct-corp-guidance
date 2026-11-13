@@ -18,7 +18,8 @@ export type IconName =
   | "grid"
   | "user"
   | "document"
-  | "info";
+  | "info"
+  | "fit";
 const paths: Record<IconName, React.ReactNode> = {
   building: (
     <>
@@ -76,6 +77,7 @@ const paths: Record<IconName, React.ReactNode> = {
   ),
   plus: <path d="M5 12h14M12 5v14" />,
   minus: <path d="M5 12h14" />,
+  fit: <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />,
   grid: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1" />

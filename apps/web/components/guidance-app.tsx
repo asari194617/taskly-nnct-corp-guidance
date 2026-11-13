@@ -29,9 +29,11 @@ import { Icon, type IconName } from "./icons";
 import VenueMap from "./venue-map";
 import HeaderActions from "./header-actions";
 import IncrementalCompanyList from "./incremental-company-list";
+import IndustryChips from "./industry-chips";
 import {
   CompanyDetailContent,
   FavoriteButton,
+  FavoritePendingProvider,
   MapCompanyPanel,
 } from "./company-details";
 
@@ -107,6 +109,12 @@ function normalized(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase("ja").replace(/\s+/g, "");
 }
 
+type BookmarkState = {
+  saved: Set<string>;
+  retained: Set<string>;
+  pending: Set<string>;
+};
+
 export default function GuidanceApp({
   initialView = "companies",
 }: {
@@ -124,9 +132,33 @@ export default function GuidanceApp({
     view: initialView,
   });
   const routeRef = useRef(route);
-  const [saved, setSaved] = useState<Set<string>>(new Set());
-  const [retainedFavoriteIDs, setRetainedFavoriteIDs] = useState<Set<string>>(
-    new Set(),
+  const [bookmarkState, setBookmarkState] = useState<BookmarkState>(() => ({
+    saved: new Set(),
+    retained: new Set(),
+    pending: new Set(),
+  }));
+  const bookmarkSnapshot = useRef(bookmarkState);
+  const saved = bookmarkState.saved;
+  const retainedFavoriteIDs = bookmarkState.retained;
+  const updateBookmarks = useCallback(
+    (update: (previous: BookmarkState) => BookmarkState) => {
+      // Keep event handlers on the latest optimistic snapshot even before
+      // React renders a batch of changes for different companies.
+      const next = update(bookmarkSnapshot.current);
+      bookmarkSnapshot.current = next;
+      setBookmarkState(next);
+    },
+    [],
+  );
+  const resetBookmarks = useCallback(
+    (companyIDs: string[] = []) => {
+      updateBookmarks(() => ({
+        saved: new Set(companyIDs),
+        retained: new Set(companyIDs),
+        pending: new Set(),
+      }));
+    },
+    [updateBookmarks],
   );
   const authGeneration = useRef(0);
   const [busy, setBusy] = useState(false);
@@ -220,16 +252,14 @@ export default function GuidanceApp({
     setData(null);
     setUser(null);
     setPreferences(null);
-    setSaved(new Set());
-    setRetainedFavoriteIDs(new Set());
+    resetBookmarks();
     setSettingNumber(false);
     setError("ログインの有効期限が切れました。もう一度ログインしてください。");
     setStatus("signed-out");
-  }, []);
+  }, [resetBookmarks]);
   const load = useCallback(async () => {
     const generation = ++authGeneration.current;
-    setSaved(new Set());
-    setRetainedFavoriteIDs(new Set());
+    resetBookmarks();
     setStatus("loading");
     setError("");
     try {
@@ -240,8 +270,7 @@ export default function GuidanceApp({
         api<Preferences>("/api/preferences"),
       ]);
       if (generation !== authGeneration.current) return;
-      setSaved(new Set(bookmarks.company_ids));
-      setRetainedFavoriteIDs(new Set(bookmarks.company_ids));
+      resetBookmarks(bookmarks.company_ids);
       setUser(identity.user);
       setData(guidance);
       setPreferences(profile);
@@ -263,7 +292,7 @@ export default function GuidanceApp({
         setStatus("error");
       }
     }
-  }, []);
+  }, [resetBookmarks]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -272,32 +301,57 @@ export default function GuidanceApp({
     const requestKey = `${generation}:${company.id}`;
     if (bookmarkRequests.current.has(requestKey)) return;
     bookmarkRequests.current.add(requestKey);
-    const wasSaved = saved.has(company.id);
+    const wasSaved = bookmarkSnapshot.current.saved.has(company.id);
+    const wasRetained = bookmarkSnapshot.current.retained.has(company.id);
     setError("");
+    updateBookmarks((previous) => {
+      const nextSaved = new Set(previous.saved);
+      if (wasSaved) nextSaved.delete(company.id);
+      else nextSaved.add(company.id);
+      return {
+        saved: nextSaved,
+        retained: new Set(previous.retained).add(company.id),
+        pending: new Set(previous.pending).add(company.id),
+      };
+    });
     try {
       await api<void>(`/api/bookmarks/${encodeURIComponent(company.id)}`, {
         method: wasSaved ? "DELETE" : "PUT",
       });
-      if (generation !== authGeneration.current) return;
-      if (!wasSaved)
-        setRetainedFavoriteIDs((previous) => new Set(previous).add(company.id));
-      setSaved((previous) => {
-        const next = new Set(previous);
-        if (wasSaved) next.delete(company.id);
-        else next.add(company.id);
-        return next;
-      });
     } catch (cause) {
       if (generation !== authGeneration.current) return;
       if (cause instanceof APIError && cause.status === 401) expireSession();
-      else
+      else {
+        // Roll back only this company; simultaneous changes to other
+        // companies must remain visible and retain their own server result.
+        updateBookmarks((previous) => {
+          const nextSaved = new Set(previous.saved);
+          const nextRetained = new Set(previous.retained);
+          if (wasSaved) nextSaved.add(company.id);
+          else nextSaved.delete(company.id);
+          if (wasRetained) nextRetained.add(company.id);
+          else nextRetained.delete(company.id);
+          return {
+            saved: nextSaved,
+            retained: nextRetained,
+            pending: previous.pending,
+          };
+        });
         setError(
           cause instanceof Error
             ? cause.message
             : "気になるを更新できませんでした。もう一度お試しください。",
         );
+      }
     } finally {
       bookmarkRequests.current.delete(requestKey);
+      if (generation === authGeneration.current) {
+        updateBookmarks((previous) => {
+          const pending = new Set(previous.pending);
+          pending.delete(company.id);
+          return { ...previous, pending };
+        });
+      }
     }
   }
   async function logout() {
@@ -315,8 +369,7 @@ export default function GuidanceApp({
       setData(null);
       setUser(null);
       setPreferences(null);
-      setSaved(new Set());
-      setRetainedFavoriteIDs(new Set());
+      resetBookmarks();
       setSettingNumber(false);
       setStatus("signed-out");
     } catch (cause) {
@@ -411,7 +464,7 @@ export default function GuidanceApp({
     );
   }
   return (
-    <>
+    <FavoritePendingProvider value={bookmarkState.pending}>
       <a className="skip-link" href="#main">
         本文へ移動
       </a>
@@ -622,7 +675,7 @@ export default function GuidanceApp({
           onExpired={expireSession}
         />
       )}
-    </>
+    </FavoritePendingProvider>
   );
 }
 
@@ -726,6 +779,46 @@ function RosterDialog({
     </dialog>
   );
 }
+function IndustryFilter({
+  options,
+  selected,
+  onChange,
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div className="industry-filter">
+        <Button
+          variant="outlined"
+          layout="fullWidth"
+          aria-expanded={open}
+          aria-controls={open ? "company-industry-options" : undefined}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span>業種{selected.length ? ` · ${selected.length}件` : ""}</span>
+          <Icon name={open ? "minus" : "plus"} size={18} />
+        </Button>
+      </div>
+      {open && (
+        <div className="industry-options" id="company-industry-options">
+          <IndustryChips
+            options={options}
+            selected={selected}
+            onChange={onChange}
+          />
+          {selected.length > 0 && (
+            <TextButton onClick={() => onChange([])}>業種を解除</TextButton>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function Companies({
   data,
   saved,
@@ -787,25 +880,15 @@ function Companies({
     <>
       <div className="view-heading">
         <h1>{searching ? "探す" : "一覧"}</h1>
-        {!searching && (
-          <TextLink
-            href={routeHref({ ...route, view: "search", company: "" })}
-            icon={<Icon name="search" />}
-            onClick={(event) =>
-              intercept(event, () =>
-                onRouteChange({ view: "search", company: "" }),
-              )
-            }
-          >
-            探す
-          </TextLink>
-        )}
       </div>
       {searching && (
         <section className="company-search" aria-label="企業の検索と絞り込み">
           <div className="search-row">
             <label className="search-field">
               <span className="sr-only">企業名・業種・ブース番号で検索</span>
+              <span className="company-search-icon" aria-hidden="true">
+                <Icon name="search" size={20} />
+              </span>
               <TextField
                 id="company-search"
                 type="search"
@@ -816,39 +899,11 @@ function Companies({
                 }
               />
             </label>
-            <details className="industry-filter">
-              <summary>
-                業種
-                {route.industries.length
-                  ? ` · ${route.industries.length}件`
-                  : ""}
-              </summary>
-              <fieldset className="industry-options">
-                <legend className="sr-only">業種</legend>
-                {industries.map((industry) => (
-                  <Checkbox
-                    key={industry}
-                    checked={route.industries.includes(industry)}
-                    onChange={(event) =>
-                      onRouteChange({
-                        industries: event.target.checked
-                          ? [...route.industries, industry]
-                          : route.industries.filter(
-                              (value) => value !== industry,
-                            ),
-                      })
-                    }
-                  >
-                    {industry}
-                  </Checkbox>
-                ))}
-                {route.industries.length > 0 && (
-                  <TextButton onClick={() => onRouteChange({ industries: [] })}>
-                    業種を解除
-                  </TextButton>
-                )}
-              </fieldset>
-            </details>
+            <IndustryFilter
+              options={industries}
+              selected={route.industries}
+              onChange={(industries) => onRouteChange({ industries })}
+            />
           </div>
           <div className="filter-row">
             <fieldset className="session-tabs">
