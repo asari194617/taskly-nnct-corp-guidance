@@ -127,18 +127,31 @@ def validate(source_path, output_path, sha):
                 # Docker save can omit mediaType or use Docker's media type,
                 # depending on the image store. Shape and references matter.
                 if (isinstance(data, dict) and data.get("schemaVersion") == 2
-                        and "config" in data and "layers" in data
-                        and not data.get("artifactType") and not data.get("subject")):
+                        and "config" in data and "layers" in data):
                     image_manifests.append(data)
-        if len(image_manifests) != 1:
+        expected_config_digest = "sha256:" + config_name.rsplit("/", 1)[1]
+        expected_layer_digests = ["sha256:" + layer.rsplit("/", 1)[1] for layer in layers]
+        def is_target_oci_image(candidate):
+            config = candidate.get("config")
+            image_layers = candidate.get("layers")
+            return (isinstance(config, dict) and config.get("digest") == expected_config_digest
+                    and isinstance(image_layers, list)
+                    and [layer.get("digest") if isinstance(layer, dict) else None for layer in image_layers] == expected_layer_digests)
+        targets = [candidate for candidate in image_manifests if is_target_oci_image(candidate)]
+        if len(targets) != 1:
             raise InvalidArchive("expected one OCI image")
-        oci_image = image_manifests[0]
-        oci_config = oci_image.get("config")
-        oci_layers = oci_image.get("layers")
-        if not isinstance(oci_config, dict) or oci_config.get("digest") != "sha256:" + config_name.rsplit("/", 1)[1]:
-            raise InvalidArchive("OCI image config mismatch")
-        if not isinstance(oci_layers, list) or [layer.get("digest") if isinstance(layer, dict) else None for layer in oci_layers] != ["sha256:" + layer.rsplit("/", 1)[1] for layer in layers]:
-            raise InvalidArchive("OCI image layer mismatch")
+        for candidate in image_manifests:
+            if candidate is targets[0]:
+                continue
+            config = candidate.get("config")
+            image_layers = candidate.get("layers")
+            # BuildKit provenance is a non-runnable OCI attestation manifest.
+            # Older engines omit artifactType/subject, so inspect its media types.
+            if (not isinstance(config, dict) or config.get("mediaType") != "application/vnd.oci.empty.v1+json"
+                    or not isinstance(image_layers, list)
+                    or not image_layers
+                    or any(not isinstance(layer, dict) or layer.get("mediaType") != "application/vnd.in-toto+json" for layer in image_layers)):
+                raise InvalidArchive("archive contains an additional OCI image")
     else:
         if any(not LEGACY_LAYER.fullmatch(layer) for layer in layers):
             raise InvalidArchive("mixed archive formats")
