@@ -887,9 +887,7 @@ h2 {
 }
 .spui-TextLink,
 .spui-TextButton {
-  transition:
-    color 120ms ease,
-    background-color 120ms ease;
+  transition: background-color 120ms ease;
 }
 .industry-filter {
   min-width: 0;
