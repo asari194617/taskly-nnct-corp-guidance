@@ -1540,6 +1540,66 @@ test("Account actions, interest labels and document guidance are available witho
   );
 });
 
+test("Brand spacing groups the logo and title before the desktop menu", async ({
+  page,
+}) => {
+  await login(page, "presentation");
+  for (const viewport of [
+    { width: 320, height: 700 },
+    { width: 1024, height: 900 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const metrics = await page.getByRole("banner").evaluate((header) => {
+      const brand = header.querySelector<HTMLElement>(".brand")!;
+      const logo = brand.querySelector("img")!.getBoundingClientRect();
+      const caption = brand
+        .querySelector(".brand-caption")!
+        .getBoundingClientRect();
+      const brandBounds = brand.getBoundingClientRect();
+      const navigation = header.querySelector<HTMLElement>(
+        ".desktop-navigation",
+      )!;
+      const navBounds = navigation.getBoundingClientRect();
+      const actions = header
+        .querySelector(".header-right")!
+        .getBoundingClientRect();
+      const bounds = header.getBoundingClientRect();
+      const style = getComputedStyle(header);
+      const tokenPixels = (name: string) => {
+        const probe = document.createElement("span");
+        probe.style.cssText = `position:absolute;visibility:hidden;width:var(${name});height:0;padding:0;border:0`;
+        header.append(probe);
+        const pixels = probe.getBoundingClientRect().width;
+        probe.remove();
+        return pixels;
+      };
+      return {
+        logoTitleGap: caption.left - logo.right,
+        titleMenuGap: navBounds.left - brandBounds.right,
+        smallGap: tokenPixels("--spacing-relative-spacing-lv2"),
+        largeGap: tokenPixels("--spacing-relative-spacing-lv7"),
+        navigationVisible: getComputedStyle(navigation).display !== "none",
+        headerHeight: bounds.height,
+        actionsRight: actions.right,
+        expectedActionsRight: bounds.right - parseFloat(style.paddingRight),
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    expect(metrics.logoTitleGap).toBeCloseTo(metrics.smallGap, 1);
+    expect(metrics.overflow).toBe(false);
+    expect(metrics.actionsRight).toBeCloseTo(metrics.expectedActionsRight, 1);
+    expect(metrics.headerHeight).toBe(viewport.width < 1024 ? 60 : 64);
+    if (viewport.width >= 1024) {
+      expect(metrics.navigationVisible).toBe(true);
+      expect(metrics.titleMenuGap).toBeCloseTo(metrics.largeGap, 1);
+      expect(metrics.titleMenuGap).toBeGreaterThan(metrics.logoTitleGap);
+    } else {
+      expect(metrics.navigationVisible).toBe(false);
+    }
+  }
+});
+
 test("Long company names align left without underlines and schedule markers align with titles", async ({
   page,
 }) => {
@@ -2475,3 +2535,99 @@ for (const width of [320, 1440]) {
     await expect(directoryDialog).not.toBeVisible();
   });
 }
+
+test.describe("Mobile navigation pointer feedback", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test("Footer links stay unpainted during hover, mouse press and touch while retaining selection and keyboard focus", async ({
+    page,
+  }) => {
+    await login(page, "mobile");
+    const footer = page.getByRole("navigation", {
+      name: "モバイルナビゲーション",
+    });
+    const list = footer.getByRole("link", { name: "一覧", exact: true });
+    const search = footer.getByRole("link", { name: "探す", exact: true });
+    const client = await page.context().newCDPSession(page);
+    async function expectUnpainted(link: Locator) {
+      const frames = await link.evaluate(async (node) => {
+        const samples = [];
+        for (let frame = 0; frame < 8; frame++) {
+          const style = getComputedStyle(node);
+          samples.push({
+            background: style.backgroundColor,
+            tapHighlight: style.getPropertyValue("-webkit-tap-highlight-color"),
+            transition: style.transitionDuration,
+          });
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+        }
+        return samples;
+      });
+      for (const sample of frames) {
+        expect(sample.background).toBe("rgba(0, 0, 0, 0)");
+        expect(sample.tapHighlight).toBe("rgba(0, 0, 0, 0)");
+        expect(sample.transition).toBe("0s");
+      }
+    }
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await list.click();
+      await expect(list).toHaveAttribute("aria-current", "page");
+      await expect(list.locator("svg")).toHaveAttribute("data-filled", "true");
+      await page.mouse.move(0, 0);
+      const beforeHover = await search.evaluate(
+        (node) => getComputedStyle(node).color,
+      );
+      await search.hover();
+      expect(
+        await search.evaluate((node) => getComputedStyle(node).color),
+      ).not.toBe(beforeHover);
+      await expectUnpainted(search);
+      await page.mouse.down();
+      expect(await search.evaluate((node) => node.matches(":active"))).toBe(
+        true,
+      );
+      await expectUnpainted(search);
+      await page.mouse.up();
+      await list.click();
+      const bounds = (await search.boundingBox())!;
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [
+          { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
+        ],
+      });
+      await expectUnpainted(search);
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+      });
+      await expect(search).toHaveAttribute("aria-current", "page");
+      await expect(search.locator("svg")).toHaveAttribute(
+        "data-filled",
+        "true",
+      );
+      await expectUnpainted(search);
+      await search.focus();
+      await page.keyboard.press("Tab");
+      const next = footer.getByRole("link", { name: "予定", exact: true });
+      await expect(next).toBeFocused();
+      expect(
+        await next.evaluate((node) => node.matches(":focus-visible")),
+      ).toBe(true);
+      expect(
+        await next.evaluate((node) => getComputedStyle(node).outlineStyle),
+      ).toBe("solid");
+      expect(
+        await next.evaluate((node) => getComputedStyle(node).outlineWidth),
+      ).toBe("2px");
+    }
+    await client.detach();
+  });
+});
