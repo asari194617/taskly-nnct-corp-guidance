@@ -5,11 +5,39 @@ import "@openameba/spindle-tokens/dist/css/spindle-tokens-spacing-mobile.css";
 import "@openameba/spindle-ui/index.css";
 import "./globals.css";
 
+const title = "企業ガイダンス | Taskly";
+const description =
+  "企業情報、見学スケジュール、指定企業、会場マップを確認できます。";
+const ogImage = "https://cdn.taskly.iy0306.com/assets/thumbnail-dark.webp";
+
 export const metadata: Metadata = {
-  title: "企業ガイダンス | Taskly",
-  description:
-    "企業との出会いを、次の一歩へ。企業検索・見学スケジュール・会場案内をひとつに。",
+  metadataBase: new URL("https://nnct-corp-guidance-2026.taskly.iy0306.com"),
+  title,
+  description,
+  alternates: { canonical: "/" },
   robots: { index: false, follow: false },
+  icons: {
+    icon: {
+      url: "https://cdn.taskly.iy0306.com/assets/favicon.webp",
+      type: "image/webp",
+    },
+    apple: "https://cdn.taskly.iy0306.com/assets/apple-touch-icon.png",
+  },
+  openGraph: {
+    type: "website",
+    siteName: "Taskly",
+    title,
+    description,
+    url: "/",
+    locale: "ja_JP",
+    images: [{ url: ogImage, type: "image/webp" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: [ogImage],
+  },
 };
 
 export default function RootLayout({
