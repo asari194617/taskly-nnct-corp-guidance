@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -122,31 +121,12 @@ func (s *Server) protect(next func(http.ResponseWriter, *http.Request, User)) ht
 			failure(w, 401, "authentication_required")
 			return
 		}
-		access, _, err := s.store.Session(r.Context(), digest(cookie.Value))
-		if errors.Is(err, ErrNotFound) {
-			s.clearCookie(w, s.sessionCookieName())
-			failure(w, 401, "authentication_required")
-			return
-		}
-		if err != nil {
-			failure(w, 503, "session_unavailable")
-			return
-		}
-		token, err := s.decrypt(access)
-		if err != nil {
-			slog.Error("session decryption failed")
-			failure(w, 503, "session_unavailable")
-			return
-		}
-		user, status, err := s.userinfo(r.Context(), token)
-		if err != nil {
-			if status == 401 || status == 403 {
-				_ = s.store.DeleteSession(r.Context(), digest(cookie.Value))
+		user, sessionError := s.sessionIdentity(r.Context(), digest(cookie.Value))
+		if sessionError != nil {
+			if sessionError.status == http.StatusUnauthorized {
 				s.clearCookie(w, s.sessionCookieName())
-				failure(w, 401, "authentication_required")
-			} else {
-				failure(w, 503, "identity_unavailable")
 			}
+			failure(w, sessionError.status, sessionError.code)
 			return
 		}
 		next(w, r, user)

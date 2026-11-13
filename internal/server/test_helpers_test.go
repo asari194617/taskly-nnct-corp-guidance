@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 )
@@ -78,6 +79,27 @@ func (f *fakeStore) DeleteSession(_ context.Context, key string) error {
 	}
 	delete(f.sessions, key)
 	return nil
+}
+func (f *fakeStore) RotateSession(_ context.Context, key string, rotate func([]byte, time.Time) ([]byte, error)) ([]byte, time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errorSession != nil {
+		return nil, time.Time{}, f.errorSession
+	}
+	current, ok := f.sessions[key]
+	if !ok {
+		return nil, time.Time{}, ErrNotFound
+	}
+	updated, err := rotate(current.encrypted, current.expiry)
+	if err != nil {
+		var invalid *invalidRotation
+		if errors.As(err, &invalid) {
+			delete(f.sessions, key)
+		}
+		return nil, time.Time{}, err
+	}
+	f.sessions[key] = fakeSession{updated, current.expiry}
+	return updated, current.expiry, nil
 }
 func (f *fakeStore) Dataset(context.Context) (json.RawMessage, error) {
 	return f.dataset, f.errorDataset

@@ -2,8 +2,8 @@
   screen and (min-width: 768px) and (max-width: 1023px);
 @import "@openameba/spindle-tokens/dist/css/spindle-tokens-spacing-desktop.css"
   screen and (min-width: 1024px);
-/* Spindle components retain their published styles. The surrounding layout
-   shares their semantic colors and spacing tokens. */
+/* Spindle components supply the base styles and semantic tokens. Links and
+   text buttons omit underlines while keeping their keyboard focus outlines. */
 :root {
   font-family: var(--font-font-family-basic-version-2), sans-serif;
   font-size: 16px;
@@ -40,6 +40,18 @@ summary:focus-visible {
 }
 a {
   color: var(--color-text-accent-primary);
+}
+a,
+button,
+.spui-TextLink,
+.spui-TextLink:hover,
+.spui-TextButton,
+.spui-TextButton:hover {
+  text-decoration: none;
+}
+.spui-TextLink,
+.spui-TextButton {
+  text-align: left;
 }
 svg {
   flex: none;
@@ -103,8 +115,12 @@ h2 {
 .header-right {
   flex: none;
 }
+.header-brand {
+  display: flex;
+  align-items: center;
+}
 .brand {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--spacing-relative-spacing-lv6);
   text-decoration: none;
@@ -120,6 +136,42 @@ h2 {
 }
 .brand-caption {
   white-space: nowrap;
+}
+.account-menu {
+  --DropdownMenu-z-index: 30;
+}
+.account-menu > .spui-DropdownMenu > .spui-IconButton {
+  width: 44px;
+  height: 44px;
+  background: transparent;
+}
+.account-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border-low-emphasis);
+  border-radius: 50%;
+  background: var(--color-surface-secondary);
+  color: var(--color-object-high-emphasis);
+}
+.account-menu > .spui-DropdownMenu > .spui-IconButton:hover .account-avatar {
+  background: var(--color-surface-tertiary);
+}
+.account-menu-identity {
+  padding: var(--spacing-relative-spacing-lv4)
+    var(--spacing-relative-spacing-lv8) var(--spacing-relative-spacing-lv6);
+  overflow-wrap: anywhere;
+}
+.account-menu .spui-DropdownMenu-menu {
+  max-width: calc(100vw - 24px);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 20%);
+  border: 1px solid var(--color-border-low-emphasis);
+}
+.account-menu .spui-DropdownMenu-menuButton {
+  min-height: 44px;
+  color: var(--color-text-high-emphasis);
 }
 .header-right {
   display: flex;
@@ -442,6 +494,10 @@ h2 {
   padding: var(--spacing-relative-spacing-lv8);
 }
 .timeline-item {
+  --timeline-heading-height: 1.6rem;
+  --timeline-heading-center: calc(
+    var(--spacing-relative-spacing-lv8) + var(--timeline-heading-height) / 2
+  );
   display: grid;
   grid-template-columns: 60px 24px minmax(0, 1fr);
 }
@@ -454,6 +510,9 @@ h2 {
 .timeline-time span {
   color: var(--color-text-medium-emphasis);
   font-size: 0.75rem;
+}
+.timeline-time b {
+  line-height: var(--timeline-heading-height);
 }
 .timeline-track {
   position: relative;
@@ -469,21 +528,21 @@ h2 {
   background: var(--color-border-low-emphasis);
 }
 .timeline-track > span {
-  position: relative;
+  position: absolute;
+  top: calc(var(--timeline-heading-center) - 5px);
   width: 10px;
   height: 10px;
   border-radius: 50%;
   background: var(--color-border-medium-emphasis);
-  margin-top: 25px;
 }
 .timeline-item.is-term .timeline-track > span {
   background: var(--color-object-accent-primary);
 }
 .timeline-item:first-child .timeline-track::before {
-  top: 26px;
+  top: var(--timeline-heading-center);
 }
 .timeline-item:last-child .timeline-track::before {
-  bottom: calc(100% - 26px);
+  bottom: calc(100% - var(--timeline-heading-center));
 }
 .timeline-content {
   padding: var(--spacing-relative-spacing-lv8)
@@ -497,6 +556,7 @@ h2 {
 }
 .timeline-content h2 {
   font-size: 1rem;
+  line-height: var(--timeline-heading-height);
 }
 .timeline-content > a {
   display: inline-block;
@@ -531,6 +591,25 @@ h2 {
   margin-top: var(--spacing-relative-spacing-lv8);
   font-size: 0.875rem;
   white-space: pre-line;
+}
+.information-documents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-relative-spacing-lv6);
+  margin-bottom: var(--spacing-relative-spacing-lv10);
+}
+.information-documents .spui-Button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-relative-spacing-lv4);
+}
+.company-card-main,
+.company-card-main h2,
+.company-dialog h2,
+.assignment-visit a,
+.timeline-content a,
+.venue-map-results button {
+  text-align: left;
 }
 .assignment-panel > h2 {
   margin-bottom: var(--spacing-relative-spacing-lv6);
@@ -789,22 +868,6 @@ h2 {
 .notice-sections ul {
   margin: 0;
   padding-left: 1.5em;
-}
-@media (min-width: 1024px) and (max-width: 1279px) {
-  .topbar {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0 var(--spacing-relative-spacing-lv8);
-  }
-  .desktop-navigation {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-self: center;
-  }
-  .header-right {
-    grid-column: 2;
-    grid-row: 1;
-  }
 }
 @media (max-width: 1023px) {
   .mobile-navigation ul {

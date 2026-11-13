@@ -16,7 +16,11 @@
 {"client_id":"nnct-corp-guidance-2026","redirect_uri":"https://api.nnct-corp-guidance-2026.taskly.iy0306.com/auth/callback"}
 ```
 
-confidential client、既存利用者、認証の移行フラグは変更しません。API は PKCE と state をブラウザーに結び付け、callback の issuer を検証します。OAuth access token はサーバー側で暗号化し、ローカルセッションは15分で失効します。期限後は再ログインします。保護されたリクエストごとに taskly-auth の userinfo で失効を確認します。
+confidential client、既存利用者、認証の移行フラグは変更しません。API は PKCE と state をブラウザーに結び付け、callback の issuer を検証します。ローカルセッションと Cookie はログインから30日間有効です。15分の OAuth access token とローテーションする refresh token をサーバー側でまとめて暗号化し、期限が近づくと taskly-auth の既存 refresh grant で更新します。更新してもローカルセッションの30日の期限は延長しません。保護されたリクエストごとに userinfo で失効と同一利用者であることを確認し、ログアウト時は refresh token のファミリー全体を失効させます。
+
+更新は MySQL のセッション行ロックで直列化し、複数APIから同じ refresh token を使わないようにします。更新済みトークンは userinfo の再確認より先に永続化するため、一時的な userinfo 障害で古いトークンへ戻りません。更新の結果が不明になった場合はセッションを無効化して再ログインを要求し、使い終わった refresh token を再送しません。ブラウザーの切断時も、独立した有界の処理で更新結果の保存・失効を完了します。
+
+既存の暗号化 access token のみのセッションは従来の短い期限で利用でき、次のログインから30日へ切り替わります。暗号化データは既存の BLOB 列へ保存するため追加DDLは不要です。この形式を知らない旧APIへ切り戻す場合、新形式のセッションは再ログインが必要ですが、名簿番号設定・気になる企業は保持されます。
 
 企業一覧・指定企業・利用者設定と、文書 URL 発行の各 API は認証必須です。Cookie は HttpOnly、Secure、本番は host-only。変更 API は正確な UI Origin を検証します。名簿番号とブックマークは OAuth のユーザー ID ごとに保存し、名簿番号を URL へ含めません。
 
@@ -31,6 +35,8 @@ confidential client、既存利用者、認証の移行フラグは変更しま�
 [Deploy production](../.github/workflows/deploy.yml) は、main の最新コミットがその SHA で CI に合格済みであることを検証します。PR の成功だけでは本番へ配備しません。手動実行でも同じ main・CI 検査を行います。
 
 API の配備・readiness・未認証アクセスの拒否を確認してから UI を配備します。新しい API ルートを使う画面が、旧 API より先に公開されることを防ぎます。
+
+すべて GitHub ホストのランナーで実行します。配備後は企業情報・個人設定・保存情報・資料 URL 発行が未認証なら401、無効な署名 URL は403になることを検査し、画面の CSP・共有 URL・資料案内ページも確認します。成功したコミットと公開 URL は Actions の実行サマリーに記録します。
 
 | 環境 | 種別 | 名前 |
 | --- | --- | --- |

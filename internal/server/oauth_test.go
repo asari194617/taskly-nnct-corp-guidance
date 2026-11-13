@@ -51,7 +51,7 @@ func tokenIdentity(t *testing.T, s *Server, f *fakeStore) roundTripFunc {
 			if r.Header.Get("Authorization") != "" || r.Form.Get("client_secret") != "" {
 				t.Error("public client must not send a client secret")
 			}
-			return identityResponse(200, `{"access_token":"upstream-access","token_type":"Bearer","expires_in":3600}`), nil
+			return identityResponse(200, `{"access_token":"upstream-access","refresh_token":"upstream-refresh","token_type":"Bearer","expires_in":3600}`), nil
 		case "/oauth/userinfo":
 			if r.Header.Get("Authorization") != "Bearer upstream-access" {
 				t.Error("missing upstream bearer token")
@@ -99,19 +99,22 @@ func TestOAuthAuthorizationCodePKCEAndSessionRotation(t *testing.T) {
 			session = c
 		}
 	}
-	if session == nil || !session.HttpOnly || !session.Secure || session.Domain != "" || session.MaxAge > 900 {
+	if session == nil || !session.HttpOnly || !session.Secure || session.Domain != "" || session.MaxAge > 2592000 || session.MaxAge < 2591990 {
 		t.Fatalf("unsafe session cookie: %+v", session)
 	}
 	saved, ok := f.sessions[digest(session.Value)]
 	if !ok {
 		t.Fatal("hashed session missing")
 	}
-	access, err := s.decrypt(saved.encrypted)
-	if err != nil || access != "upstream-access" {
-		t.Fatalf("access token not encrypted: %s %v", access, err)
+	credentials, err := s.decryptCredentials(saved.encrypted)
+	if err != nil || credentials.AccessToken != "upstream-access" || credentials.RefreshToken != "upstream-refresh" || credentials.Subject != "user-1" {
+		t.Fatalf("session credentials not encrypted: %v", err)
 	}
-	if time.Until(saved.expiry) > 901*time.Second {
+	if time.Until(credentials.AccessExpiry) > 901*time.Second {
 		t.Fatal("upstream expiry was not capped")
+	}
+	if remaining := time.Until(saved.expiry); remaining < sessionLifetime-time.Minute || remaining > sessionLifetime {
+		t.Fatal("session expiry is not one month")
 	}
 	if len(f.flows) != 0 {
 		t.Fatal("flow was not consumed")
@@ -180,23 +183,28 @@ func TestOAuthCancellationAndDependencyFailures(t *testing.T) {
 		}, 502},
 		{"missing access token", func(s *Server, f *fakeStore, q url.Values) {
 			s.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return identityResponse(200, `{"token_type":"Bearer","expires_in":900}`), nil
+				return identityResponse(200, `{"refresh_token":"refresh","token_type":"Bearer","expires_in":900}`), nil
+			})
+		}, 502},
+		{"missing refresh token", func(s *Server, f *fakeStore, q url.Values) {
+			s.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return identityResponse(200, `{"access_token":"token","token_type":"Bearer","expires_in":900}`), nil
 			})
 		}, 502},
 		{"incorrect token type", func(s *Server, f *fakeStore, q url.Values) {
 			s.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return identityResponse(200, `{"access_token":"token","token_type":"MAC","expires_in":900}`), nil
+				return identityResponse(200, `{"access_token":"token","refresh_token":"refresh","token_type":"MAC","expires_in":900}`), nil
 			})
 		}, 502},
 		{"expired token", func(s *Server, f *fakeStore, q url.Values) {
 			s.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return identityResponse(200, `{"access_token":"token","token_type":"Bearer","expires_in":0}`), nil
+				return identityResponse(200, `{"access_token":"token","refresh_token":"refresh","token_type":"Bearer","expires_in":0}`), nil
 			})
 		}, 502},
 		{"userinfo rejected", func(s *Server, f *fakeStore, q url.Values) {
 			s.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/oauth/token" {
-					return identityResponse(200, `{"access_token":"token","token_type":"Bearer","expires_in":900}`), nil
+					return identityResponse(200, `{"access_token":"token","refresh_token":"refresh","token_type":"Bearer","expires_in":900}`), nil
 				}
 				return identityResponse(503, `{}`), nil
 			})

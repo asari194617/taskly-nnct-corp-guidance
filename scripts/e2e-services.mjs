@@ -8,8 +8,12 @@ import { resolve, extname, sep } from "node:path";
 export async function startServices(output) {
   const requests = new Map(),
     codes = new Map(),
-    tokens = new Map();
-  const subjects = ["alice", "bob", "onboarding", "routing", "map", "outage", "mobile", "documents", "presentation"];
+    tokens = new Map(),
+    refreshTokens = new Map(),
+    revokedFamilies = new Set(),
+    shortAccess = new Map(),
+    refreshCounts = new Map();
+  const subjects = ["alice", "bob", "onboarding", "routing", "map", "outage", "mobile", "documents", "presentation", "refresh", "menu"];
   let unavailable = false;
   const json = (res, status, body) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -24,6 +28,18 @@ export async function startServices(output) {
     return new URLSearchParams(body);
   };
   const token = () => randomBytes(32).toString("base64url");
+  const revokeFamily = (family) => {
+    revokedFamilies.add(family);
+    for (const [access, value] of tokens) {
+      if (value.family === family) tokens.delete(access);
+    }
+  };
+  const issueTokens = (sub, family, refreshExpiry, expiresIn = 900) => {
+    const access = token(), refresh = token();
+    tokens.set(access, { sub, family, expiresAt: Date.now() + expiresIn * 1000 });
+    refreshTokens.set(refresh, { sub, family, expiresAt: refreshExpiry, used: false });
+    return { access_token: access, refresh_token: refresh, token_type: "Bearer", expires_in: expiresIn };
+  };
   const issuer = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, "http://127.0.0.1:3372");
@@ -59,47 +75,66 @@ export async function startServices(output) {
         return res.end();
       }
       if (url.pathname === "/oauth/token" && req.method === "POST") {
-        const q = await form(req),
-          code = codes.get(q.get("code"));
+        const q = await form(req);
+        if (q.get("grant_type") === "refresh_token") {
+          const refresh = refreshTokens.get(q.get("refresh_token"));
+          if (q.get("client_id") !== "synthetic-e2e" || !refresh ||
+              refresh.expiresAt <= Date.now() || revokedFamilies.has(refresh.family))
+            return json(res, 400, { error: "invalid_grant" });
+          if (refresh.used) {
+            revokeFamily(refresh.family);
+            return json(res, 400, { error: "invalid_grant" });
+          }
+          refresh.used = true;
+          refreshCounts.set(refresh.sub, (refreshCounts.get(refresh.sub) || 0) + 1);
+          return json(res, 200, issueTokens(refresh.sub, refresh.family, refresh.expiresAt));
+        }
+        const code = codes.get(q.get("code"));
         if (
-          !code ||
+          q.get("grant_type") !== "authorization_code" || !code ||
           q.get("client_id") !== code.client_id ||
           q.get("redirect_uri") !== code.redirect_uri ||
-          createHash("sha256")
-            .update(q.get("code_verifier") || "")
-            .digest("base64url") !== code.code_challenge
-        )
-          return json(res, 400, { error: "invalid_grant" });
+          createHash("sha256").update(q.get("code_verifier") || "").digest("base64url") !== code.code_challenge
+        ) return json(res, 400, { error: "invalid_grant" });
         codes.delete(q.get("code"));
-        const access = token();
-        tokens.set(access, code.sub);
-        return json(res, 200, {
-          access_token: access,
-          token_type: "Bearer",
-          expires_in: 900,
-        });
+        return json(res, 200, issueTokens(code.sub, token(), Date.now() + 30 * 86400 * 1000, shortAccess.get(code.sub) || 900));
       }
       if (url.pathname === "/oauth/userinfo") {
         if (unavailable) return json(res, 503, { error: "synthetic_outage" });
-        const sub = tokens.get(
-          (req.headers.authorization || "").replace(/^Bearer /, ""),
-        );
-        if (!sub) return json(res, 401, { error: "invalid_token" });
+        const access = tokens.get((req.headers.authorization || "").replace(/^Bearer /, ""));
+        if (!access || access.expiresAt <= Date.now() || revokedFamilies.has(access.family))
+          return json(res, 401, { error: "invalid_token" });
         return json(res, 200, {
-          sub,
-          email: `${sub}@example.test`,
-          name: `検証ユーザー ${sub}`,
+          sub: access.sub,
+          email: `${access.sub}@example.test`,
+          name: `検証ユーザー ${access.sub}`,
         });
       }
       if (url.pathname === "/oauth/revoke" && req.method === "POST") {
-        const q = await form(req);
-        tokens.delete(q.get("token"));
+        const q = await form(req), refresh = refreshTokens.get(q.get("token"));
+        if (refresh) revokeFamily(refresh.family);
+        else tokens.delete(q.get("token"));
         return json(res, 200, {});
       }
       if (url.pathname === "/__test/revoke" && req.method === "POST") {
-        for (const [access, sub] of tokens)
-          if (sub === url.searchParams.get("subject")) tokens.delete(access);
+        for (const value of [...tokens.values(), ...refreshTokens.values()])
+          if (value.sub === url.searchParams.get("subject")) revokeFamily(value.family);
         return json(res, 200, {});
+      }
+      if (url.pathname === "/__test/short-token" && req.method === "POST") {
+        const subject = url.searchParams.get("subject");
+        if (!subjects.includes(subject)) return json(res, 400, { error: "invalid_subject" });
+        shortAccess.set(subject, 2);
+        return json(res, 200, {});
+      }
+      if (url.pathname === "/__test/refresh-count" && req.method === "GET") {
+        return json(res, 200, { count: refreshCounts.get(url.searchParams.get("subject")) || 0 });
+      }
+      if (url.pathname === "/__test/active-families" && req.method === "GET") {
+        const families = new Set([...refreshTokens.values()]
+          .filter(value => value.sub === url.searchParams.get("subject") && value.expiresAt > Date.now() && !revokedFamilies.has(value.family))
+          .map(value => value.family));
+        return json(res, 200, { count: families.size });
       }
       if (url.pathname === "/__test/outage" && req.method === "POST") {
         unavailable = url.searchParams.get("enabled") === "1";

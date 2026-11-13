@@ -26,7 +26,22 @@ function companyLink(name: string) {
 }
 async function ready() {
   render(<GuidanceApp />);
-  await screen.findByRole("button", { name: "ログアウト" });
+  await screen.findByRole("button", { name: "ユーザーメニュー" });
+}
+async function openAccount() {
+  if (!screen.queryByRole("menu", { name: "ユーザーメニュー" })) {
+    await userEvent.click(screen.getByRole("button", { name: "ユーザーメニュー" }));
+  }
+  return screen.getByRole("menu", { name: "ユーザーメニュー" });
+}
+async function accountAction(name: string) {
+  const menu = await openAccount();
+  await userEvent.click(within(menu).getByRole("menuitem", { name }));
+}
+async function expectAccountNumber(number: number) {
+  const menu = await openAccount();
+  expect(menu).toHaveTextContent(new RegExp(`Ec4.*${number}番`));
+  await userEvent.keyboard("{Escape}");
 }
 function locationURL() { return new URL(window.location.href); }
 function popTo(path: string) {
@@ -108,11 +123,11 @@ describe("authentication and private content", () => {
   it("preserves the page on failed logout, then clears all private state on success", async () => {
     await ready();
     failures.set("/auth/logout", 503);
-    await userEvent.click(screen.getByRole("button", { name: "ログアウト" }));
+    await accountAction("ログアウト");
     expect(await screen.findByRole("alert")).toHaveTextContent("ログアウトできませんでした");
     expect(screen.getByRole("heading", { name: dataset.companies[0].name })).toBeInTheDocument();
     failures.delete("/auth/logout");
-    await userEvent.click(screen.getByRole("button", { name: "ログアウト" }));
+    await accountAction("ログアウト");
     await screen.findByRole("button", { name: "Tasklyでログイン" });
     expect(screen.queryByText(dataset.companies[0].name)).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/auth/logout"), expect.objectContaining({ method: "POST", credentials: "include" }));
@@ -120,15 +135,109 @@ describe("authentication and private content", () => {
   it("reports logout transport failures", async () => {
     await ready();
     failures.set("/auth/logout", new Error("通信エラー"));
-    await userEvent.click(screen.getByRole("button", { name: "ログアウト" }));
+    await accountAction("ログアウト");
     expect(await screen.findByRole("alert")).toHaveTextContent("通信エラー");
   });
   it("uses the account fallback label without requiring an event date", async () => {
     userName = "";
     dataset.event.date = "未定";
     await ready();
+    await openAccount();
     expect(screen.getByText("Taskly ユーザー")).toBeInTheDocument();
     expect(screen.queryByText("未定")).not.toBeInTheDocument();
+  });
+});
+
+describe("account menu", () => {
+  it("keeps account actions behind the avatar and supports keyboard navigation and dismissal", async () => {
+    await ready();
+    const trigger = screen.getByRole("button", { name: "ユーザーメニュー" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menuitem", { name: "ログアウト" })).not.toBeInTheDocument();
+    const menu = await openAccount();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(menu).toHaveTextContent(userName);
+    expect(menu).toHaveTextContent(/Ec4.*7番/);
+    const roster = within(menu).getByRole("menuitem", { name: "名簿番号の設定" });
+    const logout = within(menu).getByRole("menuitem", { name: "ログアウト" });
+    expect(within(menu).getByRole("menuitem", { name: "配布資料の案内" })).toBeInTheDocument();
+    await userEvent.keyboard("{End}");
+    expect(logout).toHaveFocus();
+    await userEvent.keyboard("{Home}");
+    expect(roster).toHaveFocus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(logout).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(roster).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await openAccount();
+    await userEvent.click(screen.getByRole("heading", { name: "企業一覧" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/auth/logout"))).toBe(false);
+  });
+  it("opens the first or last item from the trigger keys and closes on Tab or a second click", async () => {
+    await ready();
+    const trigger = screen.getByRole("button", { name: "ユーザーメニュー" });
+    trigger.focus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(screen.getByRole("menuitem", { name: "ログアウト" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "名簿番号の設定" })).toHaveFocus();
+    await userEvent.keyboard("{Tab}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await openAccount();
+    await userEvent.click(trigger);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+  it("lets a keyboard-only user open the guide page from the account menu", async () => {
+    await ready();
+    screen.getByRole("button", { name: "ユーザーメニュー" }).focus();
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(locationURL().searchParams.get("view")).toBe("info");
+    expect(screen.getByRole("heading", { name: "配布資料の案内", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+  it("disables account actions while logout is pending and clears private state after completion", async () => {
+    await ready();
+    const original = fetchMock.getMockImplementation()! as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    let finish!: () => void;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/auth/logout")) return new Promise<Response>(resolve => {
+        finish = () => resolve(new Response(null, { status: 204 }));
+      });
+      return original(input, init);
+    });
+    await accountAction("ログアウト");
+    expect(screen.getByRole("button", { name: "ユーザーメニュー" })).toBeDisabled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await act(async () => finish());
+    await screen.findByRole("button", { name: "Tasklyでログイン" });
+    expect(screen.queryByText(dataset.companies[0].name)).not.toBeInTheDocument();
+  });
+  it("opens roster settings and the dedicated guide page through menu actions", async () => {
+    await ready();
+    await accountAction("名簿番号の設定");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "名簿番号" })).toHaveValue(7);
+    await userEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    await accountAction("配布資料の案内");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(locationURL().searchParams.get("view")).toBe("info");
+    expect(screen.getByRole("heading", { name: "配布資料の案内", level: 1 })).toBeInTheDocument();
+  });
+  it("uses one interest label for saved companies without an account-persistence explanation", async () => {
+    saved.add("AM-1");
+    await ready();
+    await userEvent.click(nav("気になる"));
+    expect(screen.getByRole("heading", { name: "気になる", level: 1 })).toBeInTheDocument();
+    expect(within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /気になるから削除$/ })).toBeChecked();
+    expect(document.body).not.toHaveTextContent("見学リスト");
+    expect(document.body).not.toHaveTextContent("保存した企業は、同じTasklyアカウントで確認できます。");
   });
 });
 
@@ -144,9 +253,9 @@ describe("Ec4 first-visit preferences", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "名簿番号の設定" })).not.toBeInTheDocument());
     expect(rosterNumber).toBe(7);
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/preferences"), expect.objectContaining({ method: "PUT", body: JSON.stringify({ roster_number: 7 }) }));
-    expect(screen.getByRole("button", { name: "名簿番号を変更" })).toHaveTextContent("7番");
+    await expectAccountNumber(7);
     expect(locationURL().search).not.toMatch(/roster|number|名簿/);
-    await userEvent.click(nav("自分の見学リスト"));
+    await userEvent.click(nav("気になる"));
     expect(screen.getByRole("heading", { name: "指定企業" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /あおばテスト株式会社/ })).toBeInTheDocument();
   });
@@ -157,7 +266,7 @@ describe("Ec4 first-visit preferences", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "あとで" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: dataset.companies[0].name })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "名簿番号を設定" }));
+    await accountAction("名簿番号の設定");
     dialog = screen.getByRole("dialog", { name: "名簿番号の設定" });
     fireEvent(dialog, new Event("cancel", { bubbles: true }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -166,7 +275,7 @@ describe("Ec4 first-visit preferences", () => {
   it("does not ask again when the stored account preference is present", async () => {
     await ready();
     expect(screen.queryByRole("dialog", { name: "名簿番号の設定" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "名簿番号を変更" }));
+    await accountAction("名簿番号の設定");
     const dialog = screen.getByRole("dialog", { name: "名簿番号の設定" });
     expect(within(dialog).getByRole("spinbutton", { name: "名簿番号" })).toHaveValue(7);
     await userEvent.click(within(dialog).getByRole("button", { name: "キャンセル" }));
@@ -174,7 +283,7 @@ describe("Ec4 first-visit preferences", () => {
   });
   it("keeps invalid numbers in the modal until a valid number is saved", async () => {
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "名簿番号を変更" }));
+    await accountAction("名簿番号の設定");
     const dialog = screen.getByRole("dialog", { name: "名簿番号の設定" });
     const number = within(dialog).getByRole("spinbutton", { name: "名簿番号" });
     await userEvent.clear(number);
@@ -187,8 +296,8 @@ describe("Ec4 first-visit preferences", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(rosterNumber).toBe(8);
-    expect(screen.getByRole("button", { name: "名簿番号を変更" })).toHaveTextContent("8番");
-    await userEvent.click(nav("自分の見学リスト"));
+    await expectAccountNumber(8);
+    await userEvent.click(nav("気になる"));
     const assignments = screen.getByRole("heading", { name: "指定企業" }).closest("section")!;
     expect(within(assignments).getAllByRole("link")[0]).toHaveTextContent(dataset.companies[1].name);
   });
@@ -196,7 +305,7 @@ describe("Ec4 first-visit preferences", () => {
     rosterNumber = null;
     await ready();
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "あとで" }));
-    await userEvent.click(nav("自分の見学リスト"));
+    await userEvent.click(nav("気になる"));
     const assignments = screen.getByRole("heading", { name: "指定企業" }).closest("section")!;
     await userEvent.click(within(assignments).getByRole("button", { name: "名簿番号を設定" }));
     expect(screen.getByRole("dialog", { name: "名簿番号の設定" })).toBeInTheDocument();
@@ -209,11 +318,11 @@ describe("Ec4 first-visit preferences", () => {
     window.history.replaceState(null, "", "/?view=plan");
     await ready();
     expect(screen.getByRole("status")).toHaveTextContent("指定企業が見つかりません");
-    expect(screen.getByRole("heading", { name: "保存した企業はありません" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "気になる企業はありません" })).toBeInTheDocument();
   });
   it("handles a save transport failure and does not discard the previous preference", async () => {
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "名簿番号を変更" }));
+    await accountAction("名簿番号の設定");
     failures.set("PUT /api/preferences", new Error("設定を保存できません"));
     const dialog = screen.getByRole("dialog", { name: "名簿番号の設定" });
     await userEvent.click(within(dialog).getByRole("button", { name: "保存する" }));
@@ -222,7 +331,7 @@ describe("Ec4 first-visit preferences", () => {
   });
   it("returns to sign-in when the preference save discovers an expired session", async () => {
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "名簿番号を変更" }));
+    await accountAction("名簿番号の設定");
     failures.set("PUT /api/preferences", 401);
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "保存する" }));
     await screen.findByRole("button", { name: "Tasklyでログイン" });
@@ -285,7 +394,7 @@ describe("shareable routes and venue navigation", () => {
     expect(locationURL().pathname).toBe("/");
     expect(locationURL().searchParams.get("view")).toBe("plan");
     expect(locationURL().hash).toBe("#saved");
-    expect(screen.getByRole("heading", { name: "自分の見学リスト" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "気になる" })).toBeInTheDocument();
   });
   it("updates query routes and responds to browser back/forward state changes", async () => {
     await ready();
@@ -293,7 +402,7 @@ describe("shareable routes and venue navigation", () => {
     expect(locationURL().searchParams.get("view")).toBe("schedule");
     expect(screen.getByRole("heading", { name: "スケジュール" })).toBeInTheDocument();
     popTo("/?view=plan");
-    expect(screen.getByRole("heading", { name: "自分の見学リスト" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "気になる" })).toBeInTheDocument();
     popTo("/?view=companies&company=PM-1");
     expect(screen.getByRole("dialog", { name: dataset.companies[2].name })).toBeInTheDocument();
   });
@@ -398,7 +507,7 @@ describe("shareable routes and venue navigation", () => {
 });
 
 describe("structured guide notices", () => {
-  it("preserves section headings, paragraphs and lists inside the optional guide disclosure", async () => {
+  it("opens guide sections on their own shareable page without adding them to the schedule", async () => {
     dataset.notice_sections = [
       { id: "preparation", title: "検証用の準備", blocks: [
         { type: "paragraph", text: "持参品の確認 <script>" },
@@ -408,25 +517,82 @@ describe("structured guide notices", () => {
     ];
     window.history.replaceState(null, "", "/?view=schedule");
     await ready();
-    const disclosure = screen.getByText("配布資料の案内").closest("details")!;
-    expect(disclosure).not.toHaveAttribute("open");
-    await userEvent.click(screen.getByText("配布資料の案内"));
-    expect(disclosure).toHaveAttribute("open");
-    const first = within(disclosure).getByRole("heading", { name: "検証用の準備" }).closest("section")!;
+    expect(screen.queryByRole("heading", { name: "検証用の準備" })).not.toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "配布資料の案内" });
+    expect(link).toHaveAttribute("href", "/?view=info");
+    await userEvent.click(link);
+    expect(locationURL().searchParams.get("view")).toBe("info");
+    expect(screen.getByRole("heading", { level: 1, name: "配布資料の案内" })).toBeInTheDocument();
+    const first = screen.getByRole("heading", { name: "検証用の準備" }).closest("section")!;
     expect(within(first).getByText("持参品の確認 <script>")).toBeInTheDocument();
     expect(within(first).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["検証ノート", "検証ペン"]);
-    expect(within(disclosure).getByRole("heading", { name: "検証用の移動" })).toBeInTheDocument();
-    expect(within(disclosure).getByText("検証経路で移動する")).toBeInTheDocument();
-    expect(within(disclosure).queryByText(dataset.notices[0])).not.toBeInTheDocument();
-    expect(disclosure.querySelector("script")).toBeNull();
+    expect(screen.getByRole("heading", { name: "検証用の移動" })).toBeInTheDocument();
+    expect(screen.getByText("検証経路で移動する")).toBeInTheDocument();
+    expect(screen.queryByText(dataset.notices[0])).not.toBeInTheDocument();
+    expect(first.querySelector("script")).toBeNull();
+    popTo("/?view=schedule");
+    expect(screen.queryByRole("heading", { name: "検証用の準備" })).not.toBeInTheDocument();
   });
-  it("keeps older guide notices readable when no structured sections were supplied", async () => {
+  it("supports direct guide visits and legacy notice text without structured sections", async () => {
     dataset.notice_sections = [];
-    window.history.replaceState(null, "", "/?view=schedule");
+    window.history.replaceState(null, "", "/?view=info");
     await ready();
-    const disclosure = screen.getByText("配布資料の案内").closest("details")!;
-    await userEvent.click(screen.getByText("配布資料の案内"));
-    expect(within(disclosure).getByText(dataset.notices[0])).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "配布資料の案内", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText(dataset.notices[0])).toBeInTheDocument();
+  });
+});
+
+describe("guide PDF access", () => {
+  it("opens the issued signed URL directly and detaches the new tab from its opener", async () => {
+    window.history.replaceState(null, "", "/?view=info");
+    const tab = { opener: window, location: { href: "about:blank" }, close: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "テストガイド原本" }));
+    await waitFor(() => expect(tab.location.href).toBe("https://signed.example.test/documents/guide?token=synthetic"));
+    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
+    expect(tab.opener).toBeNull();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(tab.close).not.toHaveBeenCalled();
+  });
+  it("reports a blocked popup without fetching a document URL", async () => {
+    window.history.replaceState(null, "", "/?view=info");
+    vi.spyOn(window, "open").mockReturnValue(null);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "テストガイド原本" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("ポップアップを許可");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/documents/guide/url"))).toBe(false);
+  });
+  it.each([503, new Error("検証用通信エラー")])("closes the placeholder tab when URL issuance fails (%s)", async failure => {
+    window.history.replaceState(null, "", "/?view=info");
+    const tab = { opener: null, location: { href: "about:blank" }, close: vi.fn() };
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    failures.set("/api/documents/guide/url", failure);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "テストガイド原本" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "テストガイド原本" })).toBeEnabled();
+  });
+  it("clears private information if signed URL issuance discovers an expired login", async () => {
+    window.history.replaceState(null, "", "/?view=info");
+    const tab = { opener: null, location: { href: "about:blank" }, close: vi.fn() };
+    vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    failures.set("/api/documents/guide/url", 401);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "テストガイド原本" }));
+    await screen.findByRole("button", { name: "Tasklyでログイン" });
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("heading", { name: "配布資料の案内" })).not.toBeInTheDocument();
+  });
+  it("shows an empty guide page without inventing documents or notices", async () => {
+    window.history.replaceState(null, "", "/?view=info");
+    dataset.documents = [];
+    dataset.notice_sections = [];
+    dataset.notices = [];
+    await ready();
+    expect(screen.getByRole("heading", { name: "配布資料の案内はありません" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "PDF資料" })).not.toBeInTheDocument();
   });
 });
 
@@ -464,7 +630,7 @@ describe("company filtering and persistent bookmarks", () => {
     expect(morning).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     expect(morning).toBeChecked();
-    const interest = within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /見学リストに保存/ });
+    const interest = within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /気になるに追加/ });
     interest.focus();
     await userEvent.keyboard(" ");
     await waitFor(() => expect(interest).toBeChecked());
@@ -494,15 +660,15 @@ describe("company filtering and persistent bookmarks", () => {
     window.history.replaceState(null, "", "/?view=search&saved=1");
     await ready();
     expect(screen.getAllByRole("article")).toHaveLength(1);
-    const onlySaved = screen.getByRole("checkbox", { name: /^保存した企業$/ });
+    const onlySaved = screen.getByRole("checkbox", { name: /^気になる企業のみ$/ });
     expect(onlySaved).toBeChecked();
     await userEvent.click(onlySaved);
     const first = dataset.companies[0];
-    await userEvent.click(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を見学リストから削除` }));
+    await userEvent.click(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を気になるから削除` }));
     await waitFor(() => expect(saved.has("AM-1")).toBe(false));
-    await userEvent.click(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を見学リストに保存` }));
+    await userEvent.click(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を気になるに追加` }));
     await waitFor(() => expect(saved.has("AM-1")).toBe(true));
-    await userEvent.click(nav("自分の見学リスト"));
+    await userEvent.click(nav("気になる"));
     expect(screen.getAllByText(first.name).length).toBeGreaterThan(0);
   });
   it("saves from a linked detail and closes the modal using its close controls", async () => {
@@ -510,7 +676,7 @@ describe("company filtering and persistent bookmarks", () => {
     const first = dataset.companies[0];
     await userEvent.click(companyLink(first.name));
     let dialog = screen.getByRole("dialog", { name: first.name });
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: `${first.name}を見学リストに保存` }));
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: `${first.name}を気になるに追加` }));
     await waitFor(() => expect(saved.has(first.id)).toBe(true));
     fireEvent(dialog, new Event("cancel", { bubbles: true }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -522,7 +688,7 @@ describe("company filtering and persistent bookmarks", () => {
   it("clears private content when a bookmark request discovers a revoked login", async () => {
     await ready();
     failures.set("/api/bookmarks/AM-1", 401);
-    await userEvent.click(within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /見学リストに保存/ }));
+    await userEvent.click(within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /気になるに追加/ }));
     await screen.findByRole("button", { name: "Tasklyでログイン" });
     expect(screen.getByRole("alert")).toHaveTextContent("ログインの有効期限");
     expect(screen.queryByText(dataset.companies[0].name)).not.toBeInTheDocument();
@@ -535,7 +701,7 @@ describe("company filtering and persistent bookmarks", () => {
       if (String(input).endsWith("/api/bookmarks/AM-1")) return new Promise<Response>((resolve) => { finish = () => resolve(new Response(null, { status: 204 })); });
       return original(input, init);
     });
-    const input = within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /見学リストに保存/ });
+    const input = within(card(dataset.companies[0].name)).getByRole("checkbox", { name: /気になるに追加/ });
     fireEvent.click(input);
     fireEvent.click(input);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/bookmarks/AM-1"))).toHaveLength(1);
@@ -546,8 +712,8 @@ describe("company filtering and persistent bookmarks", () => {
     await ready();
     failures.set("/api/bookmarks/AM-1", 503);
     const first = dataset.companies[0];
-    await userEvent.click(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を見学リストに保存` }));
+    await userEvent.click(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を気になるに追加` }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を見学リストに保存` })).not.toBeChecked();
+    expect(within(card(first.name)).getByRole("checkbox", { name: `${first.name}を気になるに追加` })).not.toBeChecked();
   });
 });

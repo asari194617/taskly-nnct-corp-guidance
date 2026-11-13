@@ -118,27 +118,12 @@ func (s *Server) signedDocument(w http.ResponseWriter, r *http.Request) {
 		failure(w, 403, "invalid_document_link")
 		return
 	}
-	access, expiry, err := s.store.Session(r.Context(), claims.SessionHash)
-	if errors.Is(err, ErrNotFound) || (err == nil && !expiry.After(time.Now())) {
-		failure(w, 403, "expired_document_link")
-		return
-	}
-	if err != nil {
-		failure(w, 503, "session_unavailable")
-		return
-	}
-	token, err := s.decrypt(access)
-	if err != nil {
-		failure(w, 503, "session_unavailable")
-		return
-	}
-	_, status, err := s.userinfo(r.Context(), token)
-	if err != nil {
-		if status == http.StatusUnauthorized || status == http.StatusForbidden {
-			_ = s.store.DeleteSession(r.Context(), claims.SessionHash)
+	_, sessionError := s.sessionIdentity(r.Context(), claims.SessionHash)
+	if sessionError != nil {
+		if sessionError.status == http.StatusUnauthorized {
 			failure(w, 403, "expired_document_link")
 		} else {
-			failure(w, 503, "identity_unavailable")
+			failure(w, sessionError.status, sessionError.code)
 		}
 		return
 	}

@@ -8,6 +8,22 @@ const nav = (page: Page, name: string) => page
   .getByRole("link", { name, exact: false });
 const rosterDialog = (page: Page) => page.getByRole("dialog", { name: "名簿番号の設定" });
 
+async function openAccount(page: Page) {
+  const menu = page.getByRole("menu", { name: "ユーザーメニュー", exact: true });
+  if (!await menu.isVisible()) await page.getByRole("button", { name: "ユーザーメニュー", exact: true }).click();
+  await expect(menu).toBeVisible();
+  return menu;
+}
+async function accountAction(page: Page, name: string) {
+  const menu = await openAccount(page);
+  await menu.getByRole("menuitem", { name, exact: true }).click();
+}
+async function expectAccountNumber(page: Page, number: number) {
+  const menu = await openAccount(page);
+  await expect(menu).toContainText(new RegExp(`Ec4.*${number}番`));
+  await page.keyboard.press("Escape");
+  await expect(menu).not.toBeVisible();
+}
 async function chooseRoster(page: Page, number: number) {
   const dialog = rosterDialog(page);
   await expect(dialog).toBeVisible();
@@ -29,7 +45,7 @@ async function login(page: Page, subject: string, path = "/", setup = true) {
     await expect(rosterDialog(page)).toBeVisible();
     if (setup) await chooseRoster(page, 7);
   }
-  if (setup) await expect(page.getByRole("button", { name: "ログアウト", exact: true })).toBeVisible();
+  if (setup) await expect(page.getByRole("button", { name: "ユーザーメニュー", exact: true })).toBeVisible();
 }
 async function assertCompanyCount(page: Page, count: number) {
   await expect(page.locator(".company-card")).toHaveCount(count);
@@ -86,20 +102,20 @@ test("First Ec4 roster setup validates, personalizes, persists and can be change
   await expect(dialog.getByRole("alert")).toBeVisible();
   expect((await (await page.request.get(`${API}/api/preferences`)).json()).roster_number).toBeNull();
   await chooseRoster(page, 7);
-  await expect(page.locator("header").getByRole("button", { name: "名簿番号を変更" })).toContainText("7番");
-  await nav(page, "自分の見学リスト").click();
+  await expectAccountNumber(page, 7);
+  await nav(page, "気になる").click();
   await expect(page.getByRole("heading", { name: "指定企業", exact: true })).toBeVisible();
   await expect(page.locator("body")).toContainText("架空あおばソフト");
   await expect(page.locator("body")).not.toContainText("架空ホール");
   await page.reload();
   await expect(rosterDialog(page)).not.toBeVisible();
-  await expect(page.locator("header").getByRole("button", { name: "名簿番号を変更" })).toContainText("7番");
-  await page.locator("header").getByRole("button", { name: "名簿番号を変更" }).click();
+  await expectAccountNumber(page, 7);
+  await accountAction(page, "名簿番号の設定");
   await expect(dialog.getByRole("spinbutton", { name: "名簿番号" })).toHaveValue("7");
   await chooseRoster(page, 8);
   expect((await (await page.request.get(`${API}/api/preferences`)).json()).roster_number).toBe(8);
   await page.reload();
-  await expect(page.locator("header").getByRole("button", { name: "名簿番号を変更" })).toContainText("8番");
+  await expectAccountNumber(page, 8);
   expect(new URL(page.url()).searchParams.has("roster_number")).toBe(false);
 });
 
@@ -110,16 +126,16 @@ test("Search filters and saved companies survive reload through real MySQL", asy
   await page.getByRole("searchbox").fill("あおば");
   await assertCompanyCount(page, 1);
   await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe("あおば");
-  await page.getByLabel("架空あおばソフトを見学リストに保存", { exact: true }).locator("..").click();
-  await expect(page.getByLabel("架空あおばソフトを見学リストから削除", { exact: true })).toBeChecked();
+  await page.getByLabel("架空あおばソフトを気になるに追加", { exact: true }).locator("..").click();
+  await expect(page.getByLabel("架空あおばソフトを気になるから削除", { exact: true })).toBeChecked();
   await page.reload();
   await assertCompanyCount(page, 1);
   await expect(page.getByRole("searchbox")).toHaveValue("あおば");
-  await expect(page.getByLabel("架空あおばソフトを見学リストから削除", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("架空あおばソフトを気になるから削除", { exact: true })).toBeChecked();
   await page.getByRole("searchbox").fill("");
-  await page.getByLabel("保存した企業", { exact: true }).locator("..").click();
+  await page.getByLabel("気になる企業のみ", { exact: true }).locator("..").click();
   await assertCompanyCount(page, 1);
-  await page.getByLabel("保存した企業", { exact: true }).locator("..").click();
+  await page.getByLabel("気になる企業のみ", { exact: true }).locator("..").click();
   await page.getByRole("radio", { name: "午後の部", exact: true }).click();
   await assertCompanyCount(page, 2);
   await page.getByLabel("業種で絞り込む").selectOption("建設");
@@ -150,7 +166,12 @@ test("Shared company URLs restore through OAuth and browser back/forward", async
   await page.goForward();
   await expect(page.getByRole("heading", { name: "スケジュール", exact: true })).toBeVisible();
   await expect(page.getByRole("combobox")).toHaveCount(0);
-  await page.getByText("配布資料の案内", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "見学前の準備", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "配布資料の案内", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "配布資料の案内", level: 1 })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("view")).toBe("info");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "配布資料の案内", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "見学前の準備", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "質問するとき", exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "検証用の筆記具" })).toBeVisible();
@@ -217,7 +238,7 @@ test("Map booths open shareable company details and detail links highlight the b
 });
 
 test("Signed PDFs open directly without cookies and expire on logout", async ({ page, request }) => {
-  await login(page, "documents", "/?view=map");
+  await login(page, "documents", "/?view=info");
   const popupPromise = page.waitForEvent("popup");
   // Headless Chromium may download a PDF instead of committing a viewer page.
   // Observe the real top-level navigation, whose URL is identical in both cases.
@@ -247,7 +268,7 @@ test("Signed PDFs open directly without cookies and expire on logout", async ({ 
   wrongDocument.pathname = "/documents/floor-a";
   expect((await request.get(wrongDocument.href)).status()).toBe(403);
   if (!popup.isClosed()) await popup.close();
-  await page.getByRole("button", { name: "ログアウト", exact: true }).click();
+  await accountAction(page, "ログアウト");
   await expect(page.getByRole("button", { name: "Tasklyでログイン" })).toBeVisible();
   expect((await request.get(signed)).status()).toBe(403);
   expect((await request.get(`${API}/api/documents/guide/url`)).status()).toBe(401);
@@ -255,14 +276,14 @@ test("Signed PDFs open directly without cookies and expire on logout", async ({ 
 
 test("Saved companies and roster preferences remain isolated by identity", async ({ page }) => {
   await login(page, "bob", "/?view=search");
-  await page.getByLabel("保存した企業", { exact: true }).locator("..").click();
+  await page.getByLabel("気になる企業のみ", { exact: true }).locator("..").click();
   await expect(page.getByRole("heading", { name: "条件に合う企業が見つかりません" })).toBeVisible();
   expect((await (await page.request.get(`${API}/api/preferences`)).json()).roster_number).toBe(7);
   await page.getByRole("button", { name: "条件をリセット" }).click();
-  await page.getByLabel("架空あおばソフトを見学リストに保存", { exact: true }).locator("..").click();
-  await expect(page.getByLabel("架空あおばソフトを見学リストから削除", { exact: true })).toBeChecked();
-  await page.getByLabel("架空あおばソフトを見学リストから削除", { exact: true }).locator("..").click();
-  await expect(page.getByLabel("架空あおばソフトを見学リストに保存", { exact: true })).not.toBeChecked();
+  await page.getByLabel("架空あおばソフトを気になるに追加", { exact: true }).locator("..").click();
+  await expect(page.getByLabel("架空あおばソフトを気になるから削除", { exact: true })).toBeChecked();
+  await page.getByLabel("架空あおばソフトを気になるから削除", { exact: true }).locator("..").click();
+  await expect(page.getByLabel("架空あおばソフトを気になるに追加", { exact: true })).not.toBeChecked();
 });
 
 test("Identity outages fail closed, then revoked sessions offer reauthentication", async ({ page, request }) => {
@@ -276,7 +297,7 @@ test("Identity outages fail closed, then revoked sessions offer reauthentication
   await page.getByRole("button", { name: "もう一度接続する" }).click();
   await assertCompanyCount(page, 4);
   await request.post(`${ISSUER}/__test/revoke?subject=outage`);
-  await page.getByLabel("架空いろは機械を見学リストに保存", { exact: true }).locator("..").click();
+  await page.getByLabel("架空いろは機械を気になるに追加", { exact: true }).locator("..").click();
   await expect(page.getByRole("button", { name: "Tasklyでログイン" })).toBeVisible();
   await assertCompanyCount(page, 0);
   await login(page, "outage");
@@ -289,7 +310,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
   const mobile = page.getByRole("navigation", { name: "モバイルナビゲーション" });
   await expect(mobile).toBeVisible();
   expect(await mobile.evaluate(node => getComputedStyle(node).position)).toBe("fixed");
-  for (const label of ["企業", "検索", "予定", "マップ", "見学リスト"]) {
+  for (const label of ["企業", "検索", "予定", "マップ", "気になる"]) {
     const link = mobile.getByRole("link", { name: label, exact: true });
     await expect(link).toHaveAttribute("href", label === "企業" ? /^\/(?:\?|$)/ : /view=/);
     await expect(link.locator("svg").first()).toBeVisible();
@@ -300,7 +321,7 @@ test("Small screens use fixed icon links while large-screen navigation stays in 
   await expect.poll(() => page.locator("body").evaluate(body => body.scrollWidth)).toBeLessThanOrEqual(320);
   await mobile.getByRole("link", { name: "マップ", exact: true }).click();
   await expect(page.getByRole("img", { name: "検証1階マップ", exact: true })).toBeVisible();
-  await mobile.getByRole("link", { name: "見学リスト", exact: true }).click();
+  await mobile.getByRole("link", { name: "気になる", exact: true }).click();
   await expect(page.getByRole("heading", { name: "指定企業", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(mobile).not.toBeVisible();
@@ -360,4 +381,101 @@ test("The directory starts with companies and follows readable system color them
       await info.attach(`Directory ${viewport.width}px ${colorScheme}`, { path: screenshot, contentType: "image/png" });
     }
   }
+});
+
+test("Account actions, interest labels and document guidance are available without crowding the header", async ({ page }) => {
+  await login(page, "menu");
+  const trigger = page.getByRole("button", { name: "ユーザーメニュー", exact: true });
+  await expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+  await expect(page.getByRole("menuitem", { name: "ログアウト", exact: true })).toHaveCount(0);
+  const triggerBounds = (await trigger.boundingBox())!;
+  expect(triggerBounds.width).toBeLessThanOrEqual(44);
+  expect(triggerBounds.height).toBeLessThanOrEqual(44);
+  const icon = (await trigger.locator("svg").boundingBox())!;
+  expect(icon.width).toBeLessThanOrEqual(24);
+  const brand = page.getByRole("link", { name: "Taskly 企業ガイダンス ホーム" });
+  const caption = (await brand.getByText("企業ガイダンス", { exact: true }).boundingBox())!;
+  expect(Math.abs(caption.y + caption.height / 2 - triggerBounds.y - triggerBounds.height / 2)).toBeLessThanOrEqual(3);
+  const menu = await openAccount(page);
+  await expect(menu).toContainText("検証ユーザー menu");
+  const roster = menu.getByRole("menuitem", { name: "名簿番号の設定", exact: true });
+  const logout = menu.getByRole("menuitem", { name: "ログアウト", exact: true });
+  await page.keyboard.press("End");
+  await expect(logout).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(roster).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(logout).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await openAccount(page);
+  await page.getByRole("heading", { name: "企業一覧", exact: true }).click();
+  await expect(menu).not.toBeVisible();
+  await accountAction(page, "配布資料の案内");
+  await expect(page.getByRole("heading", { name: "配布資料の案内", level: 1 })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("view")).toBe("info");
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "企業一覧", exact: true })).toBeVisible();
+  await nav(page, "気になる").click();
+  await expect(page.getByRole("heading", { name: "気になる", level: 1 })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("見学リスト");
+  await expect(page.locator("body")).not.toContainText("保存した企業は、同じTasklyアカウントで確認できます。");
+});
+
+test("Long company names align left without underlines and schedule markers align with titles", async ({ page }) => {
+  await login(page, "presentation");
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    const title = page.getByRole("link", { name: "架空よつば研究・環境設備・情報技術・共同研究開発センター株式会社", exact: true });
+    await title.scrollIntoViewIfNeeded();
+    const metrics = await title.evaluate(node => {
+      const style = getComputedStyle(node);
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return { align: style.textAlign, lines: range.getClientRects().length, decoration: style.textDecorationLine };
+    });
+    expect(["left", "start"]).toContain(metrics.align);
+    expect(metrics.lines).toBeGreaterThan(1);
+    expect(metrics.decoration).toBe("none");
+    await title.hover();
+    expect(await title.evaluate(node => getComputedStyle(node).textDecorationLine)).toBe("none");
+    const details = title.locator("xpath=ancestor::article").getByRole("link", { name: "詳細を見る", exact: true });
+    expect(await details.evaluate(node => getComputedStyle(node).textDecorationLine)).toBe("none");
+    await details.hover();
+    expect(await details.evaluate(node => getComputedStyle(node).textDecorationLine)).toBe("none");
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await nav(page, "スケジュール").click();
+  const rows = page.locator(".timeline-item");
+  for (let index = 0; index < 3; index++) {
+    const row = rows.nth(index);
+    const dot = (await row.locator(".timeline-track > span").boundingBox())!;
+    const heading = (await row.getByRole("heading", { level: 2 }).boundingBox())!;
+    expect(Math.abs(dot.y + dot.height / 2 - heading.y - heading.height / 2)).toBeLessThanOrEqual(2);
+  }
+});
+
+test("A month-long session rotates short-lived access credentials and still revokes on logout", async ({ page, request }) => {
+  expect((await request.post(`${ISSUER}/__test/short-token?subject=refresh`)).status()).toBe(200);
+  await login(page, "refresh");
+  const cookie = (await page.context().cookies(API)).find(value => value.name === "guidance_session");
+  expect(cookie).toBeTruthy();
+  const remainingDays = (cookie!.expires - Date.now() / 1000) / 86400;
+  expect(remainingDays).toBeGreaterThan(29.99);
+  expect(remainingDays).toBeLessThanOrEqual(30);
+  await expect.poll(async () => (await (await request.get(`${ISSUER}/__test/refresh-count?subject=refresh`)).json()).count).toBeGreaterThan(0);
+  // The issuer's initial credential expires after two seconds. A refresh must
+  // preserve this browser's longer session rather than reusing the old access.
+  await expect.poll(async () => {
+    const response = await page.request.get(`${API}/api/me`);
+    return response.status() === 200 ? Date.now() / 1000 - (cookie!.expires - 30 * 86400) : -1;
+  }, { timeout: 7000, intervals: [500] }).toBeGreaterThan(2);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "企業一覧", exact: true })).toBeVisible();
+  await accountAction(page, "ログアウト");
+  await expect(page.getByRole("button", { name: "Tasklyでログイン", exact: true })).toBeVisible();
+  expect((await page.request.get(`${API}/api/me`)).status()).toBe(401);
+  expect((await page.context().cookies(API)).some(value => value.name === "guidance_session")).toBe(false);
+  expect((await (await request.get(`${ISSUER}/__test/active-families?subject=refresh`)).json()).count).toBe(0);
 });

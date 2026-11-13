@@ -11,7 +11,7 @@ import { SegmentedControl } from "@openameba/spindle-ui/SegmentedControl";
 import { TextField } from "@openameba/spindle-ui/Form/TextField";
 import { DropDown } from "@openameba/spindle-ui/Form/DropDown";
 import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
-import { api, APIError, API_URL } from "../lib/api";
+import { api, APIError, API_URL, documentURL } from "../lib/api";
 import {
   defaultRoute,
   readRoute,
@@ -28,6 +28,7 @@ import type {
 } from "../lib/types";
 import { Icon, type IconName } from "./icons";
 import VenueMap from "./venue-map";
+import AccountMenu from "./account-menu";
 
 const EC4 = { department: "電子制御工学科", grade: 4 };
 const selectLayout = { width: "100%", maxWidth: "100%", minWidth: 0 };
@@ -40,8 +41,8 @@ const navigation: { id: View; title: string; short: string; icon: IconName }[] =
     { id: "map", title: "会場マップ", short: "マップ", icon: "map" },
     {
       id: "plan",
-      title: "自分の見学リスト",
-      short: "見学リスト",
+      title: "気になる",
+      short: "気になる",
       icon: "bookmark",
     },
   ];
@@ -228,7 +229,7 @@ export default function GuidanceApp() {
         setError(
           cause instanceof Error
             ? cause.message
-            : "見学リストを更新できませんでした。もう一度お試しください。",
+            : "気になるを更新できませんでした。もう一度お試しください。",
         );
     } finally {
       bookmarkRequests.current.delete(company.id);
@@ -310,7 +311,6 @@ export default function GuidanceApp() {
               <TextLink
                 href={routeHref({ ...route, view: item.id, company: "" })}
                 variant={route.view === item.id ? undefined : "subtle"}
-                underline="hover"
                 icon={mobile ? <Icon name={item.icon} size={23} /> : undefined}
                 aria-current={route.view === item.id ? "page" : undefined}
                 onClick={(event) => intercept(event, () => navigate(item.id))}
@@ -319,7 +319,7 @@ export default function GuidanceApp() {
                 {item.id === "plan" && saved.size > 0 ? (
                   <span
                     className="saved-count"
-                    aria-label={`${saved.size}件保存`}
+                    aria-label={`気になる${saved.size}件`}
                   >
                     {saved.size}
                   </span>
@@ -343,29 +343,14 @@ export default function GuidanceApp() {
         {ready && menu(false)}
         <div className="header-right">
           {ready && (
-            <>
-              <span className="sr-only">{user.name || "Taskly ユーザー"}</span>
-              <TextButton
-                onClick={() => setSettingNumber(true)}
-                aria-label={
-                  preferences.roster_number === null
-                    ? "名簿番号を設定"
-                    : "名簿番号を変更"
-                }
-              >
-                {preferences.roster_number === null
-                  ? "番号設定"
-                  : `${preferences.roster_number}番`}
-              </TextButton>
-              <IconButton
-                variant="neutral"
-                onClick={() => void logout()}
-                disabled={busy}
-                aria-label="ログアウト"
-              >
-                <Icon name="logout" />
-              </IconButton>
-            </>
+            <AccountMenu
+              name={user.name}
+              rosterNumber={preferences.roster_number}
+              busy={busy}
+              onConfigure={() => setSettingNumber(true)}
+              onInformation={() => navigate("info")}
+              onLogout={() => void logout()}
+            />
           )}
         </div>
       </header>
@@ -438,6 +423,7 @@ export default function GuidanceApp() {
                 assignment={assignment}
                 route={route}
                 onSelect={openCompany}
+                onInformation={() => navigate("info")}
               />
             )}
             {route.view === "map" && (
@@ -481,6 +467,9 @@ export default function GuidanceApp() {
                 onConfigure={() => setSettingNumber(true)}
                 onFind={() => navigate("companies")}
               />
+            )}
+            {route.view === "info" && (
+              <Information data={data} onExpired={expireSession} />
             )}
           </main>
           {menu(true)}
@@ -742,7 +731,7 @@ function Companies({
                   onRouteChange({ saved: event.target.checked })
                 }
               >
-                保存した企業
+                気になる企業のみ
               </Checkbox>
             </div>
           </div>
@@ -815,9 +804,9 @@ function CompanyCard({
         <Checkbox
           checked={saved}
           onChange={onSave}
-          aria-label={`${company.name}を${saved ? "見学リストから削除" : "見学リストに保存"}`}
+          aria-label={`${company.name}を${saved ? "気になるから削除" : "気になるに追加"}`}
         >
-          気になる企業
+          気になる
         </Checkbox>
       </div>
       <div className="company-card-main">
@@ -937,9 +926,9 @@ function CompanyDialog({
           <Checkbox
             checked={saved}
             onChange={onSave}
-            aria-label={`${company.name}を${saved ? "見学リストから削除" : "見学リストに保存"}`}
+            aria-label={`${company.name}を${saved ? "気になるから削除" : "気になるに追加"}`}
           >
-            気になる企業
+            気になる
           </Checkbox>
         </div>
       </div>
@@ -951,16 +940,25 @@ function Schedule({
   assignment,
   route,
   onSelect,
+  onInformation,
 }: {
   data: Guidance;
   assignment?: Assignment;
   route: RouteState;
   onSelect: (company: Company) => void;
+  onInformation: () => void;
 }) {
   return (
     <>
       <div className="view-heading">
         <h1>スケジュール</h1>
+        <TextLink
+          href={routeHref({ ...route, view: "info", company: "" })}
+          icon={<Icon name="info" />}
+          onClick={(event) => intercept(event, onInformation)}
+        >
+          配布資料の案内
+        </TextLink>
       </div>
       <section className="timeline" aria-label="ガイダンススケジュール">
         {data.schedule.map((slot) => {
@@ -1010,37 +1008,90 @@ function Schedule({
           );
         })}
       </section>
-      {(data.notice_sections?.length || data.notices.length) > 0 && (
-        <section className="notices">
-          <details>
-            <summary>配布資料の案内</summary>
-            <div className="notice-sections">
-              {data.notice_sections?.length
-                ? data.notice_sections.map((section) => (
-                    <section
-                      key={section.id}
-                      aria-labelledby={`notice-${section.id}`}
-                    >
-                      <h2 id={`notice-${section.id}`}>{section.title}</h2>
-                      {section.blocks.map((block, index) =>
-                        block.type === "paragraph" ? (
-                          <p key={index}>{block.text}</p>
-                        ) : (
-                          <ul key={index}>
-                            {block.items.map((item, itemIndex) => (
-                              <li key={itemIndex}>{item}</li>
-                            ))}
-                          </ul>
-                        ),
-                      )}
-                    </section>
-                  ))
-                : data.notices.map((notice, index) => (
-                    <p key={index}>{notice}</p>
-                  ))}
-            </div>
-          </details>
+    </>
+  );
+}
+function Information({
+  data,
+  onExpired,
+}: {
+  data: Guidance;
+  onExpired: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [opening, setOpening] = useState(false);
+  async function openDocument(id: string) {
+    const tab = window.open("about:blank", "_blank");
+    if (!tab) {
+      setError("資料を開くには、ブラウザーのポップアップを許可してください。");
+      return;
+    }
+    tab.opener = null;
+    setOpening(true);
+    setError("");
+    try {
+      tab.location.href = (await documentURL(id)).url;
+    } catch (cause) {
+      tab.close();
+      if (cause instanceof APIError && cause.status === 401) onExpired();
+      else
+        setError(
+          cause instanceof Error ? cause.message : "資料を開けませんでした。",
+        );
+    } finally {
+      setOpening(false);
+    }
+  }
+  const documents = data.documents.filter(
+    (item) => item.mime_type === "application/pdf",
+  );
+  return (
+    <>
+      <div className="view-heading">
+        <h1>配布資料の案内</h1>
+      </div>
+      {error && <Message error>{error}</Message>}
+      {documents.length > 0 && (
+        <section className="information-documents" aria-label="PDF資料">
+          {documents.map((item) => (
+            <Button
+              key={item.id}
+              variant="outlined"
+              disabled={opening}
+              onClick={() => void openDocument(item.id)}
+            >
+              {item.title}
+              <Icon name="external" size={16} />
+            </Button>
+          ))}
         </section>
+      )}
+      {(data.notice_sections?.length || data.notices.length) > 0 ? (
+        <div className="notice-sections">
+          {data.notice_sections?.length
+            ? data.notice_sections.map((section) => (
+                <section
+                  key={section.id}
+                  aria-labelledby={`notice-${section.id}`}
+                >
+                  <h2 id={`notice-${section.id}`}>{section.title}</h2>
+                  {section.blocks.map((block, index) =>
+                    block.type === "paragraph" ? (
+                      <p key={index}>{block.text}</p>
+                    ) : (
+                      <ul key={index}>
+                        {block.items.map((item, itemIndex) => (
+                          <li key={itemIndex}>{item}</li>
+                        ))}
+                      </ul>
+                    ),
+                  )}
+                </section>
+              ))
+            : data.notices.map((notice, index) => <p key={index}>{notice}</p>)}
+        </div>
+      ) : (
+        <Empty title="配布資料の案内はありません" />
       )}
     </>
   );
@@ -1072,7 +1123,7 @@ function Plan({
   return (
     <>
       <div className="view-heading">
-        <h1>自分の見学リスト</h1>
+        <h1>気になる</h1>
         <TextButton
           onClick={onConfigure}
           aria-label={
@@ -1122,7 +1173,7 @@ function Plan({
       </section>
       <div className="section-heading">
         <h2>
-          保存した企業 <span>{companies.length}</span>
+          気になる企業 <span>{companies.length}</span>
         </h2>
       </div>
       {companies.length ? (
@@ -1140,7 +1191,7 @@ function Plan({
           ))}
         </div>
       ) : (
-        <Empty title="保存した企業はありません">
+        <Empty title="気になる企業はありません">
           <Button variant="outlined" onClick={onFind}>
             企業を探す
           </Button>

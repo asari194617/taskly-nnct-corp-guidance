@@ -1,4 +1,10 @@
-export type View = "companies" | "search" | "schedule" | "map" | "plan";
+export type View =
+  | "companies"
+  | "search"
+  | "schedule"
+  | "map"
+  | "plan"
+  | "info";
 export type RouteState = {
   view: View;
   company: string;
@@ -30,7 +36,8 @@ export function readRoute(search: string): RouteState {
       view === "search" ||
       view === "schedule" ||
       view === "map" ||
-      view === "plan"
+      view === "plan" ||
+      view === "info"
         ? view
         : "companies",
     company: id(query.get("company")),
