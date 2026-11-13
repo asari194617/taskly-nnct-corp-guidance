@@ -20,7 +20,7 @@
 
 ## ローカル開発
 
-必要環境: Go（`go.mod`）、Node.js 22.18 以上、npm、Docker Compose、Python 3.12。配布資料の再抽出には Tesseract OCR も必要です。以下はリポジトリのルートから実行します。
+必要環境: Go（`go.mod`）、Node.js 24系（24.18.0 以上、CIも24系）、npm、Docker Compose、Python 3.12。配布資料の再抽出には Tesseract OCR も必要です。以下はリポジトリのルートから実行します。
 
 ```sh
 cp .env.example .env
