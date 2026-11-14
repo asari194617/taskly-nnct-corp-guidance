@@ -5,6 +5,7 @@ import { DropdownMenu } from "@openameba/spindle-ui/DropdownMenu";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
 import { Icon } from "./icons";
 import { useOffline } from "./offline-context";
+import AboutServiceDialog from "./about-service-dialog";
 
 type Props = {
   name: string;
@@ -22,6 +23,7 @@ export default function AccountMenu({
   onLogout,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const { offline } = useOffline();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -147,6 +149,15 @@ export default function AccountMenu({
             <DropdownMenu.Title>名簿番号の設定</DropdownMenu.Title>
           </DropdownMenu.ListItem>
           <DropdownMenu.ListItem
+            icon={<Icon name="info" />}
+            onClick={() => {
+              close();
+              setAboutOpen(true);
+            }}
+          >
+            <DropdownMenu.Title>このサービスについて</DropdownMenu.Title>
+          </DropdownMenu.ListItem>
+          <DropdownMenu.ListItem
             icon={<Icon name="logout" />}
             onClick={() => {
               close();
@@ -157,6 +168,12 @@ export default function AccountMenu({
           </DropdownMenu.ListItem>
         </DropdownMenu.List>
       </DropdownMenu.Frame>
+      {aboutOpen && (
+        <AboutServiceDialog
+          returnFocusRef={trigger}
+          onClose={() => setAboutOpen(false)}
+        />
+      )}
     </div>
   );
 }
