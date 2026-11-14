@@ -16,10 +16,7 @@ import type {
 } from "../lib/types";
 import type { EventTimeState } from "../lib/event-time";
 import { formatScheduleTime } from "../lib/event-time";
-import {
-  recommendationReasons,
-  suggestRecommendations,
-} from "../lib/recommendations";
+import { reconcileRecommendations } from "../lib/recommendations";
 import { routeHref, type RouteState } from "../lib/route-state";
 import { FavoriteButton } from "./company-details";
 import { Icon } from "./icons";
@@ -86,26 +83,21 @@ export default function HomeDashboard({
     department: preferences.department,
     session: route.session,
   };
-  const recommendationScope = `${preferences.department}:${preferences.grade}:${preferences.roster_number}:${route.session}`;
+  const recommendationScope = `${data.event.date}:${preferences.department}:${preferences.grade}:${preferences.roster_number}:${route.session}`;
   const recommendationIDs = useRef<{ scope: string; ids: string[] } | null>(
     null,
   );
-  // Keep the chosen cards stable while saved-company state changes; only their
-  // reasons update until the profile/session scope changes or Home remounts.
   if (recommendationIDs.current?.scope !== recommendationScope) {
     recommendationIDs.current = {
       scope: recommendationScope,
-      ids: suggestRecommendations({ ...options, limit: 4 }).map(
-        (item) => item.company.id,
-      ),
+      ids: [],
     };
   }
-  const recommendations = recommendationIDs.current.ids.flatMap((id) => {
-    const company = data.companies.find((item) => item.id === id);
-    return company
-      ? [{ company, reasons: recommendationReasons(options, company) }]
-      : [];
-  });
+  const { history, recommendations } = reconcileRecommendations(
+    { ...options, limit: 4 },
+    recommendationIDs.current.ids,
+  );
+  recommendationIDs.current.ids = history;
   const all = tasks.data?.tasks || [];
   const assigned = all
     .filter((task) => task.kind === "assigned_visit")

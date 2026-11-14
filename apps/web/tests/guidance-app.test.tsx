@@ -823,7 +823,7 @@ describe("shareable routes and venue navigation", () => {
     ).not.toBeInTheDocument();
     await expectAccountNumber(8);
   });
-  it("shares an optimistic interest from a Home recommendation with its company detail", async () => {
+  it("shares an optimistic interest from a Home recommendation detail and removes the saved recommendation", async () => {
     window.history.replaceState(null, "", "/");
     const company = {
       ...dataset.companies[0],
@@ -834,22 +834,17 @@ describe("shareable routes and venue navigation", () => {
     dataset.companies.push(company);
     await ready();
     const requests = holdBookmarkWrites([company.id]);
-    const save = screen.getByRole("button", {
+    await userEvent.click(screen.getByRole("link", { name: company.name }));
+    const dialog = await screen.findByRole("dialog", { name: company.name });
+    const save = within(dialog).getByRole("button", {
       name: `${company.name}を気になるに追加`,
     });
     fireEvent.click(save);
     expect(save).toHaveAttribute("aria-pressed", "true");
     expect(save).toBeDisabled();
     expect(nav("気になる")).toHaveTextContent("1");
-    await userEvent.click(screen.getByRole("link", { name: company.name }));
-    const dialog = await screen.findByRole("dialog", { name: company.name });
-    const sameInterest = within(dialog).getByRole("button", {
-      name: `${company.name}を気になるから解除`,
-    });
-    expect(sameInterest).toHaveAttribute("aria-pressed", "true");
-    expect(sameInterest).toBeDisabled();
     await act(async () => requests.finish(company.id));
-    await waitFor(() => expect(sameInterest).toBeEnabled());
+    await waitFor(() => expect(save).toBeEnabled());
     expect(saved.has(company.id)).toBe(true);
     await userEvent.click(
       within(dialog).getByRole("button", { name: "閉じる" }),
@@ -857,7 +852,93 @@ describe("shareable routes and venue navigation", () => {
     expect(
       screen.getByRole("heading", { name: "ホーム", level: 1 }),
     ).toBeInTheDocument();
+    const recommendations = screen.getByRole("region", { name: "おすすめ" });
+    expect(
+      within(recommendations).queryByRole("link", { name: company.name }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(recommendations).getByText("条件に合う企業はありません"),
+    ).toBeInTheDocument();
   });
+
+  it("restores the original recommendation slot after one concurrent optimistic save fails without reverting another successful save", async () => {
+    window.history.replaceState(null, "", "/");
+    const candidates = Array.from({ length: 6 }, (_, index) => ({
+      ...dataset.companies[0],
+      id: `REC-${index + 1}`,
+      booth: 20 + index,
+      name: `候補企業${index + 1}`,
+      industries: ["機械"],
+    }));
+    dataset.companies.push(...candidates);
+    await ready();
+    const recommendations = screen.getByRole("region", { name: "おすすめ" });
+    const names = () =>
+      within(recommendations)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent);
+    const first = within(recommendations).getByRole("link", {
+      name: "候補企業1",
+    });
+    const fourth = within(recommendations).getByRole("link", {
+      name: "候補企業4",
+    });
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業2",
+      "候補企業3",
+      "候補企業4",
+    ]);
+    const requests = holdBookmarkWrites(["REC-2", "REC-3"]);
+    fireEvent.click(
+      within(recommendations).getByRole("button", {
+        name: "候補企業2を気になるに追加",
+      }),
+    );
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業3",
+      "候補企業4",
+      "候補企業5",
+    ]);
+    fireEvent.click(
+      within(recommendations).getByRole("button", {
+        name: "候補企業3を気になるに追加",
+      }),
+    );
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業4",
+      "候補企業5",
+      "候補企業6",
+    ]);
+    await act(async () => requests.finish("REC-3"));
+    await act(async () => requests.finish("REC-2", 503));
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業2",
+      "候補企業4",
+      "候補企業5",
+    ]);
+    expect(
+      within(recommendations).getByRole("link", { name: "候補企業1" }),
+    ).toBe(first);
+    expect(
+      within(recommendations).getByRole("link", { name: "候補企業4" }),
+    ).toBe(fourth);
+    expect(
+      within(recommendations).getByRole("button", {
+        name: "候補企業2を気になるに追加",
+      }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(saved.has("REC-2")).toBe(false);
+    expect(saved.has("REC-3")).toBe(true);
+    expect(nav("気になる")).toHaveTextContent("1");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "情報を取得できませんでした",
+    );
+  });
+
   it.each(["__NA", "_N"] as const)(
     "keeps typed search parameters when the framework commits after a favorite update (%s)",
     async (flag) => {

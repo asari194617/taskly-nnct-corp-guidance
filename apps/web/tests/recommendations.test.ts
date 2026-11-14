@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   recommendationReasons,
+  reconcileRecommendations,
   suggestRecommendations,
 } from "../lib/recommendations";
 import type { Assignment, BoothBounds, Company, Document } from "../lib/types";
@@ -55,16 +56,15 @@ function suggest(
 }
 
 describe("explainable guidance recommendations", () => {
-  it("uses a transparent Ec4 industry heuristic ahead of a favourite alone", () => {
+  it("excludes a saved company while keeping the transparent Ec4 industry heuristic", () => {
     const generic = company("saved", { industries: ["一般サービス"] });
     const relevant = company("related", { industries: ["電子機器"] });
     const result = suggest([generic, relevant], {
       department: "電子制御工学科",
       savedIDs: new Set(["saved"]),
     });
-    expect(result.map((item) => item.company.id)).toEqual(["related", "saved"]);
+    expect(result.map((item) => item.company.id)).toEqual(["related"]);
     expect(result[0].reasons).toEqual(["電子制御に関連する業種"]);
-    expect(result[1].reasons).toEqual(["気になる企業"]);
     expect(
       suggest([generic, relevant], {
         department: " EC4 ",
@@ -85,22 +85,37 @@ describe("explainable guidance recommendations", () => {
     }
   });
 
-  it("uses other favourites' industries and does not count a company's own industry twice", () => {
+  it("uses saved companies' industries to recommend only other companies", () => {
     const favourite = company("favourite", { industries: [" 情報 ", "情報"] });
     const related = company("related", { industries: ["情報"] });
     const result = suggest([related, favourite], {
       savedIDs: new Set([favourite.id]),
     });
     expect(result[0]).toEqual({
-      company: favourite,
-      reasons: ["気になる企業"],
-    });
-    expect(result[1]).toEqual({
       company: related,
       reasons: ["気になる企業と同じ業種"],
     });
+    expect(result).toHaveLength(1);
     expect(
       suggest([related], { savedIDs: new Set(["unknown"]) })[0].reasons,
+    ).toEqual([]);
+  });
+
+  it("excludes multiple saved candidates and returns fewer or no suggestions when none remain", () => {
+    const companies = [company("a"), company("b"), company("c")];
+    expect(
+      suggest(companies, { savedIDs: new Set(["a", "b"]), limit: 4 }).map(
+        (item) => item.company.id,
+      ),
+    ).toEqual(["c"]);
+    expect(
+      suggest(companies, { savedIDs: new Set(["a", "b", "c"]), limit: 4 }),
+    ).toEqual([]);
+    expect(
+      recommendationReasons(
+        { data: { companies, documents: [] }, savedIDs: new Set(["b"]) },
+        companies[1],
+      ),
     ).toEqual([]);
   });
 
@@ -344,12 +359,11 @@ describe("explainable guidance recommendations", () => {
     expect(recommendationReasons(options, companies[1])).toEqual([]);
     const changed = {
       ...options,
-      savedIDs: new Set(["z"]),
+      savedIDs: new Set(["a"]),
       department: "電子制御工学科",
     };
     expect(recommendationReasons(changed, companies[1])).toEqual([
       "電子制御に関連する業種",
-      "気になる企業",
     ]);
     expect(
       recommendationReasons(
@@ -361,5 +375,102 @@ describe("explainable guidance recommendations", () => {
       recommendationReasons({ ...changed, session: "PM" }, companies[1]),
     ).toEqual([]);
     expect(recommendationReasons(changed, company("unknown"))).toEqual([]);
+  });
+
+  it("backfills saved cards without reordering unaffected cards and restores their original priority after rollback", () => {
+    const companies = Array.from({ length: 6 }, (_, index) =>
+      company(`c${index + 1}`),
+    );
+    const options = {
+      data: { companies, documents: [] },
+      savedIDs: new Set<string>(),
+      limit: 4,
+    };
+    const initial = reconcileRecommendations(options, []);
+    const ids = (result: typeof initial) =>
+      result.recommendations.map((item) => item.company.id);
+    expect(ids(initial)).toEqual(["c1", "c2", "c3", "c4"]);
+    expect(initial.history).toEqual(["c1", "c2", "c3", "c4"]);
+    const firstSave = reconcileRecommendations(
+      { ...options, savedIDs: new Set(["c2"]) },
+      initial.history,
+    );
+    expect(ids(firstSave)).toEqual(["c1", "c3", "c4", "c5"]);
+    expect(firstSave.history).toEqual(["c1", "c2", "c3", "c4", "c5"]);
+    const concurrentSave = reconcileRecommendations(
+      { ...options, savedIDs: new Set(["c2", "c3"]) },
+      firstSave.history,
+    );
+    expect(ids(concurrentSave)).toEqual(["c1", "c4", "c5", "c6"]);
+    const rollback = reconcileRecommendations(
+      { ...options, savedIDs: new Set(["c3"]) },
+      concurrentSave.history,
+    );
+    expect(ids(rollback)).toEqual(["c1", "c2", "c4", "c5"]);
+    expect(ids(reconcileRecommendations(options, rollback.history))).toEqual([
+      "c1",
+      "c2",
+      "c3",
+      "c4",
+    ]);
+  });
+
+  it("reconciles only eligible unique companies and keeps zero, short and all-saved sets bounded", () => {
+    const companies = [
+      company("a"),
+      company("b"),
+      company("pm", { session: "PM" }),
+      company("assigned"),
+    ];
+    const options = {
+      data: { companies, documents: [] },
+      savedIDs: new Set<string>(),
+      assignment: assignment("assigned"),
+      session: "AM" as const,
+      limit: 4,
+    };
+    const history = Object.freeze(["missing", "a", "a", "pm", "assigned"]);
+    const result = reconcileRecommendations(options, history);
+    expect(history).toEqual(["missing", "a", "a", "pm", "assigned"]);
+    expect(result.recommendations.map((item) => item.company.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(new Set(result.history).size).toBe(result.history.length);
+    expect(
+      reconcileRecommendations({ ...options, limit: 0 }, result.history)
+        .recommendations,
+    ).toEqual([]);
+    expect(
+      reconcileRecommendations(
+        { ...options, savedIDs: new Set(["a", "b"]) },
+        result.history,
+      ).recommendations,
+    ).toEqual([]);
+  });
+
+  it("bounds reconciled display counts while remembering only displayed backfills", () => {
+    const companies = Array.from({ length: 20 }, (_, index) =>
+      company(`candidate-${index}`),
+    );
+    const options = {
+      data: { companies, documents: [] },
+      savedIDs: new Set<string>(),
+    };
+    expect(reconcileRecommendations(options, []).recommendations).toHaveLength(
+      6,
+    );
+    expect(
+      reconcileRecommendations({ ...options, limit: Number.NaN }, [])
+        .recommendations,
+    ).toHaveLength(6);
+    const short = reconcileRecommendations({ ...options, limit: 2.8 }, []);
+    expect(short.recommendations).toHaveLength(2);
+    expect(short.history).toEqual(
+      short.recommendations.map((item) => item.company.id),
+    );
+    expect(
+      reconcileRecommendations({ ...options, limit: 100 }, []).recommendations,
+    ).toHaveLength(12);
   });
 });
