@@ -177,6 +177,41 @@ describe("explainable guidance recommendations", () => {
     expect(result[1].reasons).toEqual([]);
   });
 
+  it("routes around a booth row instead of treating back-to-back booths as nearby", () => {
+    const required = company("required", { booth: 6 });
+    const opposite = company("opposite", { booth: 18 });
+    const sameSide = company("same-side", { booth: 7 });
+    const booths = Array.from({ length: 24 }, (_, index) =>
+      box(index + 1, 0.35 + (index % 12) * 0.025, index < 12 ? 0.45 : 0.475),
+    ).map((bounds) => ({ ...bounds, width: 0.025, height: 0.025 }));
+    const options = {
+      data: {
+        companies: [required, opposite, sameSide],
+        documents: [map(booths)],
+      },
+      assignment: assignment("required"),
+      savedIDs: new Set<string>(),
+    };
+    expect(recommendationReasons(options, sameSide)).toContain(
+      "指定企業の近く",
+    );
+    expect(recommendationReasons(options, opposite)).not.toContain(
+      "指定企業の近く",
+    );
+    expect(suggestRecommendations(options)[0].company.id).toBe("same-side");
+
+    const withAisle = booths.map((bounds, index) => ({
+      ...bounds,
+      x: bounds.x + (index % 12 >= 6 ? 0.04 : 0),
+    }));
+    expect(
+      recommendationReasons(
+        { ...options, data: { ...options.data, documents: [map(withAisle)] } },
+        opposite,
+      ),
+    ).toContain("指定企業の近く");
+  });
+
   it("corrects physical distance for image aspect ratio", () => {
     const companies = [
       company("required", { booth: 1 }),

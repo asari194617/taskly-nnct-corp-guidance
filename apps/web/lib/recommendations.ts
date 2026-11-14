@@ -1,4 +1,5 @@
-import type { Assignment, Company, Document, Guidance } from "./types";
+import type { Assignment, Company, Guidance } from "./types";
+import { walkingDistances } from "./walking-distance";
 
 export type Recommendation = { company: Company; reasons: string[] };
 export type RecommendationOptions = {
@@ -10,7 +11,6 @@ export type RecommendationOptions = {
   limit?: number;
 };
 
-type Location = { x: number; y: number };
 const companyID = /^[A-Za-z0-9_-]{1,64}$/;
 const normalized = (value: string) =>
   value.normalize("NFKC").toLocaleLowerCase("ja").trim();
@@ -19,51 +19,6 @@ const companyOrder = (a: Company, b: Company) =>
 
 function industryNames(company: Company) {
   return [...new Set(company.industries.map(normalized).filter(Boolean))];
-}
-
-function locations(document: Document): Map<number, Location> {
-  const width = document.image_width,
-    height = document.image_height;
-  const result = new Map<number, Location>();
-  if (
-    document.kind !== "map" ||
-    !document.mime_type.startsWith("image/") ||
-    !width ||
-    !height ||
-    !Number.isFinite(width) ||
-    !Number.isFinite(height) ||
-    width <= 0 ||
-    height <= 0
-  )
-    return result;
-  const seen = new Set<number>();
-  const diagonal = Math.hypot(width, height);
-  for (const booth of document.booths || []) {
-    if (seen.has(booth.booth)) {
-      result.delete(booth.booth);
-      continue;
-    }
-    seen.add(booth.booth);
-    if (
-      !Number.isInteger(booth.booth) ||
-      booth.booth <= 0 ||
-      ![booth.x, booth.y, booth.width, booth.height].every(Number.isFinite) ||
-      booth.x < 0 ||
-      booth.y < 0 ||
-      booth.width <= 0 ||
-      booth.height <= 0 ||
-      booth.x + booth.width > 1.001 ||
-      booth.y + booth.height > 1.001
-    )
-      continue;
-    // Coordinates share one floor/image. Scaling by its real aspect ratio
-    // yields a distance in fractions of that image's diagonal, not booth IDs.
-    result.set(booth.booth, {
-      x: ((booth.x + booth.width / 2) * width) / diagonal,
-      y: ((booth.y + booth.height / 2) * height) / diagonal,
-    });
-  }
-  return result;
 }
 
 function relatedToDepartment(
@@ -106,7 +61,19 @@ function scoringContext({
     if (!savedIDs.has(company.id)) continue;
     for (const industry of industryNames(company)) interests.add(industry);
   }
-  const floors = data.documents.map(locations).filter((floor) => floor.size);
+  const routes = new Map<Company["session"], Map<number, number>[]>();
+  for (const session of ["AM", "PM"] as const) {
+    const sources = new Set(
+      assigned
+        .filter((company) => company.session === session)
+        .map((company) => company.booth),
+    );
+    if (sources.size)
+      routes.set(
+        session,
+        data.documents.map((document) => walkingDistances(document, sources)),
+      );
+  }
   const companies = [...unique.values()].filter(
     (company) =>
       !assignedIDs.has(company.id) &&
@@ -129,19 +96,8 @@ function scoringContext({
       reasons.push("気になる企業と同じ業種");
     }
     let nearest = Infinity;
-    for (const floor of floors) {
-      const candidate = floor.get(company.booth);
-      if (!candidate) continue;
-      for (const required of assigned) {
-        if (required.session !== company.session) continue;
-        const target = floor.get(required.booth);
-        if (target)
-          nearest = Math.min(
-            nearest,
-            Math.hypot(candidate.x - target.x, candidate.y - target.y),
-          );
-      }
-    }
+    for (const floor of routes.get(company.session) || [])
+      nearest = Math.min(nearest, floor.get(company.booth) ?? Infinity);
     if (nearest <= 0.12) {
       score += 24 * (1 - nearest / 0.12);
       reasons.push("指定企業の近く");
