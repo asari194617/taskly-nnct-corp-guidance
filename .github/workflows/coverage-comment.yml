@@ -47,14 +47,14 @@ jobs:
               try {
                 const {percent} = read(id);
                 if (typeof percent === 'number' && Number.isFinite(percent) && percent >= 0 && percent <= 100)
-                  value = `${percent.toFixed(1)}% ${['e2e','integration'].includes(id) ? '' : percent >= 80 ? '✅' : '❌'}`;
+                  value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
               } catch {}
-              return `| ${name} | ${value} | ${['e2e','integration'].includes(id) ? 'Measured' : '80%'} |`;
+              return `| ${name} | ${value} | ${id === 'e2e' ? 'Measured' : '80%'} |`;
             });
             const marker = '<!-- nnct-guidance-coverage -->';
             const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
               '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
-              'Go application, importer, Web unit tests, service worker unit execution and PDF extraction require 80%. Integration and page browser execution are reported separately; service worker coverage measures its actual runtime in Node, not page E2E execution.',
+              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction and standalone real MySQL integration require 80%. Page browser execution is reported separately; service worker coverage measures its actual runtime in Node, not page E2E execution.',
               `[CI run](${run.html_url})`].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments,
               {owner,repo,issue_number:metadata.number,per_page:100});

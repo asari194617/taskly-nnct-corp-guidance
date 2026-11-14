@@ -185,37 +185,68 @@ function guidance(value: unknown): Guidance {
 }
 function home(value: unknown): HomeTasksResponse {
   const input = object(value);
+  const sources = list(input.tasks, object);
+  const tasks: HomeTask[] = sources.map((task) => {
+    const kind = text(task.kind) as HomeTask["kind"];
+    if (
+      ![
+        "assigned_visit",
+        "visit_survey",
+        "overall_survey",
+        "sheet_submission",
+      ].includes(kind)
+    )
+      throw Error();
+    return {
+      id: text(task.id),
+      title: text(task.title),
+      kind,
+      completed: flag(task.completed),
+      completion_disabled: flag(task.completion_disabled),
+      taskly_url: "",
+      company_id: optional(task.company_id, text),
+      term: optional(task.term, number),
+      document_id: optional(task.document_id, text),
+      page: optional(task.page, number),
+      due_at: optional(task.due_at, text),
+    };
+  });
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    const hint = sources[index].auto_completed_by;
+    if (
+      task.kind !== "assigned_visit" ||
+      !task.completed ||
+      task.completion_disabled ||
+      !Number.isInteger(task.term) ||
+      task.term! <= 0 ||
+      typeof hint !== "string" ||
+      hint.length > 128 ||
+      !/^[A-Za-z][A-Za-z0-9_-]*(?::[1-9]\d*)?$/.test(hint)
+    )
+      continue;
+    const partners = tasks.filter(
+      (candidate) =>
+        candidate.kind === "visit_survey" && candidate.term === task.term,
+    );
+    // Keep only an already-present logical task relationship, never the bridge's
+    // assignment scope or a transport response's unrelated metadata.
+    if (
+      partners.length === 1 &&
+      partners[0].completed &&
+      !partners[0].completion_disabled &&
+      partners[0].id === hint &&
+      hint !== task.id
+    )
+      task.auto_completed_by = hint;
+  }
   return {
     event_id: text(input.event_id),
     roster_configured: flag(input.roster_configured),
-    tasks: list(input.tasks, (value) => {
-      const task = object(value);
-      const kind = text(task.kind) as HomeTask["kind"];
-      if (
-        ![
-          "assigned_visit",
-          "visit_survey",
-          "overall_survey",
-          "sheet_submission",
-        ].includes(kind)
-      )
-        throw Error();
-      return {
-        id: text(task.id),
-        title: text(task.title),
-        kind,
-        completed: flag(task.completed),
-        completion_disabled: flag(task.completion_disabled),
-        taskly_url: "",
-        company_id: optional(task.company_id, text),
-        term: optional(task.term, number),
-        document_id: optional(task.document_id, text),
-        page: optional(task.page, number),
-        due_at: optional(task.due_at, text),
-      };
-    }),
+    tasks,
   };
 }
+
 function scope(user: User, profile: Preferences, data: Guidance): string {
   return JSON.stringify([
     user.sub,

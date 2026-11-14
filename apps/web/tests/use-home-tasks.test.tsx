@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { IDBFactory } from "fake-indexeddb";
+import { fixture } from "./fixtures";
 import {
   OfflineProvider,
   type OfflineState,
@@ -152,6 +154,7 @@ describe("Taskly-backed home tasks", () => {
       second.resolve(
         json(
           task("visit_survey:2", {
+            term: 2,
             completed: true,
             title: "Tasklyで確認済み",
           }),
@@ -617,7 +620,9 @@ describe("Taskly-backed home tasks", () => {
     ]);
     expect(cached.tasks.map((task) => task.completed)).toEqual([false, false]);
     await act(async () => {
-      second.resolve(json(task("visit_survey:2", { completed: true })));
+      second.resolve(
+        json(task("visit_survey:2", { completed: true, term: 2 })),
+      );
       await writingSecond;
     });
     expect(cached.tasks.map((task) => task.completed)).toEqual([false, true]);
@@ -820,6 +825,7 @@ describe("Taskly-backed home tasks", () => {
           task("visit_survey:2", {
             completed: true,
             title: "new accepted result",
+            term: 2,
           }),
         ),
       );
@@ -829,4 +835,1062 @@ describe("Taskly-backed home tasks", () => {
     expect(result.current.data?.tasks[1].title).toBe("new accepted result");
     expect(deleteOfflineHome).toHaveBeenCalledOnce();
   });
+});
+
+function linkedTasks(term = 1, overrides: Partial<HomeTask> = {}): HomeTask[] {
+  return [
+    task(`visit_survey:${term}`, { term }),
+    task(`assigned_visit:${term}`, {
+      kind: "assigned_visit",
+      term,
+      company_id: `AM-${term}`,
+      ...overrides,
+    }),
+  ];
+}
+function linkedResponse(survey: HomeTask, visit?: HomeTask) {
+  return { ...survey, ...(visit ? { related_tasks: [visit] } : {}) };
+}
+function completionWrites() {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT");
+}
+
+describe("survey-owned assigned visit completion", () => {
+  it("optimistically reserves and completes the unique same-term visit in one strict survey mutation", async () => {
+    const initial = linkedTasks();
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[0].id);
+      void result.current.toggle(initial[1].id);
+      void result.current.toggle(initial[0].id);
+    });
+    expect(new Set(result.current.pending)).toEqual(
+      new Set(initial.map((row) => row.id)),
+    );
+    expect(result.current.data?.tasks).toEqual([
+      { ...initial[0], completed: true },
+      { ...initial[1], completed: true, auto_completed_by: initial[0].id },
+    ]);
+    expect(completionWrites()).toHaveLength(1);
+    expect(JSON.parse(String(completionWrites()[0][1]!.body))).toEqual({
+      completed: true,
+    });
+    const acceptedVisit = {
+      ...initial[1],
+      completed: true,
+      auto_completed_by: initial[0].id,
+      title: "Tasklyが確認した見学",
+    };
+    await act(async () => {
+      response.resolve(
+        json(linkedResponse({ ...initial[0], completed: true }, acceptedVisit)),
+      );
+      await writing;
+    });
+    expect(result.current.data?.tasks[1]).toEqual(acceptedVisit);
+    expect(result.current.data?.tasks[0]).not.toHaveProperty("related_tasks");
+    expect(result.current.pending.size).toBe(0);
+  });
+
+  it("undoes only a visit owned by that survey and restores both original rows after failure", async () => {
+    const initial = linkedTasks(1, {
+      completed: true,
+      auto_completed_by: "visit_survey:1",
+    });
+    initial[0].completed = true;
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[0].id);
+    });
+    expect(result.current.data?.tasks.map((row) => row.completed)).toEqual([
+      false,
+      false,
+    ]);
+    expect(result.current.data?.tasks[1].auto_completed_by).toBeUndefined();
+    await act(async () => {
+      response.resolve(json({}, 503));
+      await writing;
+    });
+    expect(result.current.data?.tasks).toEqual(initial);
+    expect(result.current.pending.size).toBe(0);
+    expect(result.current.error).not.toBe("");
+  });
+
+  it("accepts an authoritative linked undo without retaining ownership metadata", async () => {
+    const initial = linkedTasks(1, {
+      completed: true,
+      auto_completed_by: "visit_survey:1",
+    });
+    initial[0].completed = true;
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const undoneVisit = {
+      ...initial[1],
+      completed: false,
+      auto_completed_by: undefined,
+    };
+    fetchMock.mockResolvedValueOnce(
+      json(linkedResponse({ ...initial[0], completed: false }, undoneVisit)),
+    );
+    await act(async () => result.current.toggle(initial[0].id));
+    expect(result.current.data?.tasks.map((row) => row.completed)).toEqual([
+      false,
+      false,
+    ]);
+    expect(result.current.data?.tasks[1].auto_completed_by).toBeUndefined();
+  });
+
+  it.each([undefined, "visit_survey:other"])(
+    "preserves an already completed visit with ownership %s when the survey is undone",
+    async (owner) => {
+      const initial = linkedTasks(1, {
+        completed: true,
+        ...(owner ? { auto_completed_by: owner } : {}),
+      });
+      initial[0].completed = true;
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const response = deferred<Response>();
+      fetchMock.mockReturnValueOnce(response.promise);
+      let writing!: Promise<void>;
+      act(() => {
+        writing = result.current.toggle(initial[0].id);
+      });
+      expect(result.current.data?.tasks[1]).toEqual(initial[1]);
+      await act(async () => {
+        response.resolve(
+          json(linkedResponse({ ...initial[0], completed: false }, initial[1])),
+        );
+        await writing;
+      });
+      expect(result.current.data?.tasks[1]).toEqual(initial[1]);
+    },
+  );
+
+  it("preserves manual completion when a survey is checked instead of claiming ownership", async () => {
+    const initial = linkedTasks(1, { completed: true });
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[0].id);
+    });
+    expect(result.current.data?.tasks[1]).toEqual(initial[1]);
+    await act(async () => {
+      response.resolve(
+        json(linkedResponse({ ...initial[0], completed: true }, initial[1])),
+      );
+      await writing;
+    });
+    expect(result.current.data?.tasks[1]).toEqual(initial[1]);
+  });
+
+  it("undoes an automatic visit and lets a subsequent manual completion survive later survey undo", async () => {
+    const initial = linkedTasks(1, {
+      completed: true,
+      auto_completed_by: "visit_survey:1",
+    });
+    initial[0].completed = true;
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[1].id);
+    });
+    expect(result.current.data?.tasks[1]).toMatchObject({ completed: false });
+    expect(result.current.data?.tasks[1].auto_completed_by).toBeUndefined();
+    const manual = {
+      ...initial[1],
+      completed: false,
+      auto_completed_by: undefined,
+    };
+    await act(async () => {
+      response.resolve(
+        json(linkedResponse(manual, { ...initial[0], completed: false })),
+      );
+      await writing;
+    });
+    fetchMock.mockResolvedValueOnce(json({ ...manual, completed: true }));
+    await act(async () => result.current.toggle(initial[1].id));
+    expect(result.current.data?.tasks[1].completed).toBe(true);
+    expect(result.current.data?.tasks[1].auto_completed_by).toBeUndefined();
+    expect(result.current.data?.tasks[0].completed).toBe(false);
+    const checkedManual = { ...manual, completed: true };
+    fetchMock.mockResolvedValueOnce(
+      json(linkedResponse({ ...initial[0], completed: true }, checkedManual)),
+    );
+    await act(async () => result.current.toggle(initial[0].id));
+    fetchMock.mockResolvedValueOnce(
+      json(linkedResponse({ ...initial[0], completed: false }, checkedManual)),
+    );
+    await act(async () => result.current.toggle(initial[0].id));
+    expect(result.current.data?.tasks[1]).toEqual(checkedManual);
+  });
+
+  it.each(["different-term", "disabled", "ambiguous"])(
+    "does not infer an assigned target for a %s survey context",
+    async (scenario) => {
+      const initial = linkedTasks(
+        1,
+        scenario === "disabled" ? { completion_disabled: true } : {},
+      );
+      if (scenario === "different-term") initial[1].term = 2;
+      if (scenario === "ambiguous")
+        initial.push({ ...initial[1], id: "second-assigned-same-term" });
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const response = deferred<Response>();
+      fetchMock.mockReturnValueOnce(response.promise);
+      let writing!: Promise<void>;
+      act(() => {
+        writing = result.current.toggle(initial[0].id);
+      });
+      expect(result.current.data?.tasks.slice(1)).toEqual(initial.slice(1));
+      await act(async () => {
+        response.resolve(
+          scenario === "disabled"
+            ? json({}, 409)
+            : json({ ...initial[0], completed: true }),
+        );
+        await writing;
+      });
+      expect(result.current.data?.tasks.slice(1)).toEqual(initial.slice(1));
+      expect(completionWrites()).toHaveLength(1);
+    },
+  );
+
+  it("rolls back both rows and provenance atomically on a rejected pair completion", async () => {
+    const initial = linkedTasks();
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    fetchMock.mockRejectedValueOnce(new TypeError("offline"));
+    await act(async () => result.current.toggle(initial[0].id));
+    expect(result.current.data?.tasks).toEqual(initial);
+    expect(result.current.pending.size).toBe(0);
+    expect(result.current.error).toContain("完了状態を更新できませんでした");
+  });
+
+  it("keeps disjoint term pairs independent when one fails after the other succeeds", async () => {
+    const first = linkedTasks(1),
+      second = linkedTasks(2),
+      initial = [...first, ...second];
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const firstWrite = deferred<Response>(),
+      secondWrite = deferred<Response>();
+    fetchMock.mockImplementation((input) =>
+      String(input).endsWith("visit_survey%3A1")
+        ? firstWrite.promise
+        : secondWrite.promise,
+    );
+    let a!: Promise<void>, b!: Promise<void>;
+    act(() => {
+      a = result.current.toggle(first[0].id);
+      b = result.current.toggle(second[0].id);
+    });
+    expect(result.current.pending.size).toBe(4);
+    const acceptedSecond = {
+      ...second[1],
+      completed: true,
+      auto_completed_by: second[0].id,
+    };
+    await act(async () => {
+      secondWrite.resolve(
+        json(linkedResponse({ ...second[0], completed: true }, acceptedSecond)),
+      );
+      await b;
+    });
+    expect(new Set(result.current.pending)).toEqual(
+      new Set(first.map((row) => row.id)),
+    );
+    await act(async () => {
+      firstWrite.resolve(json({}, 503));
+      await a;
+    });
+    expect(result.current.data?.tasks).toEqual([
+      ...first,
+      { ...second[0], completed: true },
+      acceptedSecond,
+    ]);
+    expect(result.current.pending.size).toBe(0);
+  });
+
+  it.each(["before", "during"])(
+    "fences both linked rows against a GET started %s the mutation",
+    async (ordering) => {
+      const initial = linkedTasks();
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const read = deferred<Response>(),
+        write = deferred<Response>();
+      fetchMock.mockImplementation((_input, init) =>
+        init?.method === "PUT" ? write.promise : read.promise,
+      );
+      let reading!: Promise<void>, writing!: Promise<void>;
+      act(() => {
+        if (ordering === "before") reading = result.current.refresh();
+        writing = result.current.toggle(initial[0].id);
+        if (ordering === "during") reading = result.current.refresh();
+      });
+      const acceptedVisit = {
+        ...initial[1],
+        completed: true,
+        auto_completed_by: initial[0].id,
+      };
+      await act(async () => {
+        write.resolve(
+          json(
+            linkedResponse({ ...initial[0], completed: true }, acceptedVisit),
+          ),
+        );
+        await writing;
+      });
+      await act(async () => {
+        read.resolve(json(home(initial)));
+        await reading;
+      });
+      expect(result.current.data?.tasks).toEqual([
+        { ...initial[0], completed: true },
+        acceptedVisit,
+      ]);
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      await act(async () => result.current.refresh());
+      expect(result.current.data?.tasks).toEqual(initial);
+    },
+  );
+
+  it("rejects primary-only success for a linked pair and restores both originals", async () => {
+    const initial = linkedTasks();
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    fetchMock.mockResolvedValueOnce(json({ ...initial[0], completed: true }));
+    await act(async () => result.current.toggle(initial[0].id));
+    expect(result.current.data?.tasks).toEqual(initial);
+    expect(result.current.error).not.toBe("");
+  });
+
+  it.each(["empty", "duplicate", "unexpected-id", "wrong-kind", "wrong-term"])(
+    "rejects a %s related response atomically without overwriting another row",
+    async (scenario) => {
+      const initial = [
+        ...linkedTasks(),
+        task("unrelated", { kind: "overall_survey", term: undefined }),
+      ];
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const partner = {
+        ...initial[1],
+        completed: true,
+        auto_completed_by: initial[0].id,
+      };
+      const related =
+        scenario === "empty"
+          ? []
+          : scenario === "duplicate"
+            ? [partner, partner]
+            : [
+                {
+                  ...partner,
+                  ...(scenario === "unexpected-id" ? { id: "unrelated" } : {}),
+                  ...(scenario === "wrong-kind"
+                    ? { kind: "visit_survey" }
+                    : {}),
+                  ...(scenario === "wrong-term" ? { term: 2 } : {}),
+                },
+              ];
+      fetchMock.mockResolvedValueOnce(
+        json({ ...initial[0], completed: true, related_tasks: related }),
+      );
+      await act(async () => result.current.toggle(initial[0].id));
+      expect(result.current.data?.tasks).toEqual(initial);
+      expect(result.current.pending.size).toBe(0);
+      expect(result.current.error).not.toBe("");
+    },
+  );
+
+  it("waits for the server on a disabled linked partner without optimistically checking either row", async () => {
+    const initial = linkedTasks(1, { completion_disabled: true });
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[0].id);
+    });
+    expect(result.current.data?.tasks).toEqual(initial);
+    expect(new Set(result.current.pending)).toEqual(
+      new Set(initial.map((row) => row.id)),
+    );
+    expect(completionWrites()).toHaveLength(1);
+    await act(async () => {
+      response.resolve(json({}, 409));
+      await writing;
+    });
+    expect(result.current.data?.tasks).toEqual(initial);
+    expect(result.current.error).toContain("Tasklyでタスクの状態を確認");
+  });
+
+  it("does not auto-write linked completion when native Taskly state is observed on focus", async () => {
+    const initial = linkedTasks();
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    fetchMock.mockResolvedValueOnce(
+      json(home([{ ...initial[0], completed: true }, initial[1]])),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() =>
+      expect(result.current.data?.tasks[0].completed).toBe(true),
+    );
+    expect(result.current.data?.tasks[1]).toEqual(initial[1]);
+    expect(completionWrites()).toHaveLength(0);
+  });
+});
+
+function completedLinkedTasks(term = 1) {
+  const pair = linkedTasks(term, {
+    completed: true,
+    auto_completed_by: `visit_survey:${term}`,
+  });
+  pair[0].completed = true;
+  return pair;
+}
+
+describe("undoing a survey-owned assigned visit", () => {
+  it("unchecks only its trusted survey, reserves both rows and blocks conflicting clicks during one atomic request", async () => {
+    const initial = completedLinkedTasks();
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[1].id);
+      void result.current.toggle(initial[0].id);
+      void result.current.toggle(initial[1].id);
+    });
+    expect(result.current.data?.tasks.map((row) => row.completed)).toEqual([
+      false,
+      false,
+    ]);
+    expect(result.current.data?.tasks[1].auto_completed_by).toBeUndefined();
+    expect(new Set(result.current.pending)).toEqual(
+      new Set(initial.map((row) => row.id)),
+    );
+    expect(completionWrites()).toHaveLength(1);
+    expect(completionWrites()[0][0]).toContain("/tasks/assigned_visit%3A1");
+    expect(JSON.parse(String(completionWrites()[0][1]!.body))).toEqual({
+      completed: false,
+    });
+    const survey = {
+      ...initial[0],
+      completed: false,
+      title: "Tasklyのアンケート",
+    };
+    const visit = {
+      ...initial[1],
+      completed: false,
+      auto_completed_by: undefined,
+    };
+    await act(async () => {
+      response.resolve(json(linkedResponse(visit, survey)));
+      await writing;
+    });
+    expect(result.current.data?.tasks).toEqual([survey, visit]);
+    expect(result.current.pending.size).toBe(0);
+    expect(result.current.error).toBe("");
+  });
+
+  it.each([409, 503])(
+    "restores both original completions and provenance when reverse undo fails (%s)",
+    async (status) => {
+      const initial = completedLinkedTasks();
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      fetchMock.mockResolvedValueOnce(json({}, status));
+      await act(async () => result.current.toggle(initial[1].id));
+      expect(result.current.data?.tasks).toEqual(initial);
+      expect(result.current.pending.size).toBe(0);
+      expect(result.current.error).not.toBe("");
+      expect(completionWrites()).toHaveLength(1);
+    },
+  );
+
+  it.each(["manual", "other-origin", "other-term", "ambiguous"])(
+    "keeps the survey unchanged for an assigned undo with %s provenance",
+    async (scenario) => {
+      const initial = completedLinkedTasks();
+      if (scenario === "manual") delete initial[1].auto_completed_by;
+      if (scenario === "other-origin")
+        initial[1].auto_completed_by = "visit_survey:other";
+      if (scenario === "other-term") initial[0].term = 2;
+      if (scenario === "ambiguous")
+        initial.push({ ...initial[0], id: "another-same-term-survey" });
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const response = deferred<Response>();
+      fetchMock.mockReturnValueOnce(response.promise);
+      let writing!: Promise<void>;
+      act(() => {
+        writing = result.current.toggle(initial[1].id);
+      });
+      expect(result.current.data?.tasks[0]).toEqual(initial[0]);
+      const linked = scenario === "manual" || scenario === "other-origin";
+      expect(new Set(result.current.pending)).toEqual(
+        new Set(linked ? [initial[1].id, initial[0].id] : [initial[1].id]),
+      );
+      const manualVisit = {
+        ...initial[1],
+        completed: false,
+        auto_completed_by: undefined,
+      };
+      await act(async () => {
+        response.resolve(
+          json(linked ? linkedResponse(manualVisit, initial[0]) : manualVisit),
+        );
+        await writing;
+      });
+      expect(result.current.data?.tasks[0]).toEqual(initial[0]);
+      expect(result.current.error).toBe("");
+    },
+  );
+
+  it("never completes a survey when an incomplete assigned visit is manually checked", async () => {
+    const initial = linkedTasks(1, { auto_completed_by: "visit_survey:1" });
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[1].id);
+    });
+    expect(result.current.data?.tasks[0]).toEqual(initial[0]);
+    expect(result.current.data?.tasks[1].auto_completed_by).toBeUndefined();
+    expect([...result.current.pending]).toEqual([initial[1].id]);
+    await act(async () => {
+      response.resolve(
+        json({ ...initial[1], completed: true, auto_completed_by: undefined }),
+      );
+      await writing;
+    });
+    expect(result.current.data?.tasks[0].completed).toBe(false);
+  });
+
+  it.each(["before", "during"])(
+    "preserves both accepted reverse changes against a GET started %s undo",
+    async (ordering) => {
+      const initial = completedLinkedTasks();
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const read = deferred<Response>(),
+        write = deferred<Response>();
+      fetchMock.mockImplementation((_input, init) =>
+        init?.method === "PUT" ? write.promise : read.promise,
+      );
+      let reading!: Promise<void>, writing!: Promise<void>;
+      act(() => {
+        if (ordering === "before") reading = result.current.refresh();
+        writing = result.current.toggle(initial[1].id);
+        if (ordering === "during") reading = result.current.refresh();
+      });
+      const survey = { ...initial[0], completed: false };
+      const visit = {
+        ...initial[1],
+        completed: false,
+        auto_completed_by: undefined,
+      };
+      await act(async () => {
+        write.resolve(json(linkedResponse(visit, survey)));
+        await writing;
+      });
+      await act(async () => {
+        read.resolve(json(home(initial)));
+        await reading;
+      });
+      expect(result.current.data?.tasks).toEqual([survey, visit]);
+    },
+  );
+
+  it.each(["missing", "duplicate", "wrong-id", "wrong-kind", "wrong-term"])(
+    "rejects a %s related survey response and restores the pair",
+    async (scenario) => {
+      const initial = completedLinkedTasks();
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const survey = { ...initial[0], completed: false };
+      const related =
+        scenario === "missing"
+          ? []
+          : scenario === "duplicate"
+            ? [survey, survey]
+            : [
+                {
+                  ...survey,
+                  ...(scenario === "wrong-id"
+                    ? { id: "unrelated-survey" }
+                    : {}),
+                  ...(scenario === "wrong-kind"
+                    ? { kind: "assigned_visit" }
+                    : {}),
+                  ...(scenario === "wrong-term" ? { term: 2 } : {}),
+                },
+              ];
+      fetchMock.mockResolvedValueOnce(
+        json({ ...initial[1], completed: false, related_tasks: related }),
+      );
+      await act(async () => result.current.toggle(initial[1].id));
+      expect(result.current.data?.tasks).toEqual(initial);
+      expect(result.current.error).not.toBe("");
+      expect(result.current.pending.size).toBe(0);
+    },
+  );
+
+  it.each(["missing-auto-hint", "outdated-auto-hint"])(
+    "reconciles both authoritative rows after undo despite a %s",
+    async (scenario) => {
+      const initial = completedLinkedTasks();
+      if (scenario === "missing-auto-hint") delete initial[1].auto_completed_by;
+      fetchMock.mockResolvedValueOnce(json(home(initial)));
+      const { result } = renderHook(() => useHomeTasks(onExpired));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const response = deferred<Response>();
+      fetchMock.mockReturnValueOnce(response.promise);
+      let writing!: Promise<void>;
+      act(() => {
+        writing = result.current.toggle(initial[1].id);
+      });
+      expect(new Set(result.current.pending)).toEqual(
+        new Set(initial.map((row) => row.id)),
+      );
+      expect(result.current.data?.tasks[0].completed).toBe(
+        scenario === "missing-auto-hint",
+      );
+      const survey = {
+        ...initial[0],
+        completed: scenario === "outdated-auto-hint",
+      };
+      const visit = {
+        ...initial[1],
+        completed: false,
+        auto_completed_by: undefined,
+      };
+      await act(async () => {
+        response.resolve(json(linkedResponse(visit, survey)));
+        await writing;
+      });
+      expect(result.current.data?.tasks).toEqual([survey, visit]);
+      expect(result.current.error).toBe("");
+    },
+  );
+
+  it("reserves an already incomplete matching survey while undoing its owned visit", async () => {
+    const initial = completedLinkedTasks();
+    initial[0].completed = false;
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const response = deferred<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = result.current.toggle(initial[1].id);
+    });
+    expect(new Set(result.current.pending)).toEqual(
+      new Set(initial.map((row) => row.id)),
+    );
+    await act(async () => {
+      response.resolve(
+        json(
+          linkedResponse(
+            { ...initial[1], completed: false, auto_completed_by: undefined },
+            initial[0],
+          ),
+        ),
+      );
+      await writing;
+    });
+    expect(result.current.data?.tasks.map((row) => row.completed)).toEqual([
+      false,
+      false,
+    ]);
+    expect(result.current.error).toBe("");
+  });
+
+  it("does not undo a survey when an independent native Taskly visit undo arrives on focus", async () => {
+    const initial = completedLinkedTasks();
+    fetchMock.mockResolvedValueOnce(json(home(initial)));
+    const { result } = renderHook(() => useHomeTasks(onExpired));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    fetchMock.mockResolvedValueOnce(
+      json(
+        home([
+          initial[0],
+          { ...initial[1], completed: false, auto_completed_by: undefined },
+        ]),
+      ),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() =>
+      expect(result.current.data?.tasks[1].completed).toBe(false),
+    );
+    expect(result.current.data?.tasks[0]).toEqual(initial[0]);
+    expect(completionWrites()).toHaveLength(0);
+  });
+});
+
+function pairMutation(direction: "forward" | "reverse", term = 1) {
+  const initial =
+    direction === "forward" ? linkedTasks(term) : completedLinkedTasks(term);
+  const survey = { ...initial[0], completed: direction === "forward" };
+  const visit = {
+    ...initial[1],
+    completed: direction === "forward",
+    auto_completed_by: direction === "forward" ? initial[0].id : undefined,
+  };
+  return {
+    initial: home(initial),
+    accepted: home([survey, visit]),
+    id: initial[direction === "forward" ? 0 : 1].id,
+    response:
+      direction === "forward"
+        ? linkedResponse(survey, visit)
+        : linkedResponse(visit, survey),
+  };
+}
+function pairCacheHarness(initial: HomeTasksResponse) {
+  const state = offlineState(false);
+  let cached: HomeTasksResponse | null = null;
+  vi.mocked(saveOfflineHome).mockImplementation(async (_session, data) => {
+    cached = structuredClone(data);
+  });
+  vi.mocked(readOfflineHome).mockImplementation(async () =>
+    cached ? { data: structuredClone(cached), savedAt: Date.now() } : null,
+  );
+  vi.mocked(deleteOfflineHome).mockImplementation(async () => {
+    cached = null;
+  });
+  fetchMock.mockResolvedValueOnce(json(initial));
+  const mounted = renderHook(() => useHomeTasks(onExpired), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <OfflineProvider value={state}>{children}</OfflineProvider>
+    ),
+  });
+  return { ...mounted, cached: () => cached, state };
+}
+
+describe("confirmed linked completions in offline storage", () => {
+  it.each(["forward", "reverse"] as const)(
+    "stores the %s pair in one atomic confirmed snapshot without persisting optimism",
+    async (direction) => {
+      const pair = pairMutation(direction);
+      const mounted = pairCacheHarness(pair.initial);
+      await waitFor(() => expect(mounted.result.current.loading).toBe(false));
+      expect(saveOfflineHome).toHaveBeenCalledOnce();
+      const response = deferred<Response>();
+      fetchMock.mockReturnValueOnce(response.promise);
+      let writing!: Promise<void>;
+      act(() => {
+        writing = mounted.result.current.toggle(pair.id);
+      });
+      expect(mounted.result.current.pending.size).toBe(2);
+      expect(mounted.cached()).toEqual(pair.initial);
+      expect(saveOfflineHome).toHaveBeenCalledOnce();
+      await act(async () => {
+        response.resolve(json(pair.response));
+        await writing;
+      });
+      expect(mounted.result.current.data).toEqual(pair.accepted);
+      expect(mounted.cached()).toEqual(pair.accepted);
+      expect(saveOfflineHome).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(saveOfflineHome).mock.calls[1]).toEqual([
+        mounted.state.session,
+        pair.accepted,
+      ]);
+    },
+  );
+
+  it.each([
+    ["forward", "before"],
+    ["forward", "during"],
+    ["reverse", "before"],
+    ["reverse", "during"],
+  ] as const)(
+    "keeps both %s rows confirmed when a read starts %s its pending mutation",
+    async (direction, ordering) => {
+      const pair = pairMutation(direction);
+      const mounted = pairCacheHarness(pair.initial);
+      await waitFor(() => expect(mounted.result.current.loading).toBe(false));
+      const read = deferred<Response>(),
+        write = deferred<Response>();
+      fetchMock.mockImplementation((_input, init) =>
+        init?.method === "PUT" ? write.promise : read.promise,
+      );
+      let reading!: Promise<void>, writing!: Promise<void>;
+      act(() => {
+        if (ordering === "before") reading = mounted.result.current.refresh();
+        writing = mounted.result.current.toggle(pair.id);
+        if (ordering === "during") reading = mounted.result.current.refresh();
+      });
+      expect(mounted.cached()).toEqual(pair.initial);
+      await act(async () => {
+        read.resolve(json(pair.initial));
+        await reading;
+      });
+      expect(mounted.cached()).toEqual(pair.initial);
+      expect(
+        vi
+          .mocked(saveOfflineHome)
+          .mock.calls.every(
+            ([, data]) => JSON.stringify(data) === JSON.stringify(pair.initial),
+          ),
+      ).toBe(true);
+      await act(async () => {
+        write.resolve(json(pair.response));
+        await writing;
+      });
+      expect(mounted.cached()).toEqual(pair.accepted);
+      expect(mounted.result.current.data).toEqual(pair.accepted);
+    },
+  );
+
+  it.each(["forward", "reverse"] as const)(
+    "does not let an old read replace either newly confirmed %s row in storage",
+    async (direction) => {
+      const pair = pairMutation(direction);
+      const mounted = pairCacheHarness(pair.initial);
+      await waitFor(() => expect(mounted.result.current.loading).toBe(false));
+      const read = deferred<Response>(),
+        write = deferred<Response>();
+      fetchMock.mockImplementation((_input, init) =>
+        init?.method === "PUT" ? write.promise : read.promise,
+      );
+      let reading!: Promise<void>, writing!: Promise<void>;
+      act(() => {
+        reading = mounted.result.current.refresh();
+        writing = mounted.result.current.toggle(pair.id);
+      });
+      await act(async () => {
+        write.resolve(json(pair.response));
+        await writing;
+      });
+      expect(mounted.cached()).toEqual(pair.accepted);
+      await act(async () => {
+        read.resolve(json(pair.initial));
+        await reading;
+      });
+      expect(mounted.cached()).toEqual(pair.accepted);
+      expect(mounted.result.current.data).toEqual(pair.accepted);
+    },
+  );
+
+  it.each(["forward", "reverse"] as const)(
+    "rolls back both %s rows on failure while retaining only the old confirmed cache",
+    async (direction) => {
+      const pair = pairMutation(direction);
+      const mounted = pairCacheHarness(pair.initial);
+      await waitFor(() => expect(mounted.result.current.loading).toBe(false));
+      fetchMock.mockResolvedValueOnce(json({}, 503));
+      await act(async () => mounted.result.current.toggle(pair.id));
+      expect(mounted.result.current.data).toEqual(pair.initial);
+      expect(mounted.cached()).toEqual(pair.initial);
+      expect(mounted.result.current.pending.size).toBe(0);
+      expect(saveOfflineHome).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["GET", "PUT"])(
+    "revokes every pending pair after %s403 and ignores late responses without releasing a new pair",
+    async (operation) => {
+      const first = pairMutation("forward", 1),
+        second = pairMutation("reverse", 2);
+      const initial = home([...first.initial.tasks, ...second.initial.tasks]);
+      const mounted = pairCacheHarness(initial);
+      await waitFor(() => expect(mounted.result.current.loading).toBe(false));
+      const a = deferred<Response>(),
+        b = deferred<Response>();
+      fetchMock.mockImplementation((input, init) =>
+        init?.method === "PUT"
+          ? String(input).endsWith("visit_survey%3A1")
+            ? a.promise
+            : b.promise
+          : Promise.resolve(json({}, 403)),
+      );
+      let writeA!: Promise<void>, writeB!: Promise<void>;
+      act(() => {
+        writeA = mounted.result.current.toggle(first.id);
+        writeB = mounted.result.current.toggle(second.id);
+      });
+      expect(mounted.result.current.pending.size).toBe(4);
+      const signals = completionWrites().map(([, init]) => init!.signal!);
+      await act(async () => {
+        if (operation === "GET") await mounted.result.current.refresh();
+        else {
+          a.resolve(json({}, 403));
+          await writeA;
+        }
+      });
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      expect(mounted.cached()).toBeNull();
+      expect(mounted.result.current).toMatchObject({
+        data: null,
+        readonly: true,
+      });
+      expect(mounted.result.current.pending.size).toBe(0);
+      expect(deleteOfflineHome).toHaveBeenCalledExactlyOnceWith(
+        mounted.state.session,
+      );
+      const current = deferred<Response>();
+      fetchMock.mockImplementation((_input, init) =>
+        init?.method === "PUT"
+          ? current.promise
+          : Promise.resolve(json(initial)),
+      );
+      await act(async () => mounted.result.current.refresh());
+      let currentWrite!: Promise<void>;
+      act(() => {
+        currentWrite = mounted.result.current.toggle(second.id);
+      });
+      await act(async () => {
+        if (operation === "GET") {
+          a.resolve(json(first.response));
+          await writeA;
+        }
+        b.resolve(json(second.response));
+        await writeB;
+      });
+      expect(new Set(mounted.result.current.pending)).toEqual(
+        new Set(second.initial.tasks.map((row) => row.id)),
+      );
+      expect(mounted.cached()).toEqual(initial);
+      expect(saveOfflineHome).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        current.resolve(json(second.response));
+        await currentWrite;
+      });
+      expect(mounted.cached()).toEqual(
+        home([...first.initial.tasks, ...second.accepted.tasks]),
+      );
+      expect(mounted.result.current.pending.size).toBe(0);
+    },
+  );
+
+  it.each(["forward", "reverse"] as const)(
+    "persists and restores a confirmed %s pair through native IndexedDB without navigation URLs",
+    async (direction) => {
+      vi.stubGlobal("indexedDB", new IDBFactory());
+      const store = await vi.importActual<
+        typeof import("../lib/offline-store")
+      >("../lib/offline-store");
+      const pack = await store.saveOfflinePack({
+        user: {
+          sub: "native-cache-student",
+          name: "検証学生",
+          email: "cache@example.test",
+        },
+        guidance: fixture(),
+        preferences: {
+          department: "電子制御工学科",
+          grade: 4,
+          roster_number: 7,
+        },
+        bookmarks: [],
+      });
+      expect(pack).not.toBeNull();
+      vi.mocked(saveOfflineHome).mockImplementation(store.saveOfflineHome);
+      vi.mocked(readOfflineHome).mockImplementation(store.readOfflineHome);
+      vi.mocked(deleteOfflineHome).mockImplementation(store.deleteOfflineHome);
+      const pair = pairMutation(direction);
+      let state: OfflineState = {
+        ...offlineState(false),
+        session: pack!.session,
+      };
+      fetchMock.mockResolvedValueOnce(json(pair.initial));
+      const mounted = renderHook(() => useHomeTasks(onExpired), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <OfflineProvider value={state}>{children}</OfflineProvider>
+        ),
+      });
+      await waitFor(() => expect(mounted.result.current.loading).toBe(false));
+      const oldCache = await store.readOfflineHome(pack!.session);
+      expect(oldCache?.data.tasks.map((row) => row.completed)).toEqual(
+        pair.initial.tasks.map((row) => row.completed),
+      );
+      const response = deferred<Response>();
+      fetchMock.mockReturnValueOnce(response.promise);
+      let writing!: Promise<void>;
+      act(() => {
+        writing = mounted.result.current.toggle(pair.id);
+      });
+      const pendingCache = await store.readOfflineHome(pack!.session);
+      expect(pendingCache?.data).toEqual(oldCache?.data);
+      await act(async () => {
+        response.resolve(json(pair.response));
+        await writing;
+      });
+      const confirmedCache = await store.readOfflineHome(pack!.session);
+      expect(confirmedCache?.data.tasks.map((row) => row.completed)).toEqual(
+        pair.accepted.tasks.map((row) => row.completed),
+      );
+      expect(confirmedCache?.data.tasks[1].auto_completed_by).toBe(
+        pair.accepted.tasks[1].auto_completed_by,
+      );
+      expect(
+        confirmedCache?.data.tasks.every(
+          (row) => row.taskly_url === "" && !row.url,
+        ),
+      ).toBe(true);
+      mounted.unmount();
+      state = { ...state, offline: true };
+      const restored = renderHook(() => useHomeTasks(onExpired), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <OfflineProvider value={state}>{children}</OfflineProvider>
+        ),
+      });
+      await waitFor(() => expect(restored.result.current.loading).toBe(false));
+      expect(restored.result.current.data).toEqual(confirmedCache?.data);
+      expect(restored.result.current.readonly).toBe(true);
+      const requests = fetchMock.mock.calls.length;
+      await act(async () => restored.result.current.toggle(pair.id));
+      expect(fetchMock).toHaveBeenCalledTimes(requests);
+      restored.unmount();
+      await store.clearOfflinePack();
+    },
+  );
 });

@@ -158,6 +158,97 @@ describe("verified offline snapshots in IndexedDB", () => {
     );
   });
 
+  it("preserves a confirmed logical survey relationship without bridge or transport metadata", async () => {
+    const pack = await seed();
+    const linked: HomeTasksResponse = {
+      ...tasks,
+      tasks: [
+        {
+          ...tasks.tasks[0],
+          id: "assigned-visit-1",
+          auto_completed_by: "visit-survey-1",
+        },
+        { ...tasks.tasks[0], id: "visit-survey-1", kind: "visit_survey" },
+      ],
+    };
+    Object.assign(linked.tasks[0], {
+      auto_assignment_scope: "private-bridge-scope",
+      related_tasks: [{ private_token: "private-transport-token" }],
+    });
+    await saveOfflineHome(pack.session, linked);
+    expect(
+      (await readOfflineHome(pack.session))?.data.tasks[0].auto_completed_by,
+    ).toBe("visit-survey-1");
+    expect(
+      (await restoreOfflinePack())?.home?.data.tasks[0].auto_completed_by,
+    ).toBe("visit-survey-1");
+    const stored = JSON.stringify((await inspect()).active);
+    expect(stored).not.toContain("private-bridge-scope");
+    expect(stored).not.toContain("private-transport-token");
+    expect(stored).not.toContain("related_tasks");
+    delete linked.tasks[0].auto_completed_by;
+    await saveOfflineHome(pack.session, linked);
+    expect(
+      (await readOfflineHome(pack.session))?.data.tasks[0].auto_completed_by,
+    ).toBeUndefined();
+  });
+
+  it.each([
+    "unmatched",
+    "wrong-term",
+    "ambiguous",
+    "wrong-kind",
+    "incomplete",
+    "disabled",
+    "survey-incomplete",
+    "survey-disabled",
+    "missing-term",
+    "invalid-term",
+    "unsafe-id",
+    "non-string-hint",
+  ])("discards an invalid cached relationship hint: %s", async (invalid) => {
+    const pack = await seed();
+    const linked: HomeTasksResponse = {
+      ...tasks,
+      tasks: [
+        {
+          ...tasks.tasks[0],
+          id: "assigned-visit-1",
+          auto_completed_by: "visit-survey-1",
+        },
+        { ...tasks.tasks[0], id: "visit-survey-1", kind: "visit_survey" },
+      ],
+    };
+    const assigned = linked.tasks[0],
+      survey = linked.tasks[1];
+    if (invalid === "unmatched")
+      assigned.auto_completed_by = "visit-survey-other";
+    if (invalid === "wrong-term") survey.term = 2;
+    if (invalid === "ambiguous")
+      linked.tasks.push({ ...survey, id: "visit-survey-duplicate" });
+    if (invalid === "wrong-kind") assigned.kind = "sheet_submission";
+    if (invalid === "incomplete") assigned.completed = false;
+    if (invalid === "disabled") assigned.completion_disabled = true;
+    if (invalid === "survey-incomplete") survey.completed = false;
+    if (invalid === "survey-disabled") survey.completion_disabled = true;
+    if (invalid === "missing-term") delete assigned.term;
+    if (invalid === "invalid-term") assigned.term = 1.5;
+    if (invalid === "unsafe-id")
+      assigned.auto_completed_by = "https://private.example.test/?token=secret";
+    if (invalid === "non-string-hint")
+      Object.assign(assigned, {
+        auto_completed_by: { token: "private-transport-token" },
+      });
+    await saveOfflineHome(pack.session, linked);
+    const snapshot = await readOfflineHome(pack.session);
+    expect(snapshot?.data.tasks).toHaveLength(linked.tasks.length);
+    expect(snapshot?.data.tasks[0].auto_completed_by).toBeUndefined();
+    expect(snapshot?.data.tasks[1]).toMatchObject({
+      completed: survey.completed,
+      completion_disabled: survey.completion_disabled,
+    });
+  });
+
   it("stores actual image bytes and refuses unknown documents or non-image data", async () => {
     const pack = await seed();
     const image = new Blob(["synthetic-map"], { type: "image/png" });

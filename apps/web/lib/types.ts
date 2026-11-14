@@ -78,6 +78,10 @@ export type HomeTask = {
   document_id?: string;
   page?: number;
   due_at?: string;
+  auto_completed_by?: string;
+};
+export type HomeTaskUpdateResponse = HomeTask & {
+  related_tasks?: HomeTask[];
 };
 export type HomeTasksResponse = {
   tasks: HomeTask[];

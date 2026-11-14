@@ -140,10 +140,50 @@ beforeEach(() => {
         const completed = JSON.parse(String(init.body)).completed;
         const current = snapshot.tasks.find((row) => row.id === id)!;
         const updated = { ...current, completed };
+        if (current.kind === "assigned_visit") delete updated.auto_completed_by;
+        const partner =
+          current.kind === "visit_survey"
+            ? snapshot.tasks.find(
+                (row) =>
+                  row.kind === "assigned_visit" && row.term === current.term,
+              )
+            : current.kind === "assigned_visit" && !completed
+              ? snapshot.tasks.find(
+                  (row) =>
+                    row.kind === "visit_survey" && row.term === current.term,
+                )
+              : undefined;
+        const related = partner
+          ? current.kind === "assigned_visit"
+            ? {
+                ...partner,
+                completed:
+                  current.auto_completed_by === partner.id
+                    ? false
+                    : partner.completed,
+              }
+            : {
+                ...partner,
+                completed: completed
+                  ? true
+                  : partner.auto_completed_by === current.id
+                    ? false
+                    : partner.completed,
+                auto_completed_by:
+                  completed && !partner.completed
+                    ? current.id
+                    : !completed && partner.auto_completed_by === current.id
+                      ? undefined
+                      : partner.auto_completed_by,
+              }
+          : undefined;
         snapshot.tasks = snapshot.tasks.map((row) =>
-          row.id === id ? updated : row,
+          row.id === id ? updated : row.id === related?.id ? related : row,
         );
-        return json(updated);
+        return json({
+          ...updated,
+          ...(related ? { related_tasks: [related] } : {}),
+        });
       }
       if (path === "/api/documents/guide/url")
         return json({ url: signedURL, expires_at: "2030-05-14T00:17:00Z" });

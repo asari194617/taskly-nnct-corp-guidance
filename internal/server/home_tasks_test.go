@@ -58,15 +58,60 @@ func homeBridge(t *testing.T, s *Server, canonical map[string]tasklyHomeTask) ro
 		} else {
 			key := strings.TrimPrefix(r.URL.Path, "/integrations/nnct-guidance/tasks/")
 			var change struct {
-				Completed bool `json:"completed"`
+				Completed         bool   `json:"completed"`
+				LinkAssignedVisit bool   `json:"link_assigned_visit"`
+				AssignmentScope   string `json:"assignment_scope"`
 			}
 			if json.NewDecoder(r.Body).Decode(&change) != nil {
 				t.Error("invalid taskly update body")
 			}
 			task := canonical[key]
+			previous := *task.Completed
+			var related []tasklyHomeTask
+			if change.LinkAssignedVisit {
+				targetKey := "assigned-visit-" + strings.TrimPrefix(key, "visit-survey-")
+				reverse := strings.HasPrefix(key, "assigned-visit-")
+				if reverse {
+					targetKey = "visit-survey-" + strings.TrimPrefix(key, "assigned-visit-")
+				}
+				target, exists := canonical[targetKey]
+				if (!strings.HasPrefix(key, "visit-survey-") && !reverse) || (reverse && change.Completed) || !sessionHashPattern.MatchString(change.AssignmentScope) || !exists {
+					t.Error("invalid server-derived pair")
+					return identityResponse(400, `{}`), nil
+				}
+				if change.Completed && (*task.CompletionDisabled || *target.CompletionDisabled) {
+					return identityResponse(409, `{}`), nil
+				}
+				if reverse {
+					if task.AutoCompletedBy == targetKey && task.AutoAssignmentScope == change.AssignmentScope {
+						value := false
+						target.Completed = &value
+					}
+				} else if change.Completed && !previous && !*target.Completed {
+					value := true
+					target.Completed = &value
+					target.AutoCompletedBy = key
+					target.AutoAssignmentScope = change.AssignmentScope
+				} else if !change.Completed && target.AutoCompletedBy == key && target.AutoAssignmentScope == change.AssignmentScope {
+					value := false
+					target.Completed = &value
+					target.AutoCompletedBy = ""
+					target.AutoAssignmentScope = ""
+				} else if target.AutoCompletedBy == key && target.AutoAssignmentScope != change.AssignmentScope {
+					target.AutoCompletedBy = ""
+					target.AutoAssignmentScope = ""
+				}
+				canonical[targetKey] = target
+				related = []tasklyHomeTask{target}
+			}
 			task.Completed = &change.Completed
+			task.AutoCompletedBy = ""
+			task.AutoAssignmentScope = ""
 			canonical[key] = task
-			payload = task
+			payload = struct {
+				tasklyHomeTask
+				RelatedTasks []tasklyHomeTask `json:"related_tasks,omitempty"`
+			}{tasklyHomeTask: task, RelatedTasks: related}
 		}
 		body, _ := json.Marshal(payload)
 		return identityResponse(200, string(body)), nil

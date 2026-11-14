@@ -8,7 +8,7 @@
 
 - **公開の静的画面**: Service Worker `/offline-worker.js` が、ビルド時に列挙した6ページのHTML・`_next/static/` のJS/CSS/フォント/画像・TasklyロゴだけをCache Storageに保存します。`taskly-guidance-shell-v1-<revision>` にSHA-256で検証した全ファイルと取得時刻を保存します。クエリ付きのページ訪問は既知の画面パスへ対応させ、クエリ・企業名・検索語をCache Storageのキーに保存しません。API、認証、PDF、署名付きURL、他origin、任意パス、書き込み、Rangeリクエストには介入しません。
 - **個人用スナップショット**: `lib/offline-store.ts` が、オンラインで確認したアカウントと学科・学年・名簿番号の組み合わせに限定してIndexedDBへ保存します。型に沿って必要な値だけを再構築し、セッショントークン・OAuth情報・署名付きURLは保存しません。別アカウント、ログアウト、401、名簿変更時は破棄し、古い通信結果が保存を復活させない世代番号で制御します。
-- **会場マップ**: 取得した画像バイトだけを同じアカウント・名簿・データ版・期限の範囲で保存します。署名URLの期限切れ後も取得済みの画像を参照でき、表示用の一時的なBlob URLは解放します。PDFのBlob表示は導入しません。
+- **会場マップ**: 取得した画像バイトをArrayBufferとMIME型で、同じアカウント・名簿・データ版・期限の範囲に限定して保存します。表示時だけBlobを復元します。署名URLの期限切れ後も取得済みの画像を参照でき、表示用の一時的なBlob URLは解放します。PDFのBlob表示は導入しません。
 
 公開シェルも個人用スナップショットも24時間を超えるとオフライン参照に使いません。公開シェルはオンラインの画面アクセス時に取得から1時間以上経過していれば全ファイルを再確認し、全て同じビルドであることを検証できた場合に限り取得時刻を更新します。個人用データは正常に確認できた内容だけを保存します。
 
@@ -33,6 +33,6 @@ node --experimental-test-coverage --test-coverage-include=deploy/r2/offline-work
   --test-reporter=spec --test-reporter-destination=stdout \
   --test-reporter=lcov --test-reporter-destination=coverage/offline-worker.lcov \
   --test deploy/r2/offline-worker.test.mjs
-node .github/scripts/coverage-summary.mjs lcov coverage/offline-worker.lcov offline-worker.json 80 'offline-worker\.mjs$'
+node .github/scripts/coverage-summary.mjs lcov coverage/offline-worker.lcov offline-worker.json 80 --include-path 'deploy/r2/offline-worker.mjs'
 node --test deploy/r2/offline-shell.test.mjs deploy/r2/plan.test.mjs
 ```
