@@ -87,6 +87,12 @@ jobs:
               --output "$RUNNER_TEMP/guidance-$guidance_page.html"
           done
           node -e 'const fs=require("node:fs"); for(const page of ["search","favorites","schedule","documents","map"]) { const html=fs.readFileSync(process.env.RUNNER_TEMP+"/guidance-"+page+".html","utf8"); if(!html.includes("Content-Security-Policy") || !html.includes("sha256-")) throw new Error("Missing static security policy for "+page); const expected="https://nnct-corp-guidance-2026.taskly.iy0306.com/"+page+"/"; if(!(html.match(/<link\b[^>]*>/g)||[]).some(tag=>tag.includes("rel=\"canonical\"") && tag.includes("href=\""+expected+"\""))) throw new Error("Wrong static page for "+page); }'
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            --user-agent 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15' \
+            https://nnct-corp-guidance-2026.taskly.iy0306.com/offline-worker.js \
+            --dump-header "$RUNNER_TEMP/guidance-offline-worker.headers" \
+            --output "$RUNNER_TEMP/guidance-offline-worker.js"
+          node -e 'const fs=require("node:fs"); const actual=fs.readFileSync(process.env.RUNNER_TEMP+"/guidance-offline-worker.js"); if(!actual.equals(fs.readFileSync("apps/web/out/offline-worker.js"))) throw new Error("Published offline worker differs from this release"); const headers=fs.readFileSync(process.env.RUNNER_TEMP+"/guidance-offline-worker.headers","utf8"); if(!/^content-type:\s*text\/javascript\b/im.test(headers) || !/^cache-control:.*\bno-cache\b/im.test(headers)) throw new Error("Offline worker must be JavaScript served with no-cache")'
       - name: Record production deployment
         env:
           RELEASE_SHA: ${{ needs.release.outputs.sha }}

@@ -19,6 +19,8 @@ import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
 import { APIError, documentURL } from "../lib/api";
 import type { Company, Document } from "../lib/types";
 import { Icon } from "./icons";
+import { useOffline } from "./offline-context";
+import { readOfflineMap, saveOfflineMap } from "../lib/offline-store";
 import "./venue-map.css";
 import IndustryChips from "./industry-chips";
 
@@ -98,6 +100,9 @@ export default function VenueMap({
   onlyAssigned,
   onFiltersChange,
 }: Props) {
+  const offline = useOffline();
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
   const images = useMemo(
     () =>
       documents.filter(
@@ -370,7 +375,7 @@ export default function VenueMap({
   const boardWidth = (fittedWidth * zoom) / 100;
   useLayoutEffect(() => {
     const element = viewport.current,
-      key = `${url}:${viewReset}`;
+      key = `${floor}:${viewReset}`;
     if (
       !url ||
       !element ||
@@ -385,7 +390,15 @@ export default function VenueMap({
     element.scrollLeft = boardWidth / 2;
     element.scrollTop = (boardWidth * imageHeight) / imageWidth / 2;
     centeredView.current = key;
-  }, [url, viewReset, viewportSize, imageWidth, imageHeight, boardWidth]);
+  }, [
+    url,
+    floor,
+    viewReset,
+    viewportSize,
+    imageWidth,
+    imageHeight,
+    boardWidth,
+  ]);
   const available = useMemo(
     () =>
       new Map(
@@ -496,6 +509,14 @@ export default function VenueMap({
     setPreviewCompanyId(null);
     if (!floor) return;
     const controller = new AbortController();
+    const cacheSession = offlineRef.current.session;
+    let disposed = false;
+    let objectURL: string | null = null;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 15_000);
     setURL("");
     setLoading(true);
     setError("");
@@ -504,25 +525,86 @@ export default function VenueMap({
     gesture.current = null;
     suppressClick.current = false;
     setDragging(false);
-    void documentURL(floor, controller.signal)
-      .then((result) => {
-        if (!controller.signal.aborted) setURL(result.url);
-      })
-      .catch((cause) => {
-        if (controller.signal.aborted) return;
-        if (cause instanceof APIError && cause.status === 401) onExpired();
-        else
+    const showBlob = (blob: Blob) => {
+      if (disposed) return;
+      objectURL = URL.createObjectURL(blob);
+      setURL(objectURL);
+    };
+    const restore = async () => {
+      const blob = cacheSession
+        ? await readOfflineMap(cacheSession, floor)
+        : null;
+      if (!blob || disposed) return false;
+      showBlob(blob);
+      return true;
+    };
+    void (async () => {
+      try {
+        if (offlineRef.current.offline) {
+          if (await restore()) return;
+          setError("この地図は保存されていません。接続して取得してください。");
+          return;
+        }
+        const signed = await documentURL(floor, controller.signal);
+        if (disposed) return;
+        if (await restore()) return;
+        if (!cacheSession) {
+          setURL(signed.url);
+          return;
+        }
+        const response = await fetch(signed.url, {
+          credentials: "omit",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("地図を取得できませんでした。");
+        const blob = await response.blob();
+        if (!blob.type.startsWith("image/") || !blob.size)
+          throw new Error("地図を読み込めませんでした。");
+        if (disposed || controller.signal.aborted) return;
+        await saveOfflineMap(cacheSession, floor, blob);
+        if (!disposed) showBlob(blob);
+      } catch (cause) {
+        if (disposed || (controller.signal.aborted && !timedOut)) return;
+        if (
+          cause instanceof APIError &&
+          (cause.status === 401 || cause.status === 403)
+        ) {
+          onExpired();
+          return;
+        }
+        const transport =
+          timedOut ||
+          cause instanceof TypeError ||
+          (typeof cause === "object" &&
+            cause !== null &&
+            "name" in cause &&
+            cause.name === "AbortError");
+        if (transport && (await restore())) {
+          offlineRef.current.onOffline();
+          return;
+        }
+        if (transport) offlineRef.current.onOffline();
+        if (!disposed)
           setError(
-            cause instanceof Error
-              ? cause.message
-              : "マップを読み込めませんでした。",
+            transport
+              ? "この地図は保存されていません。接続して取得してください。"
+              : cause instanceof Error
+                ? cause.message
+                : "マップを読み込めませんでした。",
           );
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [floor, attempt, onExpired]);
+      } finally {
+        clearTimeout(timer);
+        if (!disposed) setLoading(false);
+      }
+    })();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller.abort();
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [floor, attempt, onExpired, offline.session?.generation]);
 
   useEffect(() => {
     if (!embedded) {

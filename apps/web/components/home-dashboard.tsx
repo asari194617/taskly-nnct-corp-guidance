@@ -25,6 +25,7 @@ import { FavoriteButton } from "./company-details";
 import { Icon } from "./icons";
 import { useHomeTasks } from "./use-home-tasks";
 import { useDocumentNavigation } from "./use-document-navigation";
+import { useOffline } from "./offline-context";
 
 export type HomeDashboardProps = {
   data: Guidance;
@@ -68,6 +69,7 @@ export default function HomeDashboard({
   onExpired,
 }: HomeDashboardProps) {
   const tasks = useHomeTasks(onExpired);
+  const { offline } = useOffline();
   const [surveyOpen, setSurveyOpen] = useState(false);
   const {
     opening: openingDocument,
@@ -159,6 +161,8 @@ export default function HomeDashboard({
             checked={task.completed}
             aria-label={task.title}
             disabled={
+              offline ||
+              tasks.readonly ||
               pending ||
               Boolean(tasks.error) ||
               (task.completion_disabled && !task.completed)
@@ -199,19 +203,25 @@ export default function HomeDashboard({
               ブース {company.booth}
             </TextLink>
           )}
-          {task.url && (
-            <TextLink
-              href={task.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              icon={<Icon name="external" size={14} />}
-            >
-              回答する
-            </TextLink>
-          )}
+          {(task.url ||
+            (offline &&
+              (task.kind === "visit_survey" ||
+                task.kind === "overall_survey"))) &&
+            (offline ? (
+              <span aria-disabled="true">回答する（オンラインで利用）</span>
+            ) : (
+              <TextLink
+                href={task.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                icon={<Icon name="external" size={14} />}
+              >
+                回答する
+              </TextLink>
+            ))}
           {task.document_id && (
             <TextButton
-              disabled={openingDocument}
+              disabled={offline || openingDocument}
               onClick={() => void openDocument(task.document_id!, task.page)}
             >
               <Icon name="document" size={16} />
@@ -244,7 +254,7 @@ export default function HomeDashboard({
                   {completed}/{all.length}
                 </span>
               )}
-              {tasklyURL && (
+              {tasklyURL && !offline && (
                 <TextLink
                   href={tasklyURL}
                   target="_blank"
@@ -261,7 +271,10 @@ export default function HomeDashboard({
               <InlineNotification.Frame visible variant="error" role="alert">
                 <InlineNotification.Text>{tasks.error}</InlineNotification.Text>
               </InlineNotification.Frame>
-              <TextButton onClick={() => void tasks.refresh()}>
+              <TextButton
+                disabled={offline}
+                onClick={() => void tasks.refresh()}
+              >
                 再読み込み
               </TextButton>
             </div>
@@ -281,7 +294,11 @@ export default function HomeDashboard({
                 {(!tasks.data.roster_configured ||
                   preferences.roster_number === null) && (
                   <div className="home-roster-action">
-                    <Button variant="outlined" onClick={onConfigure}>
+                    <Button
+                      variant="outlined"
+                      disabled={offline}
+                      onClick={onConfigure}
+                    >
                       名簿番号を設定
                     </Button>
                   </div>
@@ -326,18 +343,26 @@ export default function HomeDashboard({
                           </span>
                         </TextButton>
                       </h3>
-                      {currentSurvey?.url && (
-                        <TextLink
-                          href={currentSurvey.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          icon={<Icon name="external" size={14} />}
-                        >
-                          {currentTerm
-                            ? `ターム ${currentTerm} の回答`
-                            : "回答する"}
-                        </TextLink>
-                      )}
+                      {currentSurvey &&
+                        (currentSurvey.url || offline) &&
+                        (offline ? (
+                          <span aria-disabled="true">
+                            {currentTerm
+                              ? `ターム ${currentTerm} の回答（オンラインで利用）`
+                              : "回答する（オンラインで利用）"}
+                          </span>
+                        ) : (
+                          <TextLink
+                            href={currentSurvey.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            icon={<Icon name="external" size={14} />}
+                          >
+                            {currentTerm
+                              ? `ターム ${currentTerm} の回答`
+                              : "回答する"}
+                          </TextLink>
+                        ))}
                     </div>
                     {surveyOpen && (
                       <ul id="home-survey-tasks" className="home-task-list">

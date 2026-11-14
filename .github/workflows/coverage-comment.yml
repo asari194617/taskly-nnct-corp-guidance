@@ -42,7 +42,7 @@ jobs:
             const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
             if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
                 pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
-            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
+            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['Service worker unit execution (lines)', 'offline-worker'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
               let value = 'Unavailable (test/setup failed)';
               try {
                 const {percent} = read(id);
@@ -54,7 +54,7 @@ jobs:
             const marker = '<!-- nnct-guidance-coverage -->';
             const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
               '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
-              'Go application, importer, Web unit tests, PDF extraction and standalone real MySQL integration require 80%. Browser execution is reported separately.',
+              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction and standalone real MySQL integration require 80%. Page browser execution is reported separately; service worker coverage measures its actual runtime in Node, not page E2E execution.',
               `[CI run](${run.html_url})`].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments,
               {owner,repo,issue_number:metadata.number,per_page:100});

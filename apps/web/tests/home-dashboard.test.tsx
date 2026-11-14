@@ -15,6 +15,14 @@ import { getEventTimeState } from "../lib/event-time";
 import { defaultRoute } from "../lib/route-state";
 import type { HomeTask, HomeTasksResponse } from "../lib/types";
 import { fixture } from "./fixtures";
+import { OfflineProvider } from "../components/offline-context";
+import { readOfflineHome } from "../lib/offline-store";
+
+vi.mock("../lib/offline-store", () => ({
+  readOfflineHome: vi.fn(),
+  saveOfflineHome: vi.fn().mockResolvedValue(undefined),
+  deleteOfflineHome: vi.fn().mockResolvedValue(undefined),
+}));
 
 const documentNavigation = vi.hoisted(() => ({ assign: vi.fn() }));
 vi.mock("../lib/document-navigation", async (importOriginal) => {
@@ -114,6 +122,7 @@ let fetchMock: ReturnType<typeof vi.fn<FetchStub>>;
 const signedURL =
   "https://synthetic-r2.example.invalid/private/guide.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=synthetic";
 beforeEach(() => {
+  vi.mocked(readOfflineHome).mockReset().mockResolvedValue(null);
   documentNavigation.assign.mockReset();
   snapshot = taskSnapshot();
   failures = new Map();
@@ -567,6 +576,54 @@ describe("Taskly-backed guidance home", () => {
     });
     fireEvent.click(link);
     expect(props.onSelectCompany).not.toHaveBeenCalled();
+    expect(writes()).toHaveLength(0);
+  });
+  it("shows saved home information with readonly task, roster, document and form actions offline", async () => {
+    const props = options();
+    const saved = {
+      ...snapshot,
+      roster_configured: false,
+      tasks: snapshot.tasks.map(({ url: _url, ...task }) => ({
+        ...task,
+        taskly_url: "",
+      })),
+    };
+    vi.mocked(readOfflineHome).mockResolvedValue({
+      data: saved,
+      savedAt: Date.now(),
+    });
+    render(
+      <OfflineProvider
+        value={{
+          offline: true,
+          session: {
+            scope: "student-7",
+            generation: "verified",
+            expiresAt: Date.now() + 86_400_000,
+          },
+          savedAt: Date.now(),
+          onOffline: vi.fn(),
+        }}
+      >
+        <HomeDashboard {...props} />
+      </OfflineProvider>,
+    );
+    await screen.findByLabelText("14件中0件完了");
+    expect(fetchMock).not.toHaveBeenCalled();
+    for (const checkbox of screen.getAllByRole("checkbox"))
+      expect(checkbox).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "名簿番号を設定" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "資料を見る" })).toBeDisabled();
+    expect(
+      screen.queryByRole("link", { name: /回答|Taskly/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText(/オンラインで利用/).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getAllByRole("link", { name: "ブース 1" })[0]);
+    expect(props.onRouteChange).toHaveBeenCalledWith(
+      expect.objectContaining({ view: "map", focus: "AM-1" }),
+    );
     expect(writes()).toHaveLength(0);
   });
 });

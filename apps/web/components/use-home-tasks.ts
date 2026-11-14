@@ -7,12 +7,20 @@ import type {
   HomeTaskUpdateResponse,
   HomeTasksResponse,
 } from "../lib/types";
+import {
+  readOfflineHome,
+  saveOfflineHome,
+  deleteOfflineHome,
+  type OfflineSession,
+} from "../lib/offline-store";
+import { useOffline } from "./offline-context";
 
 type Snapshot = {
   data: HomeTasksResponse | null;
   loading: boolean;
   error: string;
   pending: ReadonlySet<string>;
+  readonly: boolean;
 };
 
 function completionPartner(task: HomeTask, tasks: HomeTask[]) {
@@ -40,13 +48,19 @@ function manualCompletion(task: HomeTask, completed: boolean): HomeTask {
 
 /** A mounted dashboard owns one account/profile scope; Taskly is the source of truth. */
 export function useHomeTasks(onExpired: () => void) {
+  const offline = useOffline();
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
   const [state, setState] = useState<Snapshot>({
     data: null,
     loading: true,
     error: "",
     pending: new Set(),
+    readonly: offline.offline,
   });
   const snapshot = useRef(state);
+  const confirmed = useRef<HomeTasksResponse | null>(null);
+  const activeScope = useRef(offline.session?.scope || "");
   const mounted = useRef(true);
   const generation = useRef(0);
   const mutations = useRef(new Map<string, number>());
@@ -54,13 +68,96 @@ export function useHomeTasks(onExpired: () => void) {
   const pending = useRef(new Set<string>());
   const read = useRef<AbortController | null>(null);
   const writes = useRef(new Set<AbortController>());
+  const homeForbidden = useRef(false);
+  const homeDeletion = useRef<Promise<void> | null>(null);
   const update = useCallback((change: (previous: Snapshot) => Snapshot) => {
     const next = change(snapshot.current);
     snapshot.current = next;
     setState(next);
   }, []);
 
+  const currentRequest = (
+    requestGeneration: number,
+    session: OfflineSession | null,
+  ) =>
+    mounted.current &&
+    requestGeneration === generation.current &&
+    session?.generation === offlineRef.current.session?.generation &&
+    session?.scope === offlineRef.current.session?.scope;
+  const persistConfirmed = useCallback((session: OfflineSession | null) => {
+    if (session && confirmed.current)
+      void saveOfflineHome(session, confirmed.current).catch(() => {});
+  }, []);
+  const forbidHome = useCallback(
+    async (session: OfflineSession | null) => {
+      if (
+        !mounted.current ||
+        session?.generation !== offlineRef.current.session?.generation ||
+        session?.scope !== offlineRef.current.session?.scope
+      )
+        return;
+      // Revoke this home generation before awaiting storage: an older accepted
+      // write must never resurrect a snapshot that the server has forbidden.
+      generation.current++;
+      homeForbidden.current = true;
+      read.current?.abort();
+      read.current = null;
+      for (const controller of writes.current) controller.abort();
+      writes.current.clear();
+      pending.current.clear();
+      mutations.current.clear();
+      confirmed.current = null;
+      update(() => ({
+        data: null,
+        loading: false,
+        error: "やることを利用できません。",
+        pending: new Set(),
+        readonly: true,
+      }));
+      const deletion = session
+        ? deleteOfflineHome(session).catch(() => {})
+        : Promise.resolve();
+      homeDeletion.current = deletion;
+      await deletion;
+      if (homeDeletion.current === deletion) homeDeletion.current = null;
+    },
+    [update],
+  );
+  const restore = useCallback(
+    async (requestGeneration: number) => {
+      const session = offlineRef.current.session;
+      if (homeDeletion.current) await homeDeletion.current;
+      if (!currentRequest(requestGeneration, session)) return;
+      if (homeForbidden.current) {
+        update(() => ({
+          data: null,
+          loading: false,
+          error: "やることを利用できません。",
+          pending: new Set(),
+          readonly: true,
+        }));
+        return;
+      }
+      const cached = session ? await readOfflineHome(session) : null;
+      if (!currentRequest(requestGeneration, session)) return;
+      const sameScope = (session?.scope || "") === activeScope.current;
+      const memoryValid =
+        sameScope && (!session || session.expiresAt > Date.now());
+      const data = cached?.data || (memoryValid ? confirmed.current : null);
+      if (cached) confirmed.current = cached.data;
+      update(() => ({
+        data,
+        loading: false,
+        error: data ? "" : "オフラインで表示できるやることは未取得です。",
+        pending: new Set(),
+        readonly: true,
+      }));
+    },
+    [update],
+  );
+
   const refresh = useCallback(async () => {
+    if (homeDeletion.current) await homeDeletion.current;
     if (
       !mounted.current ||
       document.visibilityState === "hidden" ||
@@ -68,6 +165,11 @@ export function useHomeTasks(onExpired: () => void) {
     )
       return;
     const requestGeneration = generation.current;
+    const session = offlineRef.current.session;
+    if (offlineRef.current.offline) {
+      await restore(requestGeneration);
+      return;
+    }
     const baseline = new Map(mutations.current);
     const pendingAtStart = new Set(pending.current);
     const failuresAtStart = writeFailures.current;
@@ -83,7 +185,23 @@ export function useHomeTasks(onExpired: () => void) {
       const data = await api<HomeTasksResponse>("/api/home", {
         signal: controller.signal,
       });
-      if (!mounted.current || requestGeneration !== generation.current) return;
+      if (!currentRequest(requestGeneration, session)) return;
+      homeForbidden.current = false;
+      confirmed.current = {
+        ...data,
+        tasks: data.tasks.map((task) => {
+          const changed =
+            mutations.current.get(task.id) !== baseline.get(task.id);
+          return changed ||
+            pendingAtStart.has(task.id) ||
+            pending.current.has(task.id)
+            ? confirmed.current?.tasks.find(
+                (current) => current.id === task.id,
+              ) || task
+            : task;
+        }),
+      };
+      persistConfirmed(session);
       update((previous) => ({
         data: {
           ...data,
@@ -102,16 +220,24 @@ export function useHomeTasks(onExpired: () => void) {
         loading: false,
         error: writeFailures.current === failuresAtStart ? "" : previous.error,
         pending: previous.pending,
+        readonly: false,
       }));
     } catch (cause) {
       if (
-        !mounted.current ||
-        requestGeneration !== generation.current ||
+        !currentRequest(requestGeneration, session) ||
         (controller.signal.aborted && !timedOut)
       )
         return;
       if (cause instanceof APIError && cause.status === 401) onExpired();
-      else
+      else if (cause instanceof APIError && cause.status === 403) {
+        await forbidHome(session);
+      } else if (
+        offlineRef.current.session &&
+        (cause instanceof TypeError || timedOut)
+      ) {
+        offlineRef.current.onOffline();
+        await restore(requestGeneration);
+      } else
         update((previous) => ({
           ...previous,
           loading: false,
@@ -121,10 +247,25 @@ export function useHomeTasks(onExpired: () => void) {
       clearTimeout(timer);
       if (read.current === controller) read.current = null;
     }
-  }, [onExpired, update]);
+  }, [onExpired, forbidHome, persistConfirmed, restore, update]);
 
   useEffect(() => {
     mounted.current = true;
+    const scope = offline.session?.scope || "";
+    const changedScope = scope !== activeScope.current;
+    activeScope.current = scope;
+    if (changedScope) {
+      confirmed.current = null;
+      homeForbidden.current = false;
+      homeDeletion.current = null;
+    }
+    pending.current.clear();
+    update((previous) => ({
+      ...previous,
+      data: changedScope ? null : confirmed.current || previous.data,
+      pending: new Set(),
+      readonly: previous.readonly || offline.offline,
+    }));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const resume = () => {
       if (timer !== undefined) clearTimeout(timer);
@@ -135,6 +276,7 @@ export function useHomeTasks(onExpired: () => void) {
     resume();
     window.addEventListener("focus", resume);
     window.addEventListener("pageshow", resume);
+    window.addEventListener("online", resume);
     document.addEventListener("visibilitychange", resume);
     return () => {
       mounted.current = false;
@@ -146,9 +288,16 @@ export function useHomeTasks(onExpired: () => void) {
       writes.current.clear();
       window.removeEventListener("focus", resume);
       window.removeEventListener("pageshow", resume);
+      window.removeEventListener("online", resume);
       document.removeEventListener("visibilitychange", resume);
     };
-  }, [refresh]);
+  }, [
+    refresh,
+    offline.offline,
+    offline.session?.generation,
+    offline.session?.scope,
+    update,
+  ]);
 
   const toggle = useCallback(
     async (id: string) => {
@@ -157,6 +306,9 @@ export function useHomeTasks(onExpired: () => void) {
       );
       if (
         !mounted.current ||
+        offlineRef.current.offline ||
+        navigator.onLine === false ||
+        snapshot.current.readonly ||
         !original ||
         pending.current.has(id) ||
         (original.completion_disabled && !original.completed) ||
@@ -179,6 +331,7 @@ export function useHomeTasks(onExpired: () => void) {
         !partner.completed,
       );
       const requestGeneration = generation.current;
+      const session = offlineRef.current.session;
       for (const key of originals.keys()) {
         mutations.current.set(key, (mutations.current.get(key) || 0) + 1);
         pending.current.add(key);
@@ -217,7 +370,11 @@ export function useHomeTasks(onExpired: () => void) {
       }));
       const controller = new AbortController();
       writes.current.add(controller);
-      const timer = setTimeout(() => controller.abort(), 15_000);
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 15_000);
       try {
         const response = await api<HomeTaskUpdateResponse>(
           `/api/home/tasks/${encodeURIComponent(id)}`,
@@ -228,8 +385,7 @@ export function useHomeTasks(onExpired: () => void) {
             signal: controller.signal,
           },
         );
-        if (!mounted.current || requestGeneration !== generation.current)
-          return;
+        if (!currentRequest(requestGeneration, session)) return;
         const { related_tasks: related, ...task } = response;
         if (
           task.id !== id ||
@@ -248,24 +404,36 @@ export function useHomeTasks(onExpired: () => void) {
           )
             throw new Error("Missing or unexpected related task response");
         } else if (related?.length) throw new Error("Unexpected related tasks");
-        const confirmed = new Map<string, HomeTask>([[id, task]]);
-        if (partner) confirmed.set(partner.id, related![0]);
+        const acceptedTasks = new Map<string, HomeTask>([[id, task]]);
+        if (partner) acceptedTasks.set(partner.id, related![0]);
+        // Persist one authoritative snapshot for the entire accepted pair.
+        // The UI may also contain other optimistic writes, which must not enter storage.
+        if (confirmed.current) {
+          confirmed.current = {
+            ...confirmed.current,
+            tasks: confirmed.current.tasks.map(
+              (current) => acceptedTasks.get(current.id) || current,
+            ),
+          };
+          persistConfirmed(session);
+        }
         update((previous) => ({
           ...previous,
           data: previous.data
             ? {
                 ...previous.data,
                 tasks: previous.data.tasks.map(
-                  (current) => confirmed.get(current.id) || current,
+                  (current) => acceptedTasks.get(current.id) || current,
                 ),
               }
             : null,
         }));
       } catch (cause) {
-        if (!mounted.current || requestGeneration !== generation.current)
-          return;
+        if (!currentRequest(requestGeneration, session)) return;
         if (cause instanceof APIError && cause.status === 401) onExpired();
-        else {
+        else if (cause instanceof APIError && cause.status === 403) {
+          await forbidHome(session);
+        } else {
           writeFailures.current++;
           update((previous) => ({
             ...previous,
@@ -282,19 +450,27 @@ export function useHomeTasks(onExpired: () => void) {
                 ? "Tasklyでタスクの状態を確認してください。"
                 : "完了状態を更新できませんでした。もう一度お試しください。",
           }));
+          if (
+            offlineRef.current.session &&
+            (cause instanceof TypeError || timedOut)
+          ) {
+            offlineRef.current.onOffline();
+            await restore(requestGeneration);
+          }
         }
       } finally {
         clearTimeout(timer);
         writes.current.delete(controller);
-        for (const key of originals.keys()) pending.current.delete(key);
-        if (mounted.current && requestGeneration === generation.current)
+        if (currentRequest(requestGeneration, session)) {
+          for (const key of originals.keys()) pending.current.delete(key);
           update((previous) => ({
             ...previous,
             pending: new Set(pending.current),
           }));
+        }
       }
     },
-    [onExpired, update],
+    [onExpired, forbidHome, persistConfirmed, restore, update],
   );
 
   return { ...state, refresh, toggle };

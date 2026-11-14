@@ -12,6 +12,7 @@ import { Button } from "@openameba/spindle-ui/Button";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
 import type { Company } from "../lib/types";
 import { Icon } from "./icons";
+import { useOffline } from "./offline-context";
 
 const FavoritePendingContext = createContext<ReadonlySet<string>>(new Set());
 export const FavoritePendingProvider = FavoritePendingContext.Provider;
@@ -30,6 +31,7 @@ export function FavoriteButton({
   );
   const activeRequests = useRef(new Set<string>());
   const sharedPending = useContext(FavoritePendingContext);
+  const { offline } = useOffline();
   const pending =
     sharedPending.has(company.id) || pendingCompanies.has(company.id);
   return (
@@ -40,7 +42,7 @@ export function FavoriteButton({
       aria-pressed={saved}
       aria-busy={pending || undefined}
       aria-label={`${company.name}を${saved ? "気になるから解除" : "気になるに追加"}`}
-      disabled={pending}
+      disabled={pending || offline}
       onClick={() => {
         const id = company.id;
         if (activeRequests.current.has(id)) return;

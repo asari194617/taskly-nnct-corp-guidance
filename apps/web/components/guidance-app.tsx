@@ -35,11 +35,61 @@ import { useDocumentNavigation } from "./use-document-navigation";
 import { useEventTime } from "./use-event-time";
 import { formatScheduleTime, type EventTimeState } from "../lib/event-time";
 import {
+  clearOfflinePack,
+  restoreOfflinePack,
+  saveOfflinePack,
+  readOfflineLogoutIntent,
+  setOfflineLogoutIntent,
+  updateOfflineBookmarks,
+  readOfflineMap,
+  saveOfflineMap,
+  type OfflinePack,
+  type OfflineSession,
+  OFFLINE_TTL,
+} from "../lib/offline-store";
+import { registerOfflineShell } from "../lib/offline-shell";
+import { OfflineProvider, useOffline } from "./offline-context";
+import { documentURL } from "../lib/api";
+import {
   CompanyDetailContent,
   FavoriteButton,
   FavoritePendingProvider,
   MapCompanyPanel,
 } from "./company-details";
+
+const logoutIntentKey = "guidance-offline-logout";
+const resetOfflineKey = "guidance-offline-reset";
+const requestBudget = 15_000;
+function localLogoutIntent(value?: boolean) {
+  try {
+    if (value === true) localStorage.setItem(logoutIntentKey, "1");
+    if (value === false) localStorage.removeItem(logoutIntentKey);
+    return localStorage.getItem(logoutIntentKey) === "1";
+  } catch {
+    return false;
+  }
+}
+function announceOfflineReset() {
+  try {
+    localStorage.setItem(resetOfflineKey, `${Date.now()}:${Math.random()}`);
+  } catch {}
+}
+function transportFailure(cause: unknown) {
+  return (
+    cause instanceof TypeError ||
+    (typeof cause === "object" &&
+      cause !== null &&
+      "name" in cause &&
+      cause.name === "AbortError")
+  );
+}
+function sameProfile(first: Preferences, second: Preferences) {
+  return (
+    first.department === second.department &&
+    first.grade === second.grade &&
+    first.roster_number === second.roster_number
+  );
+}
 
 const returnKey = "guidance-return-route";
 const navigation: { id: View; title: string; short: string; icon: IconName }[] =
@@ -136,6 +186,22 @@ export default function GuidanceApp({
     "loading" | "signed-out" | "ready" | "error"
   >("loading");
   const [error, setError] = useState("");
+  const [offline, setOffline] = useState(false);
+  const [offlineSession, setOfflineSession] = useState<OfflineSession | null>(
+    null,
+  );
+  const [offlineSavedAt, setOfflineSavedAt] = useState<number | null>(null);
+  const [offlinePreparation, setOfflinePreparation] = useState<
+    "preparing" | "ready" | "partial" | "unavailable"
+  >("preparing");
+  const [shellReady, setShellReady] = useState(false);
+  const activePack = useRef<OfflinePack | null>(null);
+  const verifiedIdentity = useRef<User | null>(null);
+  const confirmedSaved = useRef(new Set<string>());
+  const loadRequest = useRef<AbortController | null>(null);
+  const logoutInFlight = useRef<Promise<void> | null>(null);
+  const preparationRequest = useRef<AbortController | null>(null);
+
   const [route, setRoute] = useState<RouteState>({
     ...defaultRoute,
     view: initialView,
@@ -263,56 +329,354 @@ export default function GuidanceApp({
         : navigation.find((item) => item.id === route.view)?.title || "ホーム";
     document.title = `${title} | 企業ガイダンス | Taskly`;
   }, [route.view]);
+  const clearDisplay = useCallback(
+    (abortLoad = true) => {
+      verifiedIdentity.current = null;
+      activePack.current = null;
+      preparationRequest.current?.abort();
+      if (abortLoad) loadRequest.current?.abort();
+      setData(null);
+      setUser(null);
+      setPreferences(null);
+      setOfflineSession(null);
+      setOfflineSavedAt(null);
+      confirmedSaved.current = new Set();
+      resetBookmarks();
+      setSettingNumber(false);
+    },
+    [resetBookmarks],
+  );
   const expireSession = useCallback(() => {
     authGeneration.current++;
-    setData(null);
-    setUser(null);
-    setPreferences(null);
-    resetBookmarks();
-    setSettingNumber(false);
+    clearDisplay();
+    void clearOfflinePack().then(announceOfflineReset);
     setError("ログインの有効期限が切れました。もう一度ログインしてください。");
+    setOffline(!navigator.onLine);
     setStatus("signed-out");
+  }, [clearDisplay]);
+  const markOffline = useCallback(() => {
+    setOffline(true);
+    setSettingNumber(false);
+    resetBookmarks([...confirmedSaved.current]);
   }, [resetBookmarks]);
+  const activatePack = useCallback(
+    (pack: OfflinePack) => {
+      activePack.current = pack;
+      verifiedIdentity.current = pack.user;
+      confirmedSaved.current = new Set(pack.bookmarks);
+      resetBookmarks(pack.bookmarks);
+      setUser(pack.user);
+      setData(pack.guidance);
+      setPreferences(pack.preferences);
+      setOfflineSession(pack.session);
+      setOfflineSavedAt(pack.savedAt);
+      setSettingNumber(false);
+      setOffline(true);
+      setError("");
+      setStatus("ready");
+    },
+    [resetBookmarks],
+  );
+  const finishPendingLogout = useCallback(() => {
+    if (logoutInFlight.current) return logoutInFlight.current;
+    const request = (async () => {
+      setBusy(true);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), requestBudget);
+      try {
+        const response = await fetch(`${API_URL}/auth/logout`, {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        await setOfflineLogoutIntent(false);
+        localLogoutIntent(false);
+        setOffline(false);
+      } catch {
+        setError(
+          "端末の保存データは削除しました。ログアウトの完了には接続が必要です。",
+        );
+      } finally {
+        clearTimeout(timer);
+        logoutInFlight.current = null;
+        setBusy(false);
+      }
+    })();
+    logoutInFlight.current = request;
+    return request;
+  }, []);
+  const prepareMaps = useCallback(
+    async (pack: OfflinePack, generation: number) => {
+      preparationRequest.current?.abort();
+      const controller = new AbortController();
+      preparationRequest.current = controller;
+      setOfflinePreparation("preparing");
+      const maps = pack.guidance.documents.filter(
+        (item) => item.kind === "map" && item.mime_type.startsWith("image/"),
+      );
+      const results = await Promise.allSettled(
+        maps.map(async (item) => {
+          if (await readOfflineMap(pack.session, item.id)) return;
+          const timer = setTimeout(() => controller.abort(), requestBudget);
+          try {
+            const signed = await documentURL(item.id, controller.signal);
+            const response = await fetch(signed.url, {
+              credentials: "omit",
+              cache: "no-store",
+              signal: controller.signal,
+            });
+            if (!response.ok) throw new Error("Map download failed");
+            const blob = await response.blob();
+            if (!blob.type.startsWith("image/") || !blob.size)
+              throw new Error("Invalid map");
+            if (
+              generation !== authGeneration.current ||
+              controller.signal.aborted
+            )
+              return;
+            await saveOfflineMap(pack.session, item.id, blob);
+            if (!(await readOfflineMap(pack.session, item.id)))
+              throw new Error("Map was not saved");
+          } catch (cause) {
+            if (
+              generation === authGeneration.current &&
+              cause instanceof APIError &&
+              (cause.status === 401 || cause.status === 403)
+            )
+              expireSession();
+            throw cause;
+          } finally {
+            clearTimeout(timer);
+          }
+        }),
+      );
+      if (generation === authGeneration.current && !controller.signal.aborted)
+        setOfflinePreparation(
+          results.every((item) => item.status === "fulfilled")
+            ? "ready"
+            : "partial",
+        );
+      else if (generation === authGeneration.current)
+        setOfflinePreparation("partial");
+    },
+    [expireSession],
+  );
   const load = useCallback(async () => {
     const generation = ++authGeneration.current;
-    resetBookmarks();
-    setStatus("loading");
+    loadRequest.current?.abort();
+    preparationRequest.current?.abort();
+    const controller = new AbortController();
+    loadRequest.current = controller;
+    const timer = setTimeout(() => controller.abort(), requestBudget);
+    if (!verifiedIdentity.current) setStatus("loading");
+    else markOffline();
     setError("");
+    let attemptedIdentity: User | null = null;
+    let fallbackAllowed = true;
     try {
-      const identity = await api<{ user: User }>("/api/me");
-      const [guidance, bookmarks, profile] = await Promise.all([
-        api<Guidance>("/api/guidance"),
-        api<{ company_ids: string[] }>("/api/bookmarks"),
-        api<Preferences>("/api/preferences"),
+      if (localLogoutIntent() || (await readOfflineLogoutIntent())) {
+        if (generation !== authGeneration.current) return;
+        clearDisplay();
+        setOffline(!navigator.onLine);
+        setStatus("signed-out");
+        if (navigator.onLine) void finishPendingLogout();
+        return;
+      }
+      const identity = await api<{ user: User }>("/api/me", {
+        signal: controller.signal,
+      });
+      if (generation !== authGeneration.current) return;
+      attemptedIdentity = identity.user;
+      let cached = await restoreOfflinePack();
+      if (generation !== authGeneration.current) return;
+      if (
+        (cached && cached.user.sub !== identity.user.sub) ||
+        (verifiedIdentity.current &&
+          verifiedIdentity.current.sub !== identity.user.sub)
+      ) {
+        clearDisplay(false);
+        setStatus("loading");
+        await clearOfflinePack();
+        if (generation !== authGeneration.current) return;
+        announceOfflineReset();
+        cached = null;
+      }
+      const results = await Promise.allSettled([
+        api<Guidance>("/api/guidance", { signal: controller.signal }),
+        api<{ company_ids: string[] }>("/api/bookmarks", {
+          signal: controller.signal,
+        }),
+        api<Preferences>("/api/preferences", { signal: controller.signal }),
       ]);
       if (generation !== authGeneration.current) return;
+      const denied = results.find(
+        (item) =>
+          item.status === "rejected" &&
+          item.reason instanceof APIError &&
+          (item.reason.status === 401 || item.reason.status === 403),
+      );
+      if (denied?.status === "rejected") throw denied.reason;
+      const [guidanceResult, bookmarkResult, profileResult] = results;
+      if (
+        cached &&
+        ((profileResult.status === "fulfilled" &&
+          !sameProfile(profileResult.value, cached.preferences)) ||
+          (guidanceResult.status === "fulfilled" &&
+            guidanceResult.value.event.date !== cached.guidance.event.date))
+      ) {
+        clearDisplay(false);
+        setStatus("loading");
+        await clearOfflinePack();
+        if (generation !== authGeneration.current) return;
+        announceOfflineReset();
+        cached = null;
+        fallbackAllowed = false;
+      }
+      if (
+        guidanceResult.status !== "fulfilled" ||
+        bookmarkResult.status !== "fulfilled" ||
+        profileResult.status !== "fulfilled"
+      ) {
+        const failed = results.find((item) => item.status === "rejected");
+        if (
+          failed?.status === "rejected" &&
+          transportFailure(failed.reason) &&
+          cached
+        ) {
+          if (generation === authGeneration.current) activatePack(cached);
+          return;
+        }
+        throw failed?.status === "rejected" ? failed.reason : new Error();
+      }
+      const guidance = guidanceResult.value,
+        bookmarks = bookmarkResult.value,
+        profile = profileResult.value;
+      const pack = await saveOfflinePack(
+        {
+          user: identity.user,
+          guidance,
+          preferences: profile,
+          bookmarks: bookmarks.company_ids,
+        },
+        () => generation === authGeneration.current,
+      );
+      if (generation !== authGeneration.current) return;
+      activePack.current = pack;
+      verifiedIdentity.current = identity.user;
+      confirmedSaved.current = new Set(bookmarks.company_ids);
       resetBookmarks(bookmarks.company_ids);
       setUser(identity.user);
       setData(guidance);
       setPreferences(profile);
+      setOfflineSession(pack?.session ?? null);
+      setOfflineSavedAt(pack?.savedAt ?? Date.now());
       setSettingNumber(profile.roster_number === null);
+      setOffline(false);
       setStatus("ready");
+      if (pack) void prepareMaps(pack, generation);
+      else setOfflinePreparation("unavailable");
     } catch (cause) {
       if (generation !== authGeneration.current) return;
-      setData(null);
-      setUser(null);
-      setPreferences(null);
-      if (cause instanceof APIError && cause.status === 401)
-        setStatus("signed-out");
-      else {
-        setError(
-          cause instanceof APIError
-            ? cause.message
-            : "接続できませんでした。通信環境を確認して、もう一度お試しください。",
-        );
-        setStatus("error");
+      if (
+        cause instanceof APIError &&
+        (cause.status === 401 || cause.status === 403)
+      ) {
+        expireSession();
+        return;
       }
+      if (transportFailure(cause) && fallbackAllowed) {
+        const cached = await restoreOfflinePack(attemptedIdentity?.sub);
+        if (generation !== authGeneration.current) return;
+        if (cached) {
+          activatePack(cached);
+          return;
+        }
+      }
+      clearDisplay();
+      setError(
+        cause instanceof APIError
+          ? cause.message
+          : "保存済みの情報がありません。接続してからもう一度お試しください。",
+      );
+      setStatus("error");
+    } finally {
+      clearTimeout(timer);
+      if (loadRequest.current === controller) loadRequest.current = null;
     }
-  }, [resetBookmarks]);
+  }, [
+    activatePack,
+    clearDisplay,
+    expireSession,
+    finishPendingLogout,
+    markOffline,
+    prepareMaps,
+    resetBookmarks,
+  ]);
   useEffect(() => {
     void load();
+    return () => {
+      authGeneration.current++;
+      loadRequest.current?.abort();
+      preparationRequest.current?.abort();
+    };
   }, [load]);
+  useEffect(() => {
+    void registerOfflineShell().then(setShellReady);
+  }, []);
+  useEffect(() => {
+    const disconnected = () => {
+      loadRequest.current?.abort();
+      markOffline();
+    };
+    const reconnected = () => {
+      void load();
+    };
+    const reset = (event: StorageEvent) => {
+      if (event.key !== resetOfflineKey) return;
+      authGeneration.current++;
+      clearDisplay();
+      setOffline(!navigator.onLine);
+      setError(
+        "アカウントまたは名簿設定が変更されました。接続してログインし直してください。",
+      );
+      setStatus("signed-out");
+    };
+    window.addEventListener("offline", disconnected);
+    window.addEventListener("online", reconnected);
+    window.addEventListener("storage", reset);
+    return () => {
+      window.removeEventListener("offline", disconnected);
+      window.removeEventListener("online", reconnected);
+      window.removeEventListener("storage", reset);
+    };
+  }, [clearDisplay, load, markOffline]);
+  useEffect(() => {
+    if (!offlineSavedAt) return;
+    const remaining =
+      (offlineSession?.expiresAt ?? offlineSavedAt + OFFLINE_TTL) - Date.now();
+    const timer = setTimeout(
+      () => {
+        if (!offline) {
+          void load();
+          return;
+        }
+        authGeneration.current++;
+        clearDisplay();
+        void clearOfflinePack().then(announceOfflineReset);
+        setError(
+          "保存済みの情報の有効期限が切れました。接続して更新してください。",
+        );
+        setStatus("error");
+      },
+      Math.max(0, remaining),
+    );
+    return () => clearTimeout(timer);
+  }, [clearDisplay, load, offline, offlineSession, offlineSavedAt]);
   async function toggleSave(company: Company) {
+    if (offline) return;
+    const session = activePack.current?.session;
     const generation = authGeneration.current;
     const requestKey = `${generation}:${company.id}`;
     if (bookmarkRequests.current.has(requestKey)) return;
@@ -333,6 +697,19 @@ export default function GuidanceApp({
     try {
       await api<void>(`/api/bookmarks/${encodeURIComponent(company.id)}`, {
         method: wasSaved ? "DELETE" : "PUT",
+      });
+      if (generation !== authGeneration.current) return;
+      if (wasSaved) confirmedSaved.current.delete(company.id);
+      else confirmedSaved.current.add(company.id);
+      // Only the server-confirmed set reaches persistent storage; other
+      // optimistic mutations are intentionally absent from this snapshot.
+      if (session)
+        void updateOfflineBookmarks(session, [...confirmedSaved.current]);
+      updateBookmarks((previous) => {
+        const next = new Set(previous.saved);
+        if (wasSaved) next.delete(company.id);
+        else next.add(company.id);
+        return { ...previous, saved: next };
       });
     } catch (cause) {
       if (generation !== authGeneration.current) return;
@@ -373,28 +750,15 @@ export default function GuidanceApp({
   async function logout() {
     setBusy(true);
     setError("");
-    try {
-      const response = await fetch(`${API_URL}/auth/logout`, {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!response.ok)
-        throw new Error("ログアウトできませんでした。もう一度お試しください。");
-      authGeneration.current++;
-      setData(null);
-      setUser(null);
-      setPreferences(null);
-      resetBookmarks();
-      setSettingNumber(false);
-      setStatus("signed-out");
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "ログアウトできませんでした。",
-      );
-    } finally {
-      setBusy(false);
-    }
+    localLogoutIntent(true);
+    authGeneration.current++;
+    clearDisplay();
+    setOffline(!navigator.onLine);
+    setStatus("signed-out");
+    await Promise.all([setOfflineLogoutIntent(true), clearOfflinePack()]);
+    announceOfflineReset();
+    await finishPendingLogout();
+    setBusy(false);
   }
   function navigate(view: View) {
     changeRoute({ view, company: "" });
@@ -497,250 +861,313 @@ export default function GuidanceApp({
     );
   }
   return (
-    <FavoritePendingProvider value={bookmarkState.pending}>
-      <a className="skip-link" href="#main">
-        本文へ移動
-      </a>
-      <header className="topbar">
-        <div className="header-brand">
-          <Brand
-            homeHref={routeHref({ ...route, view: "home", company: "" })}
-          />
-        </div>
-        {ready && menu(false)}
-        <div className="header-right">
-          {ready && (
-            <HeaderActions
-              name={user.name}
-              rosterNumber={preferences.roster_number}
-              busy={busy}
-              currentView={route.view}
-              onConfigure={() => setSettingNumber(true)}
-              onInformation={() => {
-                changeRoute({ view: "info", company: "" });
-                window.scrollTo({ top: 0, behavior: "instant" });
-              }}
-              onLogout={() => void logout()}
+    <OfflineProvider
+      value={{
+        offline,
+        session: offlineSession,
+        savedAt: offlineSavedAt,
+        onOffline: markOffline,
+      }}
+    >
+      <FavoritePendingProvider value={bookmarkState.pending}>
+        <a className="skip-link" href="#main">
+          本文へ移動
+        </a>
+        <header className="topbar">
+          <div className="header-brand">
+            <Brand
+              homeHref={routeHref({ ...route, view: "home", company: "" })}
             />
-          )}
-        </div>
-      </header>
-      {!ready ? (
-        <main id="main" className="welcome-main">
-          <section className="welcome-content" aria-labelledby="welcome-title">
-            <h1 id="welcome-title">企業ガイダンス</h1>
-            <div className="welcome-action">
-              {status === "loading" ? (
-                <div className="loading-line" role="status">
-                  <span className="spinner" />
-                  ログイン状態を確認しています
-                </div>
-              ) : (
-                <>
-                  {error && <Message error>{error}</Message>}
-                  {status === "signed-out" ? (
-                    <Button
-                      size="large"
-                      onClick={() => {
-                        try {
-                          window.sessionStorage.setItem(
-                            returnKey,
-                            routeHref(routeRef.current),
-                          );
-                        } catch {}
-                        window.location.href = `${API_URL}/auth/start`;
-                      }}
-                    >
-                      Tasklyでログイン
-                    </Button>
-                  ) : (
-                    <Button size="large" onClick={() => void load()}>
-                      もう一度接続する
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
-          </section>
-        </main>
-      ) : (
-        <>
-          <main
-            id="main"
-            className={route.view === "map" ? "map-main" : "main-content"}
-            onPointerDownCapture={() => {
-              if (route.view === "map") mapInteraction.current = "pointer";
-            }}
-            onKeyDownCapture={() => {
-              if (route.view === "map") mapInteraction.current = "keyboard";
-            }}
-          >
-            {error && !selected && (
-              <div className="top-error">
-                <Message error>{error}</Message>
-              </div>
-            )}
-            {route.company && !selected && (
-              <div className="top-error">
-                <Message error>企業が見つかりません。</Message>
-                <TextButton onClick={closeCompany}>閉じる</TextButton>
-              </div>
-            )}
-            {route.view === "home" && (
-              <HomeDashboard
-                key={`${user.sub}:${preferences.department}:${preferences.grade}:${preferences.roster_number}:${data.event.date}`}
-                data={data}
-                preferences={preferences}
-                assignment={assignment}
-                savedIDs={saved}
-                route={effectiveRoute}
-                eventTime={eventTime}
-                onRouteChange={changeRoute}
-                onSelectCompany={openCompany}
-                onSaveCompany={toggleSave}
-                onConfigure={() => setSettingNumber(true)}
-                onExpired={expireSession}
-              />
-            )}
-            {route.view === "search" && (
-              <Companies
-                data={data}
-                saved={saved}
-                assignedIDs={assignedIDs}
-                route={effectiveRoute}
-                onRouteChange={changeRoute}
-                onSave={toggleSave}
-                onSelect={openCompany}
-              />
-            )}
-            {route.view === "schedule" && (
-              <Schedule
-                data={data}
-                assignment={assignment}
-                route={route}
-                onSelect={openCompany}
-                onInformation={() => navigate("info")}
-                eventTime={eventTime}
-              />
-            )}
-            {route.view === "map" && (
-              <VenueMap
-                documents={data.documents}
-                companies={data.companies}
-                session={effectiveRoute.session === "PM" ? "PM" : "AM"}
-                selectedCompanyId={route.company || route.focus}
-                search={route.q}
-                industries={route.industries}
-                mode="fullscreen"
-                detailPanelOpen={Boolean(selected && !settingNumber)}
-                detailPanel={
-                  selected && !settingNumber ? (
-                    <MapCompanyPanel
-                      company={selected}
-                      saved={saved.has(selected.id)}
-                      assigned={assignedIDs.has(selected.id)}
-                      onSave={() => toggleSave(selected)}
-                      notification={
-                        error ? <Message error>{error}</Message> : undefined
-                      }
-                      focusOnOpen={panelKeyboardFocus.current}
-                      onClose={closeCompany}
-                      returnFocus={returnMapFocus}
-                    />
-                  ) : undefined
-                }
-                onlySaved={route.saved}
-                onlyAssigned={route.assigned}
-                onFiltersChange={(patch) =>
-                  changeRoute(
-                    patch,
-                    typeof patch.q === "string" &&
-                      Object.keys(patch).length === 1,
-                  )
-                }
-                savedCompanyIds={saved}
-                assignedCompanyIds={assignedIDs}
-                onSelectCompany={(company) => {
-                  const active = document.activeElement;
-                  if (active instanceof HTMLElement && active !== document.body)
-                    mapReturnFocus.current = active;
-                  panelKeyboardFocus.current =
-                    mapInteraction.current === "keyboard";
-                  changeRoute({
-                    company: company.id,
-                    focus: company.id,
-                    session: company.session,
-                  });
-                }}
-                onSessionChange={(session) =>
-                  changeRoute({ session, company: "", focus: "" })
-                }
-                onExpired={expireSession}
-              />
-            )}
-            {route.view === "plan" && (
-              <Plan
-                data={data}
-                saved={saved}
-                retainedFavoriteIDs={retainedFavoriteIDs}
-                assignment={assignment}
-                assignedIDs={assignedIDs}
+          </div>
+          {ready && menu(false)}
+          <div className="header-right">
+            {ready && (
+              <HeaderActions
+                name={user.name}
                 rosterNumber={preferences.roster_number}
-                route={route}
-                onSave={toggleSave}
-                onSelect={openCompany}
-                onConfigure={() => setSettingNumber(true)}
-                onFind={() => {
-                  changeRoute({
-                    ...defaultRoute,
-                    view: "search",
-                    session: routeRef.current.session,
-                    sessionExplicit: routeRef.current.sessionExplicit,
-                  });
+                busy={busy}
+                currentView={route.view}
+                onConfigure={() => {
+                  if (!offline) setSettingNumber(true);
+                }}
+                onInformation={() => {
+                  changeRoute({ view: "info", company: "" });
                   window.scrollTo({ top: 0, behavior: "instant" });
                 }}
+                onLogout={() => void logout()}
               />
             )}
-            {route.view === "info" && (
-              <Information
-                data={data}
-                onExpired={expireSession}
-                scope={`${user.sub}:${preferences.department}:${preferences.grade}:${preferences.roster_number}`}
-              />
+          </div>
+        </header>
+        {ready && (
+          <div
+            role="status"
+            aria-label="オフライン用データ"
+            className={offline && ready ? "offline-availability" : "sr-only"}
+            data-state={
+              offline
+                ? "offline"
+                : offlinePreparation === "ready"
+                  ? shellReady
+                    ? "ready"
+                    : "preparing"
+                  : offlinePreparation
+            }
+            data-offline={offline ? "true" : "false"}
+          >
+            {offline
+              ? "オフライン・保存済みの情報を表示中"
+              : offlinePreparation === "ready" && shellReady
+                ? "オフライン用データを保存済み"
+                : offlinePreparation === "unavailable"
+                  ? "この端末にはオフライン用データを保存できません"
+                  : offlinePreparation === "partial"
+                    ? "一部の地図はまだ保存されていません"
+                    : "オフライン用データを保存しています"}
+            {offlineSavedAt && (
+              <span className="sr-only">
+                {" "}
+                保存日時 {new Date(offlineSavedAt).toLocaleString("ja-JP")}
+              </span>
             )}
+          </div>
+        )}
+        {!ready ? (
+          <main id="main" className="welcome-main">
+            <section
+              className="welcome-content"
+              aria-labelledby="welcome-title"
+            >
+              <h1 id="welcome-title">企業ガイダンス</h1>
+              <div className="welcome-action">
+                {status === "loading" ? (
+                  <div className="loading-line" role="status">
+                    <span className="spinner" />
+                    ログイン状態を確認しています
+                  </div>
+                ) : (
+                  <>
+                    {error && <Message error>{error}</Message>}
+                    {status === "signed-out" ? (
+                      <Button
+                        size="large"
+                        disabled={busy || offline}
+                        onClick={async () => {
+                          localLogoutIntent(false);
+                          await setOfflineLogoutIntent(false);
+                          try {
+                            window.sessionStorage.setItem(
+                              returnKey,
+                              routeHref(routeRef.current),
+                            );
+                          } catch {}
+                          window.location.href = `${API_URL}/auth/start`;
+                        }}
+                      >
+                        Tasklyでログイン
+                      </Button>
+                    ) : (
+                      <Button size="large" onClick={() => void load()}>
+                        もう一度接続する
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
           </main>
-          {menu(true)}
-        </>
-      )}
-      {ready && settingNumber && (
-        <RosterDialog
-          number={preferences.roster_number}
-          onClose={() => setSettingNumber(false)}
-          onExpired={expireSession}
-          onSaved={(profile) => {
-            setPreferences(profile);
-            setSettingNumber(false);
-          }}
-        />
-      )}
-      {ready && selected && !settingNumber && route.view !== "map" && (
-        <CompanyDialog
-          company={selected}
-          error={error}
-          saved={saved.has(selected.id)}
-          assigned={assignedIDs.has(selected.id)}
-          route={route}
-          onSave={() => toggleSave(selected)}
-          onClose={closeCompany}
-          onMap={() => mapCompany(selected)}
-          data={data}
-          savedCompanyIds={saved}
-          assignedCompanyIds={assignedIDs}
-          onSelect={openCompany}
-          onExpired={expireSession}
-        />
-      )}
-    </FavoritePendingProvider>
+        ) : (
+          <>
+            <main
+              id="main"
+              className={route.view === "map" ? "map-main" : "main-content"}
+              data-offline={offline ? "true" : "false"}
+              onPointerDownCapture={() => {
+                if (route.view === "map") mapInteraction.current = "pointer";
+              }}
+              onKeyDownCapture={() => {
+                if (route.view === "map") mapInteraction.current = "keyboard";
+              }}
+            >
+              {error && !selected && (
+                <div className="top-error">
+                  <Message error>{error}</Message>
+                </div>
+              )}
+              {route.company && !selected && (
+                <div className="top-error">
+                  <Message error>企業が見つかりません。</Message>
+                  <TextButton onClick={closeCompany}>閉じる</TextButton>
+                </div>
+              )}
+              {route.view === "home" && (
+                <HomeDashboard
+                  key={`${user.sub}:${preferences.department}:${preferences.grade}:${preferences.roster_number}:${data.event.date}`}
+                  data={data}
+                  preferences={preferences}
+                  assignment={assignment}
+                  savedIDs={saved}
+                  route={effectiveRoute}
+                  eventTime={eventTime}
+                  onRouteChange={changeRoute}
+                  onSelectCompany={openCompany}
+                  onSaveCompany={toggleSave}
+                  onConfigure={() => {
+                    if (!offline) setSettingNumber(true);
+                  }}
+                  onExpired={expireSession}
+                />
+              )}
+              {route.view === "search" && (
+                <Companies
+                  data={data}
+                  saved={saved}
+                  assignedIDs={assignedIDs}
+                  route={effectiveRoute}
+                  onRouteChange={changeRoute}
+                  onSave={toggleSave}
+                  onSelect={openCompany}
+                />
+              )}
+              {route.view === "schedule" && (
+                <Schedule
+                  data={data}
+                  assignment={assignment}
+                  route={route}
+                  onSelect={openCompany}
+                  onInformation={() => navigate("info")}
+                  eventTime={eventTime}
+                />
+              )}
+              {route.view === "map" && (
+                <VenueMap
+                  documents={data.documents}
+                  companies={data.companies}
+                  session={effectiveRoute.session === "PM" ? "PM" : "AM"}
+                  selectedCompanyId={route.company || route.focus}
+                  search={route.q}
+                  industries={route.industries}
+                  mode="fullscreen"
+                  detailPanelOpen={Boolean(selected && !settingNumber)}
+                  detailPanel={
+                    selected && !settingNumber ? (
+                      <MapCompanyPanel
+                        company={selected}
+                        saved={saved.has(selected.id)}
+                        assigned={assignedIDs.has(selected.id)}
+                        onSave={() => toggleSave(selected)}
+                        notification={
+                          error ? <Message error>{error}</Message> : undefined
+                        }
+                        focusOnOpen={panelKeyboardFocus.current}
+                        onClose={closeCompany}
+                        returnFocus={returnMapFocus}
+                      />
+                    ) : undefined
+                  }
+                  onlySaved={route.saved}
+                  onlyAssigned={route.assigned}
+                  onFiltersChange={(patch) =>
+                    changeRoute(
+                      patch,
+                      typeof patch.q === "string" &&
+                        Object.keys(patch).length === 1,
+                    )
+                  }
+                  savedCompanyIds={saved}
+                  assignedCompanyIds={assignedIDs}
+                  onSelectCompany={(company) => {
+                    const active = document.activeElement;
+                    if (
+                      active instanceof HTMLElement &&
+                      active !== document.body
+                    )
+                      mapReturnFocus.current = active;
+                    panelKeyboardFocus.current =
+                      mapInteraction.current === "keyboard";
+                    changeRoute({
+                      company: company.id,
+                      focus: company.id,
+                      session: company.session,
+                    });
+                  }}
+                  onSessionChange={(session) =>
+                    changeRoute({ session, company: "", focus: "" })
+                  }
+                  onExpired={expireSession}
+                />
+              )}
+              {route.view === "plan" && (
+                <Plan
+                  data={data}
+                  saved={saved}
+                  retainedFavoriteIDs={retainedFavoriteIDs}
+                  assignment={assignment}
+                  assignedIDs={assignedIDs}
+                  rosterNumber={preferences.roster_number}
+                  route={route}
+                  onSave={toggleSave}
+                  onSelect={openCompany}
+                  onConfigure={() => {
+                    if (!offline) setSettingNumber(true);
+                  }}
+                  onFind={() => {
+                    changeRoute({
+                      ...defaultRoute,
+                      view: "search",
+                      session: routeRef.current.session,
+                      sessionExplicit: routeRef.current.sessionExplicit,
+                    });
+                    window.scrollTo({ top: 0, behavior: "instant" });
+                  }}
+                />
+              )}
+              {route.view === "info" && (
+                <Information
+                  data={data}
+                  onExpired={expireSession}
+                  scope={`${user.sub}:${preferences.department}:${preferences.grade}:${preferences.roster_number}`}
+                />
+              )}
+            </main>
+            {menu(true)}
+          </>
+        )}
+        {ready && settingNumber && (
+          <RosterDialog
+            number={preferences.roster_number}
+            onClose={() => setSettingNumber(false)}
+            onExpired={expireSession}
+            onSaved={async () => {
+              const generation = ++authGeneration.current;
+              clearDisplay();
+              setStatus("loading");
+              await clearOfflinePack();
+              if (generation !== authGeneration.current) return;
+              announceOfflineReset();
+              void load();
+            }}
+          />
+        )}
+        {ready && selected && !settingNumber && route.view !== "map" && (
+          <CompanyDialog
+            company={selected}
+            error={error}
+            saved={saved.has(selected.id)}
+            assigned={assignedIDs.has(selected.id)}
+            route={route}
+            onSave={() => toggleSave(selected)}
+            onClose={closeCompany}
+            onMap={() => mapCompany(selected)}
+            data={data}
+            savedCompanyIds={saved}
+            assignedCompanyIds={assignedIDs}
+            onSelect={openCompany}
+            onExpired={expireSession}
+          />
+        )}
+      </FavoritePendingProvider>
+    </OfflineProvider>
   );
 }
 
@@ -755,17 +1182,26 @@ function RosterDialog({
   onSaved: (profile: Preferences) => void;
   onExpired: () => void;
 }) {
+  const { offline } = useOffline();
+  const mounted = useRef(false);
+  const request = useRef<AbortController | null>(null);
   const ref = useRef<HTMLDialogElement>(null),
     input = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(number === null ? "" : String(number)),
     [pending, setPending] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
+    mounted.current = true;
     ref.current?.showModal();
     input.current?.focus();
-    return () => ref.current?.close();
+    return () => {
+      mounted.current = false;
+      request.current?.abort();
+      ref.current?.close();
+    };
   }, []);
   async function save() {
+    if (offline || pending || !mounted.current) return;
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 99) {
       setError("名簿番号を確認してください。");
@@ -773,15 +1209,19 @@ function RosterDialog({
     }
     setPending(true);
     setError("");
+    const controller = new AbortController();
+    request.current = controller;
+    const timer = setTimeout(() => controller.abort(), requestBudget);
     try {
-      onSaved(
-        await api<Preferences>("/api/preferences", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ roster_number: parsed }),
-        }),
-      );
+      const profile = await api<Preferences>("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roster_number: parsed }),
+        signal: controller.signal,
+      });
+      if (mounted.current && !controller.signal.aborted) onSaved(profile);
     } catch (cause) {
+      if (!mounted.current) return;
       if (cause instanceof APIError && cause.status === 401) onExpired();
       else
         setError(
@@ -790,7 +1230,8 @@ function RosterDialog({
             : "保存できませんでした。もう一度お試しください。",
         );
     } finally {
-      setPending(false);
+      clearTimeout(timer);
+      if (mounted.current) setPending(false);
     }
   }
   return (
@@ -1348,6 +1789,7 @@ function Information({
   onExpired: () => void;
   scope: string;
 }) {
+  const { offline } = useOffline();
   const { error, opening, openDocument } = useDocumentNavigation(
     onExpired,
     scope,
@@ -1367,7 +1809,7 @@ function Information({
             <Button
               key={item.id}
               variant="outlined"
-              disabled={opening}
+              disabled={offline || opening}
               onClick={() => void openDocument(item.id)}
             >
               {item.title}
@@ -1431,6 +1873,7 @@ function Plan({
   onConfigure: () => void;
   onFind: () => void;
 }) {
+  const { offline } = useOffline();
   const companies = data.companies.filter((company) =>
     retainedFavoriteIDs.has(company.id),
   );
@@ -1442,6 +1885,7 @@ function Plan({
       <div className="view-heading">
         <h1>気になる</h1>
         <TextButton
+          disabled={offline}
           onClick={onConfigure}
           aria-label={
             rosterNumber === null ? "名簿番号を設定" : "名簿番号を変更"
@@ -1516,7 +1960,9 @@ function Plan({
             })}
           </div>
         ) : rosterNumber === null ? (
-          <TextButton onClick={onConfigure}>名簿番号を設定</TextButton>
+          <TextButton disabled={offline} onClick={onConfigure}>
+            名簿番号を設定
+          </TextButton>
         ) : (
           <Message>
             指定企業が見つかりません。名簿番号を確認してください。

@@ -1,5 +1,7 @@
 # テストとカバレッジ
 
+オフライン対応では実Service Worker・IndexedDBを使うブラウザー検証も実行します。Service Workerの実行カバレッジはページE2Eと分けてNodeで計測し、行・分岐・関数80%以上を要求します。PRレポートとLCOV artifact、再現手順は [オフライン参照](offline.md) に記載しています。
+
 CI は PR と main の全変更で動作します。パスによる省略やセルフホストランナーへの切り替えはありません。`required-ci` は API、Web、データ抽出、E2E、Linux 本番イメージの各ジョブがすべて成功した場合だけ成功します。
 
 ## 計測する範囲
@@ -9,6 +11,7 @@ CI は PR と main の全変更で動作します。パスによる省略やセ�
 | Go アプリケーション全体 | `go test -race -coverprofile`、API と各コマンド | statements 80%以上 |
 | インポーター | 同じ Go プロファイルの対象コマンド | statements 80%以上 |
 | Web | Vitest + V8、アプリケーションコード | lines 80%以上 |
+| Service Worker | 配備する関数そのものをNodeで実行 | lines・branches・functions 各80%以上 |
 | PDF 抽出器 | coverage.py、テストコードを除く scripts | statements 80%以上 |
 | 実 MySQL 結合テスト | `^TestMySQL` だけを実行し、`internal/server` 全体を計測 | statements 80%以上 |
 | ブラウザー E2E | Chromium の画面操作で実行されたソースの範囲を V8 で計測 | 実測値を報告 |
