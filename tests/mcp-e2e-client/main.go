@@ -237,6 +237,37 @@ func connect(token string) *mcp.ClientSession {
 	must(e, "official SDK initialize")
 	return s
 }
+
+// Only protocol status and known static application codes may enter logs.
+// Never print arbitrary MCP content, metadata, headers, tokens or SQL errors.
+func safeToolFailure(result *mcp.CallToolResult) string {
+	status, code := "unknown", "unrecognized"
+	if result == nil {
+		return "status=" + status + " code=" + code
+	}
+	switch value := result.Meta["status"].(type) {
+	case int:
+		if value >= 100 && value <= 599 {
+			status = strconv.Itoa(value)
+		}
+	case float64:
+		if value >= 100 && value <= 599 && value == float64(int(value)) {
+			status = strconv.Itoa(int(value))
+		}
+	}
+	for _, content := range result.Content {
+		text, ok := content.(*mcp.TextContent)
+		if !ok {
+			continue
+		}
+		switch text.Text {
+		case "authentication_required", "invalid_token", "insufficient_scope", "identity_unavailable", "invalid_delegation_response", "taskly_unavailable", "taskly_forbidden", "taskly_rate_limited", "mcp_rate_limited", "home_tasks_unavailable", "invalid_service_response", "completion_disabled", "home_task_not_found", "invalid_task_update", "dataset_unavailable", "bookmarks_unavailable", "service_unavailable", "invalid_search", "invalid_company_id", "company_not_found":
+			code = text.Text
+		}
+	}
+	return "status=" + status + " code=" + code
+}
+
 func call(s *mcp.ClientSession, name string, args map[string]any, expected int) map[string]any {
 	if args == nil {
 		args = map[string]any{}
@@ -246,10 +277,10 @@ func call(s *mcp.ClientSession, name string, args map[string]any, expected int) 
 	r, e := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 	must(e, name+" transport")
 	if expected != 0 {
-		check(r.IsError && fmt.Sprint(r.Meta["status"]) == fmt.Sprint(expected), name+" must reject with expected status")
+		check(r.IsError && fmt.Sprint(r.Meta["status"]) == fmt.Sprint(expected), name+" must reject with expected status ("+safeToolFailure(r)+")")
 		return nil
 	}
-	check(!r.IsError, name+" tool success")
+	check(!r.IsError, name+" tool success ("+safeToolFailure(r)+")")
 	b, e := json.Marshal(r.StructuredContent)
 	must(e, "tool result")
 	for _, forbidden := range []string{"access_token", "refresh_token", "X-Amz-", "assignment_scope", "user_sub"} {

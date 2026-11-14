@@ -283,14 +283,23 @@ export async function main() {
         ["build", "-mod=readonly", "-o", binary("guidance"), "./cmd/api"],
         root,
       ),
-      run("vet-probe", cfg.go, ["vet", "./..."], probeDir).then(() =>
-        run(
-          "build-probe",
-          cfg.go,
-          ["build", "-mod=readonly", "-o", binary("probe"), "."],
-          probeDir,
+      run(
+        "test-probe",
+        cfg.go,
+        ["test", "-mod=readonly", "-count=1", "./..."],
+        probeDir,
+      )
+        .then(() =>
+          run("vet-probe", cfg.go, ["vet", "-mod=readonly", "./..."], probeDir),
+        )
+        .then(() =>
+          run(
+            "build-probe",
+            cfg.go,
+            ["build", "-mod=readonly", "-o", binary("probe"), "."],
+            probeDir,
+          ),
         ),
-      ),
     ]);
     for (const build of builds)
       if (build.status === "rejected") throw build.reason;

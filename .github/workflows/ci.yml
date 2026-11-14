@@ -261,7 +261,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: asari194617/taskly-auth
-          ref: 23e724c42d70b6bea71bd1afb110e6b59821c2d3
+          ref: 45bae241b3c329966403d0f6441028ebb1bef75c
           path: .e2e/mcp-auth
           ssh-key: ${{ secrets.MCP_AUTH_REPO_SSH_KEY }}
           persist-credentials: false
