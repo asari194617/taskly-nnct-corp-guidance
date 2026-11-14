@@ -1719,6 +1719,17 @@ test("The home starts with tasks and explainable recommendations across readable
       expect(
         await page.locator("body").evaluate((node) => node.scrollWidth),
       ).toBeLessThanOrEqual(viewport.width);
+      await expectTextOnlyHover(
+        page,
+        tasks.locator(".home-task-main > a").first(),
+      );
+      await expectTextOnlyHover(
+        page,
+        recommendations.locator(".home-recommendation-heading h3 > a").first(),
+      );
+      await page.evaluate(() =>
+        window.scrollTo({ top: 0, behavior: "instant" }),
+      );
       const screenshot = info.outputPath(
         `home-${viewport.width}-${colorScheme}.png`,
       );

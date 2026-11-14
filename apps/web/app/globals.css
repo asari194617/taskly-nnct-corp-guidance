@@ -1332,6 +1332,7 @@ h2 {
 }
 .home-task-main > .spui-TextLink:hover {
   color: var(--color-text-accent-primary);
+  background-color: transparent;
 }
 .home-task-title {
   font-size: inherit;
@@ -1422,6 +1423,7 @@ h2 {
 }
 .home-recommendation-heading h3 .spui-TextLink:hover {
   color: var(--color-text-accent-primary);
+  background-color: transparent;
 }
 .home-recommendation-heading > .spui-Button {
   flex: none;
