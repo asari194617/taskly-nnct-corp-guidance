@@ -137,6 +137,7 @@ jobs:
           python -m coverage json -o python-coverage.json
           python -m coverage report --fail-under=80
           python -c 'import json; d=json.load(open("python-coverage.json")); json.dump({"percent": d["totals"]["percent_covered"]}, open("extractor.json", "w"))'
+      - run: npm --prefix deploy/r2 ci --ignore-scripts
       - run: node --test .github/scripts/coverage-summary.test.mjs deploy/*.test.mjs deploy/r2/*.test.mjs
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
