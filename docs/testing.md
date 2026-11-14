@@ -10,7 +10,7 @@ CI は PR と main の全変更で動作します。パスによる省略やセ�
 | インポーター | 同じ Go プロファイルの対象コマンド | statements 80%以上 |
 | Web | Vitest + V8、アプリケーションコード | lines 80%以上 |
 | PDF 抽出器 | coverage.py、テストコードを除く scripts | statements 80%以上 |
-| 実 MySQL 結合テスト | 結合テストだけの Go 実行範囲 | 実測値を報告 |
+| 実 MySQL 結合テスト | `^TestMySQL` だけを実行し、`internal/server` 全体を計測 | statements 80%以上 |
 | ブラウザー E2E | Chromium の画面操作で実行されたソースの範囲を V8 で計測 | 実測値を報告 |
 
 単体テストの合算値と結合・E2E 単独の実行範囲は別の指標です。後者の値を単体カバレッジと合算したり、操作が通っただけで100%と見なしたりしません。行カバレッジだけで全分岐の正しさは保証されないため、未認証・状態不一致・他ユーザー・不正パス・失効・障害時のケースもテストします。
@@ -28,6 +28,10 @@ Go の実 MySQL 結合テストとブラウザー E2E は CI 専用の MySQL 9.7
 ブラウザー E2E は実際の Go API と MySQL、検証用 OAuth サーバーを通して上記の利用フローを確認します。PDFは `blob:` やAPIのファイル転送ではなく、R2互換S3サービスへのpresigned URLで開きます。実Go/MySQLと、独立したSigV4検証・期限検査・Range/HEADを実装したloopbackオブジェクトサービスを使い、内容・ヘッダー・改変拒否・期限・ログアウト後の新規発行拒否を検証します。テスト用サービスが本番のR2へ接続することはありません。企業詳細とマップのクエリは再読み込みと履歴操作でも確認し、名簿番号が URL へ入らないことも検査します。
 
 ホームの完了チェックは、実際の Taskly Go サーバーの連携エンドポイント、GraphQL、MySQL の完了記録まで通します。CI はレビュー済みの Taskly コミットを固定して取得し、検証専用コマンド `apps/server/cmd/guidance-e2e` を起動します。OAuth の userinfo と introspection は同じ架空の数値ユーザー ID を返し、Taskly の通常の完了・取り消し操作とガイダンス側のチェックが同じ記録を参照することを確認します。フォームを開くだけではチェックが変わらず、見学シート用 PDF は実際に25ページ目が存在する26ページの架空資料を使います。
+
+見学アンケートと同じタームの指定企業は、実際の Taskly トランザクションで同時に完了します。ガイダンス経由で自動完了した組だけは、ガイダンス画面のどちらのチェックから解除しても両方を解除できることを確認します。以前の手動完了や、Taskly 標準 GraphQL で後から明示的に操作した項目は保護し、別ターム・指定のないターム・別アカウント・変更後の名簿設定へ連動が漏れないことも確認します。自動完了の由来はサーバーに保存し、再読み込み後も照合します。
+
+この連動の E2E は応答を作り替えず、本物の PUT の転送を一時的に保留して楽観的表示と操作中の状態を確認し、解放後に返る関連タスクと Taskly 標準 GraphQL の完了記録を照合します。完了不可の相手を含む409、認証基盤の503、トークン失効の401では部分的な完了が残らず、逆方向の解除が失敗した場合も両方が元の状態へ戻ることを確認します。MySQL のトランザクションそのものの結合テストとブラウザーの行カバレッジは別々に報告します。
 
 Taskly 検証サーバーは loopback、検証フラグ、空の `taskly_guidance_e2e` DB を必須とし、本番モードでは起動しません。E2E ランナーはこの固定名の使い捨て DB を毎回作り直します。Taskly の本番 DB、セッション、認証情報は使用しません。Redis は検証プロセス内で起動し、別の常駐サービスは不要です。
 
@@ -53,6 +57,11 @@ node --test .github/scripts/coverage-summary.test.mjs deploy/*.test.mjs deploy/r
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
-実 MySQL テストは使い捨ての専用 DB を用意し、`MYSQL_TEST_DSN` を渡して `go test -race -run '^TestMySQLIntegration$' ./internal/server` を実行します。テストはスキーマを準備し、架空データを書き込みます。稼働データを含む DB の DSN を使わないでください。
+実 MySQL テストは使い捨ての専用 DB を用意し、`MYSQL_TEST_DSN` を渡して `go test -race -run '^TestMySQL' -coverprofile=/tmp/guidance-integration.out ./internal/server` を実行します。テストはスキーマを準備し、架空データを書き込みます。稼働データを含む DB の DSN を使わないでください。
 
 ブラウザー E2E は `E2E_MYSQL_PASSWORD` と `E2E_MYSQL_DATABASE` に別の使い捨て DB の接続先を指定し、`E2E_TASKLY_DIR` にレビュー済み Taskly チェックアウトのルートを指定します。MySQL アカウントには固定名 `taskly_guidance_e2e` の作成・削除権限も必要です。`npm --prefix apps/web exec -- playwright install --with-deps chromium webkit` で両ブラウザーをインストールしてから `node scripts/e2e-run.mjs` を実行すると、スクリプトが架空データの取り込み、ローカル OAuth サーバー、両サービスの Go API、Next.js 静的本番ビルドの配信を準備します。詳細な出力先はスクリプトと `apps/web/e2e` を参照してください。
+
+
+実 MySQL 結合テストは `TestMySQL` で始まるテストだけを選び、`internal/server` 全体の実行カバレッジを単独で測定し、80%以上を必須にします。API 全体のテストやブラウザー E2E の値を合算せず、ファイル・処理の除外も行いません。同一リポジトリと fork の PR コメントの両方で、結合テストの達成率と80%の基準を表示し、元のプロファイルを artifact に保存します。
+
+テストは実際の `SQLStore` と HTTP API を使い、PKCE ログイン、暗号化セッション・更新・失効、名簿設定の永続化と利用者分離、ホームのチェック連動・両方向解除・手動チェック保持、SQL 障害時の取り消し、資料リンク、読み込み回数制限を検証します。この独立した結合テストでは OAuth と Taskly はローカル HTTP 境界で模擬します。実際の Taskly Go API・正規の完了テーブルまで接続する検証は、別のブラウザー E2E と Taskly 側の実 MySQL テストで行い、そのカバレッジとは区別します。

@@ -69,10 +69,10 @@ jobs:
           go test -race -coverprofile=coverage/go.out ./...
           node .github/scripts/coverage-summary.mjs go-profile coverage/go.out api.json 80
           node .github/scripts/coverage-summary.mjs go-profile coverage/go.out importer.json 80 --include-path 'github.com/asari194617/taskly-nnct-corp-guidance/cmd/import-guidance/'
-      - name: Measure real MySQL integration execution
+      - name: Test real MySQL integration and require 80% statement coverage
         run: |
-          go test -race -run '^TestMySQLIntegration$' -coverprofile=coverage/integration.out ./internal/server
-          node .github/scripts/coverage-summary.mjs go-profile coverage/integration.out integration.json 0
+          go test -race -run '^TestMySQL' -coverprofile=coverage/integration.out ./internal/server
+          node .github/scripts/coverage-summary.mjs go-profile coverage/integration.out integration.json 80
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -170,7 +170,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: asari194617/taskly
-          ref: 22d85b93457a6a6383f18b42c0119f8b8823dec4
+          ref: e1ba31e1c3539432ce327522cd1bdd9872a87660
           path: .e2e/taskly
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -265,14 +265,14 @@ jobs:
               try {
                 const {percent} = read(id);
                 if (typeof percent === 'number' && Number.isFinite(percent) && percent >= 0 && percent <= 100)
-                  value = `${percent.toFixed(1)}% ${['e2e','integration'].includes(id) ? '' : percent >= 80 ? '✅' : '❌'}`;
+                  value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
               } catch {}
-              return `| ${name} | ${value} | ${['e2e','integration'].includes(id) ? 'Measured' : '80%'} |`;
+              return `| ${name} | ${value} | ${id === 'e2e' ? 'Measured' : '80%'} |`;
             });
             const marker = '<!-- nnct-guidance-coverage -->';
             const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
               '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
-              'Go application, importer, Web unit tests and PDF extraction require 80%. Integration and browser execution are reported separately.',
+              'Go application, importer, Web unit tests, PDF extraction and standalone real MySQL integration require 80%. Browser execution is reported separately.',
               `[CI run](${run.html_url})`].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments,
               {owner,repo,issue_number:metadata.number,per_page:100});

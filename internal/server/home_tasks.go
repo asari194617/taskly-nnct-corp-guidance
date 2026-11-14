@@ -34,6 +34,8 @@ type HomeTask struct {
 	DocumentID         string `json:"document_id,omitempty"`
 	Page               int    `json:"page,omitempty"`
 	DueAt              string `json:"due_at,omitempty"`
+	AutoCompletedBy    string `json:"auto_completed_by,omitempty"`
+	assignmentScope    string
 }
 
 type homeDataset struct {
@@ -142,7 +144,8 @@ func (s *Server) homeTaskDefinitions(ctx context.Context, user User) ([]HomeTask
 	tasks := make([]HomeTask, 0, len(terms)+len(assigned)+2)
 	for _, term := range ordered {
 		if company := assigned[term]; company != "" {
-			tasks = append(tasks, HomeTask{ID: fmt.Sprintf("assigned-visit-%d", term), Kind: "assigned_visit", Title: companies[company] + "を見学", CompanyID: company, Term: term})
+			scope, _ := json.Marshal([]any{s.config.TasklyEventID, defaultDepartment, defaultGrade, *number, term, company, companies[company]})
+			tasks = append(tasks, HomeTask{ID: fmt.Sprintf("assigned-visit-%d", term), Kind: "assigned_visit", Title: companies[company] + "を見学", CompanyID: company, Term: term, assignmentScope: digest(string(scope))})
 		}
 	}
 	for _, term := range ordered {
@@ -156,21 +159,32 @@ func (s *Server) homeTaskDefinitions(ctx context.Context, user User) ([]HomeTask
 }
 
 type tasklyHomeTask struct {
-	Key                string `json:"key"`
-	TaskID             uint64 `json:"task_id"`
-	Completed          *bool  `json:"completed"`
-	CompletionDisabled *bool  `json:"completion_disabled"`
-	TasklyURL          string `json:"taskly_url"`
+	Key                 string `json:"key"`
+	TaskID              uint64 `json:"task_id"`
+	Completed           *bool  `json:"completed"`
+	CompletionDisabled  *bool  `json:"completion_disabled"`
+	TasklyURL           string `json:"taskly_url"`
+	AutoCompletedBy     string `json:"auto_completed_by,omitempty"`
+	AutoAssignmentScope string `json:"auto_assignment_scope,omitempty"`
 }
 
 func (task tasklyHomeTask) valid() bool {
-	return task.Key != "" && len(task.Key) <= 128 && task.TaskID > 0 && task.Completed != nil && task.CompletionDisabled != nil && safeTasklyURL(task.TasklyURL)
+	if task.Key == "" || len(task.Key) > 128 || task.TaskID == 0 || task.Completed == nil || task.CompletionDisabled == nil || !safeTasklyURL(task.TasklyURL) {
+		return false
+	}
+	if task.AutoCompletedBy == "" && task.AutoAssignmentScope == "" {
+		return true
+	}
+	return *task.Completed && !*task.CompletionDisabled && strings.HasPrefix(task.Key, "assigned-visit-") && task.AutoCompletedBy == "visit-survey-"+strings.TrimPrefix(task.Key, "assigned-visit-") && len(task.AutoAssignmentScope) == 64 && sessionHashPattern.MatchString(task.AutoAssignmentScope)
 }
 
 func joinHomeTask(definition HomeTask, canonical tasklyHomeTask) HomeTask {
 	definition.Completed = *canonical.Completed
 	definition.CompletionDisabled = *canonical.CompletionDisabled
 	definition.TasklyURL = canonical.TasklyURL
+	if definition.Kind == "assigned_visit" && definition.assignmentScope != "" && definition.assignmentScope == canonical.AutoAssignmentScope {
+		definition.AutoCompletedBy = canonical.AutoCompletedBy
+	}
 	return definition
 }
 
@@ -181,7 +195,7 @@ type homeBridgeFailure struct {
 
 func (e *homeBridgeFailure) Error() string { return e.code }
 
-func (s *Server) tasklyRequest(r *http.Request, method, key string, completed *bool, output any) *homeBridgeFailure {
+func (s *Server) tasklyRequest(r *http.Request, method, key string, completed *bool, output any, assignmentScope ...string) *homeBridgeFailure {
 	if s.config.TasklyAPIOrigin == "" || s.config.TasklyEventID == "" {
 		return &homeBridgeFailure{503, "taskly_unavailable"}
 	}
@@ -195,7 +209,17 @@ func (s *Server) tasklyRequest(r *http.Request, method, key string, completed *b
 	}
 	var body io.Reader
 	if completed != nil {
-		body = strings.NewReader(fmt.Sprintf(`{"completed":%t}`, *completed))
+		change := struct {
+			Completed         bool   `json:"completed"`
+			LinkAssignedVisit bool   `json:"link_assigned_visit,omitempty"`
+			AssignmentScope   string `json:"assignment_scope,omitempty"`
+		}{Completed: *completed}
+		if len(assignmentScope) == 1 && assignmentScope[0] != "" {
+			change.LinkAssignedVisit = true
+			change.AssignmentScope = assignmentScope[0]
+		}
+		payload, _ := json.Marshal(change)
+		body = bytes.NewReader(payload)
 	}
 	request, err := http.NewRequestWithContext(r.Context(), method, endpoint, body)
 	if err != nil {
@@ -325,8 +349,45 @@ func (s *Server) setHomeTask(w http.ResponseWriter, r *http.Request, user User) 
 		failure(w, 404, "home_task_not_found")
 		return
 	}
-	var updated tasklyHomeTask
-	if problem := s.tasklyRequest(r, http.MethodPut, key, input.Completed, &updated); problem != nil {
+	var partner *HomeTask
+	if definition.Kind == "visit_survey" && definition.CompanyID != "" {
+		for index := range definitions {
+			candidate := &definitions[index]
+			if candidate.Kind == "assigned_visit" && candidate.Term == definition.Term && candidate.CompanyID == definition.CompanyID && candidate.assignmentScope != "" {
+				partner = candidate
+				break
+			}
+		}
+		if partner == nil {
+			failure(w, 503, "home_tasks_unavailable")
+			return
+		}
+	}
+	if definition.Kind == "assigned_visit" && !*input.Completed {
+		for index := range definitions {
+			candidate := &definitions[index]
+			if candidate.Kind == "visit_survey" && candidate.Term == definition.Term && candidate.CompanyID == definition.CompanyID {
+				partner = candidate
+				break
+			}
+		}
+		if partner == nil || definition.assignmentScope == "" {
+			failure(w, 503, "home_tasks_unavailable")
+			return
+		}
+	}
+	scope := ""
+	if partner != nil {
+		scope = partner.assignmentScope
+		if definition.Kind == "assigned_visit" {
+			scope = definition.assignmentScope
+		}
+	}
+	var updated struct {
+		tasklyHomeTask
+		RelatedTasks []tasklyHomeTask `json:"related_tasks"`
+	}
+	if problem := s.tasklyRequest(r, http.MethodPut, key, input.Completed, &updated, scope); problem != nil {
 		s.homeFailure(w, r, problem)
 		return
 	}
@@ -334,7 +395,21 @@ func (s *Server) setHomeTask(w http.ResponseWriter, r *http.Request, user User) 
 		failure(w, 503, "taskly_unavailable")
 		return
 	}
-	respond(w, 200, joinHomeTask(*definition, updated))
+	var related []HomeTask
+	if partner != nil {
+		if len(updated.RelatedTasks) != 1 || !updated.RelatedTasks[0].valid() || updated.RelatedTasks[0].Key != partner.ID || updated.RelatedTasks[0].TaskID == updated.TaskID {
+			failure(w, 503, "taskly_unavailable")
+			return
+		}
+		related = []HomeTask{joinHomeTask(*partner, updated.RelatedTasks[0])}
+	} else if len(updated.RelatedTasks) != 0 {
+		failure(w, 503, "taskly_unavailable")
+		return
+	}
+	respond(w, 200, struct {
+		HomeTask
+		RelatedTasks []HomeTask `json:"related_tasks,omitempty"`
+	}{HomeTask: joinHomeTask(*definition, updated.tasklyHomeTask), RelatedTasks: related})
 }
 
 type homeRequestWindow struct {
