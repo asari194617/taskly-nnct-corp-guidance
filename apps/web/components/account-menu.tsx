@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { DropdownMenu } from "@openameba/spindle-ui/DropdownMenu";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
 import { Icon } from "./icons";
+import { useOffline } from "./offline-context";
 
 type Props = {
   name: string;
@@ -21,6 +22,7 @@ export default function AccountMenu({
   onLogout,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const { offline } = useOffline();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const initialFocus = useRef<"first" | "last">("first");
@@ -32,8 +34,15 @@ export default function AccountMenu({
     menu?.setAttribute("aria-label", "ユーザーメニュー");
     const items =
       menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
-    if (items?.length)
-      items[initialFocus.current === "last" ? items.length - 1 : 0].focus();
+    if (items?.[0]) {
+      items[0].disabled = offline;
+      items[0].setAttribute("aria-disabled", String(offline));
+    }
+    const available = Array.from(items || []).filter((item) => !item.disabled);
+    if (available.length)
+      available[
+        initialFocus.current === "last" ? available.length - 1 : 0
+      ].focus();
     const dismiss = (event: Event) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -43,7 +52,7 @@ export default function AccountMenu({
       document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("click", dismiss);
     };
-  }, [open]);
+  }, [open, offline]);
 
   function close(restoreFocus = false) {
     setOpen(false);
@@ -68,7 +77,7 @@ export default function AccountMenu({
         }
         const items = Array.from(
           root.current?.querySelectorAll<HTMLButtonElement>(
-            '[role="menuitem"]',
+            '[role="menuitem"]:not(:disabled)',
           ) || [],
         );
         const index = items.indexOf(
@@ -130,6 +139,7 @@ export default function AccountMenu({
           <DropdownMenu.ListItem
             icon={<Icon name="user" />}
             onClick={() => {
+              if (offline) return;
               close();
               onConfigure();
             }}

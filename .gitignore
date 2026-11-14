@@ -37,6 +37,7 @@ python-coverage.json
 /extractor.json
 /integration.json
 /e2e.json
+/offline-worker.json
 *.tsbuildinfo
 /apps/web/test-results/
 /.e2e/

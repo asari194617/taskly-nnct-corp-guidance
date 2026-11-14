@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APIError, documentURL } from "../lib/api";
 import { navigateDocument } from "../lib/document-navigation";
+import { useOffline } from "./offline-context";
 
 export function useDocumentNavigation(onExpired: () => void, scope = "") {
+  const offline = useOffline();
+  const readonly = useRef(offline.offline);
+  readonly.current = offline.offline;
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const expired = useRef(onExpired);
@@ -26,9 +30,13 @@ export function useDocumentNavigation(onExpired: () => void, scope = "") {
       if (requestTimer.current !== null) clearTimeout(requestTimer.current);
       requestTimer.current = null;
     };
-  }, [scope]);
+  }, [scope, offline.offline]);
 
   const openDocument = useCallback(async (id: string, page?: number) => {
+    if (readonly.current) {
+      setError("資料はオンラインで開いてください。");
+      return;
+    }
     if (!mounted.current || request.current) return;
     const controller = new AbortController();
     const currentGeneration = generation.current;

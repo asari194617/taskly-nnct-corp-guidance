@@ -91,7 +91,7 @@ test("fails closed for invalid selectors and selectors with no statements", () =
     const result = spawnSync(process.execPath, [script, "go-profile", input, output, "0", ...filter], { encoding: "utf8", timeout: 2000 });
     assert.equal(result.status, 1, `${JSON.stringify(filter)}: ${result.stderr}`);
     assert.equal(result.error, undefined);
-    assert.match(result.stderr, /Invalid literal Go coverage include path|no matching statements/);
+    assert.match(result.stderr, /Invalid literal coverage include path|no matching statements/);
     assert.equal(existsSync(output), false);
   }
 });
@@ -132,4 +132,40 @@ test("reads Istanbul line coverage", () => {
   const result = spawnSync(process.execPath, [script, "istanbul", input, output, "75"], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), { percent: 88.5 });
+});
+
+test("reports actual worker LCOV separately and rejects missing or invalid runtime coverage", () => {
+  const dir = mkdtempSync(join(tmpdir(), "taskly-worker-coverage-"));
+  const input = join(dir, "worker.lcov"), output = join(dir, "summary.json");
+  writeFileSync(input, "SF:deploy/r2/offline-worker.mjs\nLF:10\nLH:9\nend_of_record\nSF:tests/helpers.mjs\nLF:100\nLH:0\nend_of_record\nSF:deploy/r2/offline-worker.mjs.backup\nLF:100\nLH:0\nend_of_record\n");
+  const result = spawnSync(process.execPath, [script, "lcov", input, output, "80", "--include-path", "deploy/r2/offline-worker.mjs"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), { percent: 90 });
+  for (const invalid of ["", "SF:deploy/r2/offline-worker.mjs\nLF:1\nLH:2\nend_of_record\n", "SF:deploy/r2/offline-worker.mjs\nLF:10\nend_of_record\n"]) {
+    writeFileSync(input, invalid);
+    assert.equal(spawnSync(process.execPath, [script, "lcov", input, output, "80"]).status, 1);
+  }
+});
+
+test("LCOV path selectors stay literal and reject old regex arguments without summaries", () => {
+  const dir = mkdtempSync(join(tmpdir(), "taskly-worker-literal-"));
+  const input = join(dir, "worker.lcov");
+  const literal = "deploy/r2/offline-worker[ab]+(x)$|other.mjs";
+  writeFileSync(input, `SF:${literal}\nLF:10\nLH:9\nend_of_record\nSF:deploy/r2/offline-workeraaax.mjs\nLF:100\nLH:0\nend_of_record\n`);
+  const output = join(dir, "literal.json");
+  const result = spawnSync(process.execPath, [script, "lcov", input, output, "90", "--include-path", literal], { encoding: "utf8", timeout: 2000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), { percent: 90 });
+  for (const [index, args] of [
+    ["offline-worker\\.mjs$"],
+    ["--include-path", "deploy/r2/missing.mjs"],
+    ["--include-path", "(a+)+$"],
+    ["--include-path", "deploy/r2/../offline-worker.mjs"],
+  ].entries()) {
+    const rejected = join(dir, `rejected-${index}.json`);
+    const failure = spawnSync(process.execPath, [script, "lcov", input, rejected, "80", ...args], { encoding: "utf8", timeout: 2000 });
+    assert.equal(failure.status, 1);
+    assert.equal(failure.error, undefined);
+    assert.equal(existsSync(rejected), false);
+  }
 });

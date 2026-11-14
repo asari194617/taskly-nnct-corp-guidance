@@ -15,12 +15,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /ios-pdf\.spec\.ts$/,
+      testIgnore: /(?:ios-pdf|offline-webkit)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], browserName: "chromium" },
     },
     {
       name: "mobile-webkit",
-      testMatch: /ios-pdf\.spec\.ts$/,
+      testMatch: /(?:ios-pdf|offline-webkit)\.spec\.ts$/,
       use: { ...devices["iPhone 15"], browserName: "webkit" },
     },
   ],

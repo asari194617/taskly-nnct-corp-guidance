@@ -1,5 +1,7 @@
 # テストとカバレッジ
 
+オフライン対応では実Service Worker・IndexedDBを使うブラウザー検証も実行します。Service Workerの実行カバレッジはページE2Eと分けてNodeで計測し、行・分岐・関数80%以上を要求します。PRレポートとLCOV artifact、再現手順は [オフライン参照](offline.md) に記載しています。
+
 CI は PR と main の全変更で動作します。パスによる省略やセルフホストランナーへの切り替えはありません。`required-ci` は API、Web、データ抽出、E2E、Linux 本番イメージの各ジョブがすべて成功した場合だけ成功します。
 
 ## 計測する範囲

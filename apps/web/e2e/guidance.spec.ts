@@ -1277,12 +1277,16 @@ test("Private R2 presigned PDFs work without cookies and expire independently of
     (await request.get(new URL(signed.pathname, signed.origin).href)).status(),
   ).toBe(403);
   await returnToApplication(page, appURL);
+  const loggedOut = page.waitForResponse(response =>
+    response.url() === `${API}/auth/logout` && response.request().method() === "POST",
+  );
   await accountAction(page, "ログアウト");
   await expect(
     page.getByRole("button", { name: "Tasklyでログイン" }),
   ).toBeVisible();
   // R2 validates its signature, not the user's current session. Already-issued
   // links remain bearer capabilities until their bounded expiry; new issuance fails.
+  expect((await loggedOut).status()).toBe(204);
   expect((await request.get(signed.href)).status()).toBe(200);
   expect(
     (await page.request.get(`${API}/api/documents/guide/url`)).status(),
@@ -1764,7 +1768,7 @@ test("Home API denies anonymous writes, forged origins and Taskly users without 
   const denied = await page.request.get(`${API}/api/home`);
   expect(denied.status()).toBe(403);
   expect(await denied.json()).toEqual({ error: "taskly_forbidden" });
-  await expect(page.getByRole("region", { name: "やること", exact: true }).getByRole("alert")).toContainText("やることを取得できませんでした");
+  await expect(page.getByRole("region", { name: "やること", exact: true }).getByRole("alert")).toContainText("やることを利用できません。");
   await expect(page.locator(".home-task-row")).toHaveCount(0);
   const update = await page.request.put(`${API}/api/home/tasks/overall-survey`, { headers: { Origin: "http://127.0.0.1:3300" }, data: { completed: true } });
   expect(update.status()).toBe(403);
@@ -2129,10 +2133,14 @@ test("A month-long session rotates short-lived access credentials and still revo
   await expect(
     page.getByRole("heading", { name: "探す", exact: true }),
   ).toBeVisible();
+  const loggedOut = page.waitForResponse(response =>
+    response.url() === `${API}/auth/logout` && response.request().method() === "POST",
+  );
   await accountAction(page, "ログアウト");
   await expect(
     page.getByRole("button", { name: "Tasklyでログイン", exact: true }),
   ).toBeVisible();
+  expect((await loggedOut).status()).toBe(204);
   expect((await page.request.get(`${API}/api/me`)).status()).toBe(401);
   expect(
     (await page.context().cookies(API)).some(

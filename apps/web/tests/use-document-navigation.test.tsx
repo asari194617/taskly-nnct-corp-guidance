@@ -1,5 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import {
+  OfflineProvider,
+  type OfflineState,
+} from "../components/offline-context";
 import { useDocumentNavigation } from "../components/use-document-navigation";
 import { navigateDocument } from "../lib/document-navigation";
 
@@ -253,5 +258,42 @@ describe("current-tab signed document navigation", () => {
     expect(result.current.error).toBe(failureMessage);
     rerender({ scope: "new" });
     await waitFor(() => expect(result.current.error).toBe(""));
+  });
+  it("does not sign or open PDFs offline, and aborts a document that was opening when connectivity changed", async () => {
+    let state: OfflineState = {
+      offline: true,
+      session: null,
+      savedAt: null,
+      onOffline: vi.fn(),
+    };
+    const { result, rerender } = renderHook(
+      () => useDocumentNavigation(onExpired),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <OfflineProvider value={state}>{children}</OfflineProvider>
+        ),
+      },
+    );
+    await act(async () => result.current.openDocument("guide"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.error).toContain("オンライン");
+    state = { ...state, offline: false };
+    rerender();
+    const signing = deferred<Response>();
+    fetchMock.mockReturnValueOnce(signing.promise);
+    let opening!: Promise<void>;
+    act(() => {
+      opening = result.current.openDocument("guide");
+    });
+    const signal = fetchMock.mock.calls[0][1]!.signal!;
+    state = { ...state, offline: true };
+    rerender();
+    expect(signal.aborted).toBe(true);
+    await act(async () => {
+      signing.resolve(issued());
+      await opening;
+    });
+    expect(navigateDocument).not.toHaveBeenCalled();
+    expect(result.current.opening).toBe(false);
   });
 });

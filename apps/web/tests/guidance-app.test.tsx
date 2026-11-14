@@ -196,6 +196,7 @@ beforeEach(() => {
   // Company workflows start on their dedicated page; Home routing is explicit below.
   window.history.replaceState(null, "", "/search/");
   window.sessionStorage.clear();
+  window.localStorage.clear();
   dataset = fixture();
   saved = new Set();
   rosterNumber = 7;
@@ -263,7 +264,7 @@ describe("authentication and private content", () => {
   it("shows only Taskly sign-in and branding before authentication", async () => {
     failures.set("/api/me", 401);
     render(<GuidanceApp />);
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
       "ログイン状態を確認しています",
     );
     await screen.findByRole("button", { name: "Tasklyでログイン" });
@@ -285,7 +286,7 @@ describe("authentication and private content", () => {
     failures.set("/api/me", new Error("offline"));
     render(<GuidanceApp />);
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "接続できませんでした",
+      "保存済みの情報がありません",
     );
     failures.set("/api/me", 503);
     await userEvent.click(
@@ -309,32 +310,36 @@ describe("authentication and private content", () => {
       screen.queryByRole("heading", { name: dataset.companies[0].name }),
     ).not.toBeInTheDocument();
   });
-  it("preserves the page on failed logout, then clears all private state on success", async () => {
+  it("clears private state immediately even if the server cannot finish logout", async () => {
     await ready();
     failures.set("/auth/logout", 503);
     await accountAction("ログアウト");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "ログアウトできませんでした",
+      "端末の保存データは削除しました",
     );
-    expect(
-      screen.getByRole("heading", { name: dataset.companies[0].name }),
-    ).toBeInTheDocument();
-    failures.delete("/auth/logout");
-    await accountAction("ログアウト");
-    await screen.findByRole("button", { name: "Tasklyでログイン" });
     expect(
       screen.queryByText(dataset.companies[0].name),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Tasklyでログイン" }),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem("guidance-offline-logout")).toBe("1");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/auth/logout"),
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
   });
-  it("reports logout transport failures", async () => {
+  it("keeps private state removed after logout transport failure", async () => {
     await ready();
-    failures.set("/auth/logout", new Error("通信エラー"));
+    failures.set("/auth/logout", new TypeError("通信エラー"));
     await accountAction("ログアウト");
-    expect(await screen.findByRole("alert")).toHaveTextContent("通信エラー");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "ログアウトの完了には接続が必要",
+    );
+    expect(
+      screen.queryByText(dataset.companies[0].name),
+    ).not.toBeInTheDocument();
+    expect(localStorage.getItem("guidance-offline-logout")).toBe("1");
   });
   it("uses the account fallback label without requiring an event date", async () => {
     userName = "";
@@ -422,7 +427,7 @@ describe("account menu", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
-  it("disables account actions while logout is pending and clears private state after completion", async () => {
+  it("removes private state and disables sign-in while logout is pending", async () => {
     await ready();
     const original = fetchMock.getMockImplementation()! as (
       input: RequestInfo | URL,
@@ -438,9 +443,16 @@ describe("account menu", () => {
     });
     await accountAction("ログアウト");
     expect(
-      screen.getByRole("button", { name: "ユーザーメニュー" }),
+      screen.queryByRole("button", { name: "ユーザーメニュー" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Tasklyでログイン" }),
     ).toBeDisabled();
+    expect(
+      screen.queryByText(dataset.companies[0].name),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
     await act(async () => finish());
     await screen.findByRole("button", { name: "Tasklyでログイン" });
     expect(
@@ -610,7 +622,7 @@ describe("Ec4 first-visit preferences", () => {
     dataset.assignments = [];
     window.history.replaceState(null, "", "/favorites/");
     await ready();
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
       "指定企業が見つかりません",
     );
     expect(
@@ -2028,7 +2040,9 @@ describe("incremental catalog integration", () => {
     );
     await waitFor(() => expect(saved.has(dataset.companies[0].id)).toBe(false));
     expect(screen.getAllByRole("article")).toHaveLength(48);
-    expect(screen.getByRole("status")).toHaveTextContent("48 / 125社");
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      "48 / 125社",
+    );
     expect(
       within(card(name)).getByRole("button", {
         name: `${name}を気になるに追加`,

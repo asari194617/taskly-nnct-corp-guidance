@@ -114,6 +114,7 @@ export async function startObjectStore(
   directory,
   { port = 3373, now = Date.now } = {},
 ) {
+  let clockOffset = 0;
   const objects = new Map([
     ["floor-a.png", "image/png"],
     ["floor-b.png", "image/png"],
@@ -122,6 +123,36 @@ export async function startObjectStore(
   const ui = "http://127.0.0.1:3300";
   const server = createServer(async (req, res) => {
     try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      // Only the disposable harness can advance its own clock. Browser origins
+      // cannot call this endpoint, and production never imports this server.
+      if (url.pathname === "/__test/clock") {
+        const reply = (status, body) => {
+          res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify(body));
+        };
+        if (req.headers.host !== `127.0.0.1:${server.address().port}` ||
+            req.socket.remoteAddress !== "127.0.0.1" || req.headers.origin)
+          return reply(403, { error: "forbidden" });
+        if (req.method !== "POST") return reply(405, { error: "method_not_allowed" });
+        if (req.headers["content-type"] !== "application/json")
+          return reply(415, { error: "json_required" });
+        if (url.search) return reply(400, { error: "invalid_clock" });
+        let body = "";
+        for await (const part of req) {
+          body += part;
+          if (Buffer.byteLength(body) > 256) return reply(413, { error: "oversized_clock" });
+        }
+        let value;
+        try { value = JSON.parse(body); }
+        catch { return reply(400, { error: "invalid_clock" }); }
+        if (!value || typeof value !== "object" || Array.isArray(value) ||
+            Object.keys(value).length !== 1 || !Number.isInteger(value.offset_ms) ||
+            value.offset_ms < 0 || value.offset_ms > 3_600_000)
+          return reply(400, { error: "invalid_clock" });
+        clockOffset = value.offset_ms;
+        return reply(200, { offset_ms: clockOffset });
+      }
       const origin = req.headers.origin;
       if (origin === ui) {
         res.setHeader("Access-Control-Allow-Origin", ui);
@@ -145,8 +176,7 @@ export async function startObjectStore(
         res.writeHead(405);
         return res.end();
       }
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      if (!validObjectRequest(url, req.method, now())) {
+      if (!validObjectRequest(url, req.method, now() + clockOffset)) {
         res.writeHead(403);
         return res.end();
       }
