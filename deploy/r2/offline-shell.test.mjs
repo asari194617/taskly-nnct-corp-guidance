@@ -118,7 +118,14 @@ test("emitted worker installs against canonical redirects and serves offline que
       const url = new URL(req.url, "http://synthetic.invalid");
       requests.push(url.pathname);
       if (url.pathname === "/index.html") {
-        res.writeHead(302, { Location: `/${url.search}` });
+        const redirectOrigin = `http://127.0.0.1:${server.address().port}`;
+        const target = new URL("/", redirectOrigin);
+        target.search = url.search;
+        if (target.origin !== redirectOrigin) {
+          res.writeHead(400);
+          return res.end();
+        }
+        res.writeHead(302, { Location: target.href });
         return res.end();
       }
       if (!served.has(url.pathname)) {
@@ -135,6 +142,16 @@ test("emitted worker installs against canonical redirects and serves offline que
     // The public deployment redirects this alias. The strict download policy
     // must continue rejecting it instead of silently following arbitrary URLs.
     await assert.rejects(fetch(`${origin}/index.html`, { redirect: "error" }));
+    const query = "?next=//evil.example/path&company=AM-1&q=synthetic";
+    const redirect = await fetch(`${origin}/index.html${query}`, {
+      redirect: "manual",
+    });
+    assert.equal(redirect.status, 302);
+    const target = new URL(redirect.headers.get("location"));
+    assert.equal(target.origin, origin);
+    assert.equal(target.pathname, "/");
+    assert.equal(target.search, query);
+    assert.equal(target.searchParams.get("next"), "//evil.example/path");
     requests.length = 0;
     const manifest = await generateOfflineShell(root);
     assert.deepEqual(

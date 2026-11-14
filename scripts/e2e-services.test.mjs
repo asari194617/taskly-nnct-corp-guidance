@@ -113,16 +113,20 @@ test("the synthetic UI matches the public index redirect while canonical shells 
   try {
     stop = await startServices(output);
     const origin = "http://127.0.0.1:3300";
-    const query =
-      "?company=AM-1&q=synthetic&industry=information&industry=mechanical";
-    const alias = await fetch(`${origin}/index.html${query}`, {
-      redirect: "manual",
-    });
-    assert.equal(alias.status, 302);
-    assert.equal(
-      new URL(alias.headers.get("location"), origin).href,
-      `${origin}/${query}`,
-    );
+    for (const query of [
+      "?company=AM-1&q=synthetic&industry=information&industry=mechanical",
+      "?next=//evil.example/path&redirect_uri=https%3A%2F%2Fevil.example%2F&company=AM-1",
+      "?//evil.example/path&q=%0d%0aLocation%3Ahttps%3A%2F%2Fevil.example",
+    ]) {
+      const alias = await fetch(`${origin}/index.html${query}`, {
+        redirect: "manual",
+      });
+      assert.equal(alias.status, 302);
+      const target = new URL(alias.headers.get("location"));
+      assert.equal(target.origin, origin);
+      assert.equal(target.pathname, "/");
+      assert.equal(target.search, query);
+    }
     await assert.rejects(fetch(`${origin}/index.html`, { redirect: "error" }));
     for (const page of pages) {
       const path = page ? `/${page}/` : "/";

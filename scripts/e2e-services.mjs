@@ -252,8 +252,15 @@ export async function startServices(output) {
       // Match the public Cloudflare canonical redirect so native worker tests
       // reject accidental precache requests for the /index.html alias.
       if (path === "/index.html") {
+        const redirectOrigin = "http://127.0.0.1:3300";
+        const target = new URL("/", redirectOrigin);
+        target.search = url.search;
+        if (target.origin !== redirectOrigin) {
+          res.writeHead(400);
+          return res.end();
+        }
         res.writeHead(302, {
-          Location: `/${url.search}`,
+          Location: target.href,
           "Cache-Control": "no-store",
         });
         return res.end();
