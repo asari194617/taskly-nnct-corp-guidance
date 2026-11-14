@@ -1552,6 +1552,17 @@ test("The home starts with tasks and explainable recommendations across readable
 }, info) => {
   await login(page, "home", "/", false);
   await chooseRoster(page, 9);
+  const surveyGroup = page.getByRole("region", { name: "見学アンケート", exact: true });
+  const surveyHeading = surveyGroup.getByRole("heading", { name: /見学アンケート/, level: 3 });
+  const surveyToggle = surveyHeading.getByRole("button", { name: /見学アンケート/ });
+  await expect(surveyToggle).toHaveAttribute("aria-expanded", "false");
+  await surveyToggle.focus();
+  await surveyToggle.press("Enter");
+  await expect(surveyGroup.getByRole("checkbox")).toHaveCount(8);
+  await surveyToggle.press("Space");
+  await expect(surveyToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(surveyGroup.getByRole("checkbox")).toHaveCount(0);
+  await page.evaluate(() => window.scrollTo(0, 0));
   for (const viewport of [
     { width: 390, height: 844 },
     { width: 1440, height: 900 },
@@ -1563,6 +1574,9 @@ test("The home starts with tasks and explainable recommendations across readable
       await expect(page.getByRole("heading", { name: "ホーム", level: 1 })).toBeVisible();
       const tasks = page.getByRole("region", { name: "やること", exact: true });
       const recommendations = page.getByRole("region", { name: "おすすめ", exact: true });
+      await expect(surveyHeading).toBeVisible();
+      await expect(homeTask(page, "overall-survey").getByRole("heading", { name: "全体アンケートに回答", level: 3 })).toBeVisible();
+      await expect(homeTask(page, "sheet-submission").getByRole("heading", { name: "見学シートを提出", level: 3 })).toBeVisible();
       await expect(homeTask(page, "assigned-visit-1").getByRole("checkbox", { name: "架空あおばソフトを見学", exact: true })).toBeVisible();
       await expect(page.getByRole("searchbox")).toHaveCount(0);
       await expect(page.getByRole("combobox")).toHaveCount(0);

@@ -174,6 +174,9 @@ export default function HomeDashboard({
             >
               {company.name}
             </TextLink>
+          ) : task.kind === "overall_survey" ||
+            task.kind === "sheet_submission" ? (
+            <h3 className="home-task-title">{task.title}</h3>
           ) : (
             <span className="home-task-title">{task.title}</span>
           )}
@@ -299,22 +302,30 @@ export default function HomeDashboard({
                   </section>
                 )}
                 {surveys.length > 0 && (
-                  <section className="home-surveys" aria-label="見学アンケート">
+                  <section
+                    className="home-surveys"
+                    aria-labelledby="home-surveys-title"
+                  >
                     <div className="home-surveys-heading">
-                      <TextButton
-                        aria-expanded={surveyOpen}
-                        aria-controls={
-                          surveyOpen ? "home-survey-tasks" : undefined
-                        }
-                        onClick={() => setSurveyOpen((value) => !value)}
-                      >
-                        <Icon name={surveyOpen ? "minus" : "plus"} size={16} />
-                        見学アンケート{" "}
-                        <span>
-                          {surveys.filter((task) => task.completed).length}/
-                          {surveys.length}
-                        </span>
-                      </TextButton>
+                      <h3>
+                        <TextButton
+                          aria-expanded={surveyOpen}
+                          aria-controls={
+                            surveyOpen ? "home-survey-tasks" : undefined
+                          }
+                          onClick={() => setSurveyOpen((value) => !value)}
+                        >
+                          <Icon
+                            name={surveyOpen ? "minus" : "plus"}
+                            size={16}
+                          />
+                          <span id="home-surveys-title">見学アンケート</span>
+                          <span className="home-survey-count">
+                            {surveys.filter((task) => task.completed).length}/
+                            {surveys.length}
+                          </span>
+                        </TextButton>
+                      </h3>
                       {currentSurvey?.url && (
                         <TextLink
                           href={currentSurvey.url}

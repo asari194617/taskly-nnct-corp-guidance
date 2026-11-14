@@ -1329,6 +1329,7 @@ h2 {
   color: var(--color-text-accent-primary);
 }
 .home-task-title {
+  font-size: inherit;
   font-weight: bold;
 }
 .home-task-meta {
@@ -1357,11 +1358,20 @@ h2 {
   min-height: 44px;
   font-size: 0.8125rem;
 }
-.home-surveys-heading > .spui-TextButton {
+.home-surveys-heading h3 {
+  font-size: 0.9375rem;
+}
+.home-surveys-heading h3 > .spui-TextButton {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-relative-spacing-lv4);
   padding-left: 0;
+  font: inherit;
+}
+.home-survey-count {
+  color: var(--color-text-medium-emphasis);
+  font-size: 0.8125rem;
+  font-weight: normal;
 }
 .home-surveys-heading > .spui-TextLink {
   white-space: nowrap;
