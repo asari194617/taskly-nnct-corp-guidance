@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -92,6 +92,47 @@ test("the synthetic issuer joins userinfo and authenticated introspection to the
         })
       ).status,
       401,
+    );
+  } finally {
+    if (stop) await stop();
+    await rm(output, { force: true, recursive: true });
+  }
+});
+
+test("the synthetic UI matches the public index redirect while canonical shells remain direct downloads", async () => {
+  const output = await mkdtemp(join(tmpdir(), "guidance-canonical-ui-test-"));
+  const pages = ["", "search", "favorites", "schedule", "documents", "map"];
+  for (const page of pages) {
+    await mkdir(join(output, page), { recursive: true });
+    await writeFile(
+      join(output, page, "index.html"),
+      `Synthetic ${page || "home"} shell`,
+    );
+  }
+  let stop;
+  try {
+    stop = await startServices(output);
+    const origin = "http://127.0.0.1:3300";
+    const query =
+      "?company=AM-1&q=synthetic&industry=information&industry=mechanical";
+    const alias = await fetch(`${origin}/index.html${query}`, {
+      redirect: "manual",
+    });
+    assert.equal(alias.status, 302);
+    assert.equal(
+      new URL(alias.headers.get("location"), origin).href,
+      `${origin}/${query}`,
+    );
+    await assert.rejects(fetch(`${origin}/index.html`, { redirect: "error" }));
+    for (const page of pages) {
+      const path = page ? `/${page}/` : "/";
+      const response = await fetch(origin + path, { redirect: "error" });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), `Synthetic ${page || "home"} shell`);
+    }
+    assert.equal(
+      (await fetch(`${origin}/not-a-page/`, { redirect: "manual" })).status,
+      404,
     );
   } finally {
     if (stop) await stop();
