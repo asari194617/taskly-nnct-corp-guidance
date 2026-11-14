@@ -559,6 +559,34 @@ h2 {
 .company-identity > .industry-tags {
   margin-top: 0;
 }
+.company-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+.company-google-action > .spui-TextLink,
+.company-google-action[aria-disabled="true"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-medium-emphasis);
+  border-radius: 8px;
+  color: var(--color-text-high-emphasis);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+.company-google-action > .spui-TextLink:hover {
+  color: var(--color-text-accent-primary);
+  background-color: transparent;
+}
+.company-google-action[aria-disabled="true"] {
+  color: var(--color-text-medium-emphasis);
+}
 .map-company-panel .dialog-top {
   margin-bottom: 0;
 }
@@ -1364,15 +1392,12 @@ h2 {
   min-height: 44px;
   font-size: 0.8125rem;
 }
-.home-surveys-heading h3 {
-  font-size: 0.9375rem;
-}
-.home-surveys-heading h3 > .spui-TextButton {
+.home-surveys-heading > .spui-TextButton {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-relative-spacing-lv4);
   padding-left: 0;
-  font: inherit;
+  font-size: 0.9375rem;
 }
 .home-survey-count {
   color: var(--color-text-medium-emphasis);

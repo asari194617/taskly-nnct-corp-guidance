@@ -10,6 +10,7 @@ import {
 import type { ReactNode, Ref } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
+import { TextLink } from "@openameba/spindle-ui/TextLink";
 import type { Company } from "../lib/types";
 import { Icon } from "./icons";
 import { useOffline } from "./offline-context";
@@ -85,6 +86,8 @@ export function CompanyDetailContent({
   notification,
   headingRef,
 }: DetailProps) {
+  const { offline } = useOffline();
+  const googleSearch = `https://google.com/?${new URLSearchParams({ q: company.name })}`;
   return (
     <>
       <div className="dialog-top">
@@ -108,7 +111,26 @@ export function CompanyDetailContent({
             <span key={value}>{value}</span>
           ))}
         </div>
-        <FavoriteButton company={company} saved={saved} onToggle={onSave} />
+        <div className="company-detail-actions">
+          <FavoriteButton company={company} saved={saved} onToggle={onSave} />
+          {offline ? (
+            <span className="company-google-action" aria-disabled="true">
+              Googleで調べる
+              <Icon name="external" size={16} />
+            </span>
+          ) : (
+            <span className="company-google-action">
+              <TextLink
+                href={googleSearch}
+                target="_blank"
+                rel="noopener noreferrer"
+                icon={<Icon name="external" size={16} />}
+              >
+                Googleで調べる
+              </TextLink>
+            </span>
+          )}
+        </div>
       </fieldset>
       {notification}
       <div className="booth-detail">

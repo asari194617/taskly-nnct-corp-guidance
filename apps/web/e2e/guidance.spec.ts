@@ -229,7 +229,17 @@ async function expectTextOnlyHover(page: Page, link: Locator) {
     color: getComputedStyle(node).color,
     background: getComputedStyle(node).backgroundColor,
   }));
-  const before = await link.boundingBox();
+  const documentBox = () =>
+    link.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        x: rect.x + scrollX,
+        y: rect.y + scrollY,
+        width: rect.width,
+        height: rect.height,
+      };
+    });
+  const before = await documentBox();
   await link.hover();
   await expect
     .poll(() => link.evaluate((node) => getComputedStyle(node).color))
@@ -241,7 +251,7 @@ async function expectTextOnlyHover(page: Page, link: Locator) {
   expect(
     await link.evaluate((node) => getComputedStyle(node).textDecorationLine),
   ).toBe("none");
-  expect(await link.boundingBox()).toEqual(before);
+  expect(await documentBox()).toEqual(before);
 }
 
 test("Taskly branding, social metadata and legacy URLs are usable before login", async ({
@@ -1642,16 +1652,29 @@ test("The home starts with tasks and explainable recommendations across readable
   await login(page, "home", "/", false);
   await chooseRoster(page, 9);
   const surveyGroup = page.getByRole("region", {
-    name: "見学アンケート",
+    name: "アンケート",
     exact: true,
   });
   const surveyHeading = surveyGroup.getByRole("heading", {
-    name: /見学アンケート/,
+    name: "アンケート",
     level: 3,
   });
-  const surveyToggle = surveyHeading.getByRole("button", {
+  const surveyToggle = surveyGroup.getByRole("button", {
     name: /見学アンケート/,
   });
+  await expect(surveyHeading.getByRole("button")).toHaveCount(0);
+  expect(
+    await surveyHeading.evaluate((heading) => {
+      const button = heading
+        .closest("section")
+        ?.querySelector(".home-surveys-heading > button");
+      return (
+        button &&
+        heading.compareDocumentPosition(button) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    }),
+  ).toBeTruthy();
   await expect(surveyToggle).toHaveAttribute("aria-expanded", "false");
   await surveyToggle.focus();
   await surveyToggle.press("Enter");
@@ -1661,6 +1684,7 @@ test("The home starts with tasks and explainable recommendations across readable
   await expect(surveyGroup.getByRole("checkbox")).toHaveCount(0);
   await page.evaluate(() => window.scrollTo(0, 0));
   for (const viewport of [
+    { width: 320, height: 844 },
     { width: 390, height: 844 },
     { width: 1440, height: 900 },
   ]) {
@@ -1677,6 +1701,11 @@ test("The home starts with tasks and explainable recommendations across readable
         exact: true,
       });
       await expect(surveyHeading).toBeVisible();
+      const surveyHeadingBox = requireValue(await surveyHeading.boundingBox());
+      const surveyToggleBox = requireValue(await surveyToggle.boundingBox());
+      expect(surveyHeadingBox.y + surveyHeadingBox.height).toBeLessThanOrEqual(
+        surveyToggleBox.y,
+      );
       await expect(
         homeTask(page, "overall-survey").getByRole("heading", {
           name: "全体アンケートに回答",
@@ -3238,12 +3267,12 @@ test("Search controls stay balanced and company links change only text across sy
   }
 });
 
-for (const width of [320, 1440]) {
+for (const width of [320, 390, 1440]) {
   test(`The map card close action floats independently of one-line and wrapped company headings at ${width}px`, async ({
     page,
   }) => {
     const shortName = "検証企業";
-    const longName = "検証用の長い企業名と研究開発部門を含む株式会社";
+    const longName = "検証用の長い企業名 & 研究開発部門を含む株式会社";
     await page.route("**/api/guidance", async (route) => {
       const response = await route.fetch();
       const catalog = await response.json();
@@ -3274,6 +3303,62 @@ for (const width of [320, 1440]) {
           exact: true,
         });
         await expect(panel).toBeVisible();
+        const google = panel.getByRole("link", {
+          name: "Googleで調べる",
+          exact: true,
+        });
+        const favorite = panel.getByRole("button", {
+          name: new RegExp(
+            `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}を気になる`,
+          ),
+        });
+        const searchURL = new URL(
+          requireValue(await google.getAttribute("href")),
+        );
+        expect(searchURL.origin).toBe("https://google.com");
+        expect(searchURL.pathname).toBe("/");
+        expect([...searchURL.searchParams.keys()]).toEqual(["q"]);
+        expect(searchURL.searchParams.get("q")).toBe(name);
+        await expect(google).toHaveAttribute("target", "_blank");
+        await expect(google).toHaveAttribute("rel", "noopener noreferrer");
+        await expectUnobstructed(google);
+        const actionsBox = requireValue(
+          await panel.locator(".company-detail-actions").boundingBox(),
+        );
+        const googleBox = requireValue(await google.boundingBox());
+        const favoriteBox = requireValue(await favorite.boundingBox());
+        expect(googleBox.x).toBeGreaterThanOrEqual(actionsBox.x);
+        expect(googleBox.x + googleBox.width).toBeLessThanOrEqual(
+          actionsBox.x + actionsBox.width + 1,
+        );
+        expect(googleBox.height).toBeGreaterThanOrEqual(36);
+        const overlap =
+          googleBox.x < favoriteBox.x + favoriteBox.width &&
+          googleBox.x + googleBox.width > favoriteBox.x &&
+          googleBox.y < favoriteBox.y + favoriteBox.height &&
+          googleBox.y + googleBox.height > favoriteBox.y;
+        expect(overlap).toBe(false);
+        await expectTextOnlyHover(page, google);
+        if (colorScheme === "light" && index === 1) {
+          await page.context().route("https://google.com/**", (route) =>
+            route.fulfill({
+              contentType: "text/html",
+              body: "<html lang='ja'><title>検証用検索結果</title><p>検証用</p></html>",
+            }),
+          );
+          const originalURL = page.url();
+          const opened = page.context().waitForEvent("page");
+          await google.click();
+          const searchPage = await opened;
+          await searchPage.waitForLoadState();
+          expect(new URL(searchPage.url()).searchParams.get("q")).toBe(name);
+          expect(await searchPage.evaluate(() => window.opener === null)).toBe(
+            true,
+          );
+          await searchPage.close();
+          expect(page.url()).toBe(originalURL);
+          await expect(panel).toBeVisible();
+        }
         const geometry = await panel.evaluate((node) => {
           const title = node.querySelector("h2");
           const row = node.querySelector(".company-detail-heading");
@@ -3343,6 +3428,19 @@ for (const width of [320, 1440]) {
       exact: true,
     });
     await expect(directoryDialog).toBeVisible();
+    const directoryGoogle = directoryDialog.getByRole("link", {
+      name: "Googleで調べる",
+      exact: true,
+    });
+    expect(
+      new URL(
+        requireValue(await directoryGoogle.getAttribute("href")),
+      ).searchParams.get("q"),
+    ).toBe(shortName);
+    await expectUnobstructed(directoryGoogle);
+    await directoryGoogle.focus();
+    await expect(directoryGoogle).toBeFocused();
+
     await expect(
       directoryDialog.getByRole("button", {
         name: "企業情報を閉じる",
