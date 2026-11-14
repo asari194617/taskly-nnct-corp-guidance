@@ -477,7 +477,8 @@ h2 {
   border-radius: 8px;
 }
 .company-dialog,
-.roster-dialog {
+.roster-dialog,
+.about-service-dialog {
   padding: 0;
   width: calc(100% - 32px);
   max-width: 560px;
@@ -489,11 +490,25 @@ h2 {
   color: var(--color-text-high-emphasis);
 }
 .company-dialog::backdrop,
-.roster-dialog::backdrop {
+.roster-dialog::backdrop,
+.about-service-dialog::backdrop {
   background: rgba(0, 0, 0, 0.5);
 }
 .dialog-inner {
   padding: var(--spacing-relative-spacing-lv12);
+}
+.about-service-dialog {
+  max-width: 360px;
+}
+.about-service-content {
+  display: grid;
+  justify-items: center;
+  gap: var(--spacing-relative-spacing-lv8);
+  text-align: center;
+}
+.about-service-copyright {
+  color: var(--color-text-medium-emphasis);
+  font-size: 0.875rem;
 }
 .dialog-top {
   display: flex;

@@ -371,7 +371,7 @@ describe("account menu", () => {
       name: "名簿番号の設定",
     });
     const logout = within(menu).getByRole("menuitem", { name: "ログアウト" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
     expect(
       within(menu).queryByRole("menuitem", { name: "配布資料の案内" }),
     ).not.toBeInTheDocument();

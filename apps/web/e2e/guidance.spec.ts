@@ -2305,7 +2305,7 @@ test("Account actions, interest labels and document guidance are available witho
   ).toHaveCount(0);
   const menu = await openAccount(page);
   await expect(menu).toContainText("検証ユーザー menu");
-  await expect(menu.getByRole("menuitem")).toHaveCount(2);
+  await expect(menu.getByRole("menuitem")).toHaveCount(3);
   await expect(
     menu.getByRole("menuitem", { name: "配布資料の案内", exact: true }),
   ).toHaveCount(0);
@@ -3635,3 +3635,136 @@ test.describe("Mobile navigation pointer feedback", () => {
     await client.detach();
   });
 });
+
+async function expectServiceInformation(page: Page, width: number) {
+  const trigger = page.getByRole("button", {
+    name: "ユーザーメニュー",
+    exact: true,
+  });
+  const menu = await openAccount(page);
+  const names = (await menu.getByRole("menuitem").allTextContents()).map(
+    (value) => value.trim(),
+  );
+  expect(names.slice(-2)).toEqual(["このサービスについて", "ログアウト"]);
+  const about = menu.getByRole("menuitem", {
+    name: "このサービスについて",
+    exact: true,
+  });
+  await expect(about.locator("svg")).toBeVisible();
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowUp");
+  await expect(about).toBeFocused();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", {
+    name: "このサービスについて",
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(menu).not.toBeVisible();
+  expect(await dialog.evaluate((node) => node.matches(":modal"))).toBe(true);
+  await expect(
+    dialog.getByRole("heading", { name: "Taskly 企業ガイダンス", exact: true }),
+  ).toBeVisible();
+  await expect(dialog).toContainText("© 2026 asari");
+  const terms = dialog.getByRole("link", { name: "利用規約", exact: true });
+  const author = dialog.getByRole("link", { name: "asari", exact: true });
+  await expect(terms).toHaveAttribute(
+    "href",
+    "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
+  );
+  await expect(author).toHaveAttribute("href", "https://x.com/asari194617");
+  for (const link of [terms, author]) {
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(
+      await link.evaluate((node) => getComputedStyle(node).textDecorationLine),
+    ).toBe("none");
+  }
+  const close = dialog.getByRole("button", { name: "閉じる", exact: true });
+  await expect(dialog.getByRole("button")).toHaveCount(1);
+  await expect(close).toBeFocused();
+  for (const control of [terms, author, close]) {
+    await page.keyboard.press("Tab");
+    await expect(control).toBeFocused();
+  }
+  for (const control of [author, terms, close]) {
+    await page.keyboard.press("Shift+Tab");
+    await expect(control).toBeFocused();
+  }
+  const bounds = requireValue(await dialog.boundingBox());
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+  expect(
+    await page.locator("body").evaluate((node) => node.scrollWidth),
+  ).toBeLessThanOrEqual(width);
+  const contentWidth = await dialog
+    .locator(".dialog-inner")
+    .evaluate((node) => {
+      const style = getComputedStyle(node);
+      return (
+        node.getBoundingClientRect().width -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight)
+      );
+    });
+  expect(requireValue(await close.boundingBox()).width).toBeCloseTo(
+    contentWidth,
+    0,
+  );
+  await close.click();
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await accountAction(page, "このサービスについて");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await page.context().setOffline(true);
+  try {
+    const offlineMenu = await openAccount(page);
+    await expect(
+      offlineMenu.getByRole("menuitem", {
+        name: "名簿番号の設定",
+        exact: true,
+      }),
+    ).toBeDisabled();
+    await offlineMenu
+      .getByRole("menuitem", { name: "このサービスについて", exact: true })
+      .click();
+    await expect(dialog).toBeVisible();
+    await expect(terms).toHaveAttribute(
+      "href",
+      "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
+    );
+    await close.click();
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+  } finally {
+    await page.context().setOffline(false);
+  }
+}
+
+for (const width of [320, 1440]) {
+  for (const colorScheme of ["light", "dark"] as const) {
+    test(`Service information is accessible at ${width}px in ${colorScheme}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme });
+      await login(page, "menu");
+      const mutations: string[] = [];
+      page.on("request", (request) => {
+        if (
+          new URL(request.url()).origin === API &&
+          !["GET", "HEAD", "OPTIONS"].includes(request.method())
+        ) {
+          mutations.push(
+            `${request.method()} ${new URL(request.url()).pathname}`,
+          );
+        }
+      });
+      await expectServiceInformation(page, width);
+      expect(mutations).toEqual([]);
+    });
+  }
+}
