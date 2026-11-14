@@ -1337,6 +1337,10 @@ test("Identity outages fail closed, then revoked sessions offer reauthentication
   request,
 }) => {
   await login(page, "outage");
+  const preparation = page.getByRole("status", { name: "オフライン用データ", exact: true });
+  // Let authenticated background signing settle so each injected failure is
+  // observed by the foreground request this case intends to exercise.
+  await expect(preparation).toHaveAttribute("data-state", /^(ready|partial|unavailable)$/);
   await request.post(`${ISSUER}/__test/outage?enabled=1`);
   try {
     await page.reload();
@@ -1349,13 +1353,18 @@ test("Identity outages fail closed, then revoked sessions offer reauthentication
   }
   await page.getByRole("button", { name: "もう一度接続する" }).click();
   await assertCompanyCount(page, 4);
+  await expect(preparation).toHaveAttribute("data-state", /^(ready|partial|unavailable)$/);
   await request.post(`${ISSUER}/__test/revoke?subject=outage`);
+  const revoked = page.waitForResponse(response =>
+    response.url() === `${API}/api/bookmarks/AM-2` && response.request().method() === "PUT",
+  );
   await page
     .getByRole("button", {
       name: "架空いろは機械を気になるに追加",
       exact: true,
     })
     .click();
+  expect((await revoked).status()).toBe(401);
   await expect(
     page.getByRole("button", { name: "Tasklyでログイン" }),
   ).toBeVisible();
