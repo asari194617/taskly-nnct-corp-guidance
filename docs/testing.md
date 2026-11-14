@@ -74,6 +74,8 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 
 `mcp-e2e` ジョブは全 PR・main の全変更で実行し、パスや変更内容による省略はしません。レビュー済みの固定コミットから Auth と Taskly を取得し、実際の Auth・Taskly・Guidance の Go HTTP サーバーを起動します。MySQL 8.4 はこのジョブ専用で、通常のブラウザー E2E の MySQL と共有しません。
 
+Auth は非公開リポジトリのため、そのリポジトリだけを読み取れる専用 Deploy key を Guidance の Actions Secret `MCP_AUTH_REPO_SSH_KEY` に保存し、Auth の checkout にだけ渡します。固定コミットと `persist-credentials: false` を維持し、広い権限の PAT や本番用の鍵は使いません。通常の Actions Secrets が渡らない fork・Dependabot の PR では checkout が失敗し、必須ジョブも失敗します。秘密情報がない場合のスキップ、別の token へのフォールバック、`pull_request_target` への切り替えは行いません。Auth のソースを公開リポジトリへコピーしたり、artifact として配布したりしません。
+
 公式 Go MCP SDK 1.8.0 のクライアントから、初期化・全8ツールの列挙、本人確認、企業検索・詳細、本人の指定企業、固定の資料ページリンク、「気になる」の保存、Taskly 正規テーブルに対する完了連動と両方向の解除まで18項目を検証します。Auth は架空アカウントの通常のパスワード認証、PKCE とリソースの結び付け、一度だけ使える明示的同意、更新、短期委譲を実際に処理します。認証・Taskly・Guidance の業務応答はモックしません。読み取り専用スコープ、Taskly の閲覧権限不足、別リソースのトークン、親トークン失効、更新トークンの再利用も拒否することを確認します。Guidance のブラウザーセッションを代用しないことも SQL で検査します。
 
 検証用クライアントは `tests/mcp-e2e-client` の独立した Go モジュールです。アプリ本体の `go test ./...` の計測対象へテスト用実行コマンドを混ぜず、実際の MCP API コードは通常の Go 単体・実 MySQL カバレッジに含めます。この18項目は機能テストの成功件数であり、ブラウザーの V8 カバレッジや API の statements と合算・換算しません。実際の ChatGPT 画面や外部 OAuth コールバック先を操作するテストとも区別します。
