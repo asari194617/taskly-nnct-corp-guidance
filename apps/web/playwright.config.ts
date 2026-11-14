@@ -23,6 +23,11 @@ export default defineConfig({
       testMatch: /(?:ios-pdf|offline-webkit)\.spec\.ts$/,
       use: { ...devices["iPhone 15"], browserName: "webkit" },
     },
+    {
+      name: "map-webkit",
+      testMatch: /map-initial-position\.spec\.ts$/,
+      use: { ...devices["Desktop Safari"], browserName: "webkit" },
+    },
   ],
   use: {
     baseURL: "http://127.0.0.1:3300",

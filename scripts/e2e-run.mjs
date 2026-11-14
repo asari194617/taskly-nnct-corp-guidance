@@ -191,6 +191,8 @@ try {
       mime_type: "image/png",
       file_name: "floor-a.png",
       source_page: 4,
+      image_width: 100,
+      image_height: 100,
       booths: [
         { booth: 1, x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
         { booth: 2, x: 0.55, y: 0.1, width: 0.2, height: 0.2 },
@@ -203,6 +205,8 @@ try {
       mime_type: "image/png",
       file_name: "floor-b.png",
       source_page: 5,
+      image_width: 100,
+      image_height: 100,
     },
     {
       id: "guide",

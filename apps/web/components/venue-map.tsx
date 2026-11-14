@@ -149,6 +149,8 @@ export default function VenueMap({
   } | null>(null);
   const highlighted = useRef<HTMLButtonElement | null>(null);
   const viewport = useRef<HTMLElement | null>(null);
+  const stage = useRef<HTMLDivElement | null>(null);
+  const loadedSource = useRef<{ floor: string; url: string } | null>(null);
   const mapRoot = useRef<HTMLElement | null>(null);
   const bottomControls = useRef<HTMLDivElement | null>(null);
   const previewTooltip = useRef<HTMLDivElement | null>(null);
@@ -379,12 +381,17 @@ export default function VenueMap({
         )
       : viewportSize.width;
   const boardWidth = (fittedWidth * zoom) / 100;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Image completion retries real stage geometry even when descriptor dimensions stay unchanged.
   useLayoutEffect(() => {
     const element = viewport.current,
       key = `${floor}:${viewReset}`;
     if (
       !url ||
+      loading ||
       !element ||
+      !stage.current ||
+      loadedSource.current?.floor !== floor ||
+      loadedSource.current.url !== url ||
       !viewportSize.width ||
       !viewportSize.height ||
       !imageWidth ||
@@ -392,17 +399,37 @@ export default function VenueMap({
       centeredView.current === key
     )
       return;
+    // Mounting the padded drawing can introduce scrollbars. Settle the actual
+    // viewport dimensions before treating its initial position as established.
+    if (
+      element.clientWidth !== viewportSize.width ||
+      element.clientHeight !== viewportSize.height
+    ) {
+      setViewportSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      });
+      return;
+    }
     // Padding leaves room to drag even when the whole drawing fits on screen.
-    element.scrollLeft = boardWidth / 2;
-    element.scrollTop = (boardWidth * imageHeight) / imageWidth / 2;
-    centeredView.current = key;
+    const left = boardWidth / 2;
+    const top = (boardWidth * imageHeight) / imageWidth / 2;
+    element.scrollLeft = left;
+    element.scrollTop = top;
+    if (
+      Math.abs(element.scrollLeft - left) < 1 &&
+      Math.abs(element.scrollTop - top) < 1
+    )
+      centeredView.current = key;
   }, [
     url,
+    loading,
     floor,
     viewReset,
     viewportSize,
     imageWidth,
     imageHeight,
+    imageSize,
     boardWidth,
   ]);
   const available = useMemo(
@@ -518,6 +545,7 @@ export default function VenueMap({
     setPreviewCompanyId(null);
     if (!floor) return;
     const controller = new AbortController();
+    loadedSource.current = null;
     const cacheSession = offlineRef.current.session;
     let disposed = false;
     let objectURL: string | null = null;
@@ -537,6 +565,7 @@ export default function VenueMap({
     const showBlob = (blob: Blob) => {
       if (disposed) return;
       objectURL = URL.createObjectURL(blob);
+      loadedSource.current = { floor, url: objectURL };
       setURL(objectURL);
     };
     const restore = async () => {
@@ -558,6 +587,7 @@ export default function VenueMap({
         if (disposed) return;
         if (await restore()) return;
         if (!cacheSession) {
+          loadedSource.current = { floor, url: signed.url };
           setURL(signed.url);
           return;
         }
@@ -630,7 +660,16 @@ export default function VenueMap({
   useEffect(() => {
     const element = viewport.current,
       target = highlighted.current;
-    if (!url || !element || !target || !element.clientWidth) return;
+    if (
+      !url ||
+      loading ||
+      !element ||
+      !target ||
+      !element.clientWidth ||
+      loadedSource.current?.floor !== floor ||
+      loadedSource.current.url !== url
+    )
+      return;
     const root = element.closest(".venue-map");
     const overlays = Array.from(
       root?.querySelectorAll<HTMLElement>(
@@ -704,6 +743,8 @@ export default function VenueMap({
     }
   }, [
     url,
+    loading,
+    floor,
     selectedCompanyId,
     session,
     imageSize,
@@ -1021,6 +1062,7 @@ export default function VenueMap({
             ) : url ? (
               <div
                 className="venue-map-stage"
+                ref={stage}
                 style={{
                   width: boardWidth ? `${boardWidth}px` : `${zoom}%`,
                   padding: `${viewportSize.height / 2}px ${viewportSize.width / 2}px`,

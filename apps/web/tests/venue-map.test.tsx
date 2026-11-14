@@ -1133,6 +1133,107 @@ describe("interactive private venue map", () => {
     expect(map.scrollTop).toBe(160);
   });
 
+  it("retries initial centering after image layout when metadata dimensions were already known", async () => {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1900);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(886);
+    let laidOut = false,
+      left = 0,
+      top = 0;
+    render(
+      <VenueMap
+        {...props()}
+        documents={[{ ...documents[0], image_width: 1600, image_height: 1100 }]}
+      />,
+    );
+    const map = screen.getByRole("region", { name: "操作できる会場マップ" });
+    Object.defineProperties(map, {
+      scrollLeft: {
+        configurable: true,
+        get: () => left,
+        set: (value: number) => {
+          left = laidOut ? value : 0;
+        },
+      },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (value: number) => {
+          top = laidOut ? value : 0;
+        },
+      },
+    });
+    const image = await screen.findByRole("img", { name: "検証1階マップ" });
+    expect(map.scrollLeft).toBe(0);
+    expect(map.scrollTop).toBe(0);
+    laidOut = true;
+    fireEvent.load(image);
+    const drawing = requireValue(image.parentElement?.parentElement);
+    const width = Number.parseFloat(drawing.style.width);
+    // The drawing's center must coincide with the viewport's center, even
+    // when native scrolling originally clamped the requested offset to zero.
+    expect(
+      Number.parseFloat(drawing.style.paddingLeft) - map.scrollLeft + width / 2,
+    ).toBeCloseTo(950);
+    expect(
+      Number.parseFloat(drawing.style.paddingTop) -
+        map.scrollTop +
+        (width * 1100) / 1600 / 2,
+    ).toBeCloseTo(443);
+    map.scrollLeft = 71;
+    map.scrollTop = 53;
+    fireEvent.load(image);
+    expect(map.scrollLeft).toBe(71);
+    expect(map.scrollTop).toBe(53);
+    expect(
+      screen.getByRole("button", { name: "マップの表示をリセット" }),
+    ).toHaveAccessibleDescription("現在の倍率 100パーセント");
+  });
+
+  it("does not consume a new floor's position using the preceding floor's URL", async () => {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(320);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(480);
+    let releaseFloor: (value: { url: string; expires_at: string }) => void =
+      () => {};
+    vi.mocked(documentURL).mockImplementation((id) =>
+      id === "lunch"
+        ? new Promise((resolve) => {
+            releaseFloor = resolve;
+          })
+        : Promise.resolve({
+            url: "https://api.example.test/arena",
+            expires_at: "2030-05-14T10:00:00Z",
+          }),
+    );
+    render(
+      <VenueMap
+        {...props()}
+        documents={[
+          { ...documents[0], image_width: 1000, image_height: 1000 },
+          { ...documents[1], image_width: 1000, image_height: 500 },
+        ]}
+      />,
+    );
+    await screen.findByRole("img", { name: "検証1階マップ" });
+    const map = screen.getByRole("region", { name: "操作できる会場マップ" });
+    map.scrollLeft = 71;
+    map.scrollTop = 53;
+    await userEvent.click(
+      screen.getByRole("button", { name: "検証2階マップ" }),
+    );
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(map.scrollLeft).toBe(71);
+    expect(map.scrollTop).toBe(53);
+    await act(async () => {
+      releaseFloor({
+        url: "https://api.example.test/lunch",
+        expires_at: "2030-05-14T10:00:00Z",
+      });
+    });
+    await screen.findByRole("img", { name: "検証2階マップ" });
+    expect(map.scrollLeft).toBe(160);
+    expect(map.scrollTop).toBe(80);
+  });
+
   it("offers one booth tab stop and arrow navigation without trapping users before controls", async () => {
     render(<VenueMap {...props()} />);
     await screen.findByRole("img", { name: "検証1階マップ" });
