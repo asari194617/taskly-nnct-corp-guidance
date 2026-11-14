@@ -10,7 +10,8 @@ import {
 import type { ReactNode, Ref } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
 import { IconButton } from "@openameba/spindle-ui/IconButton";
-import { TextLink } from "@openameba/spindle-ui/TextLink";
+import { LinkButton } from "@openameba/spindle-ui/LinkButton";
+import { googleCompanySearchURL } from "../lib/company-search";
 import type { Company } from "../lib/types";
 import { Icon } from "./icons";
 import { useOffline } from "./offline-context";
@@ -87,7 +88,7 @@ export function CompanyDetailContent({
   headingRef,
 }: DetailProps) {
   const { offline } = useOffline();
-  const googleSearch = `https://google.com/?${new URLSearchParams({ q: company.name })}`;
+  const googleSearch = googleCompanySearchURL(company.name);
   return (
     <>
       <div className="dialog-top">
@@ -114,21 +115,28 @@ export function CompanyDetailContent({
         <div className="company-detail-actions">
           <FavoriteButton company={company} saved={saved} onToggle={onSave} />
           {offline ? (
-            <span className="company-google-action" aria-disabled="true">
+            <Button
+              size="small"
+              variant="outlined"
+              icon={<Icon name="external" size={18} />}
+              iconPosition="end"
+              disabled
+              aria-disabled="true"
+            >
               Googleで調べる
-              <Icon name="external" size={16} />
-            </span>
+            </Button>
           ) : (
-            <span className="company-google-action">
-              <TextLink
-                href={googleSearch}
-                target="_blank"
-                rel="noopener noreferrer"
-                icon={<Icon name="external" size={16} />}
-              >
-                Googleで調べる
-              </TextLink>
-            </span>
+            <LinkButton
+              size="small"
+              variant="outlined"
+              href={googleSearch}
+              target="_blank"
+              rel="noopener noreferrer"
+              icon={<Icon name="external" size={18} />}
+              iconPosition="end"
+            >
+              Googleで調べる
+            </LinkButton>
           )}
         </div>
       </fieldset>

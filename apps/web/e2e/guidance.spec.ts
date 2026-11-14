@@ -222,6 +222,81 @@ async function expectUnobstructed(control: Locator) {
     }),
   ).toBe(true);
 }
+async function expectCompanyActionSizing(
+  page: Page,
+  google: Locator,
+  favorite: Locator,
+) {
+  const sizing = (control: Locator) =>
+    control.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        radius: style.borderRadius,
+        minHeight: style.minHeight,
+        paddingLeft: style.paddingLeft,
+        paddingRight: style.paddingRight,
+        fontSize: style.fontSize,
+        lineHeight: style.lineHeight,
+      };
+    });
+  expect(await sizing(google)).toEqual(await sizing(favorite));
+  const before = requireValue(await google.boundingBox());
+  const favoriteBox = requireValue(await favorite.boundingBox());
+  expect(before.height).toBeCloseTo(favoriteBox.height, 1);
+  expect(before.height).toBeGreaterThanOrEqual(32);
+  await page.mouse.move(0, 0);
+  await expect
+    .poll(() =>
+      google.evaluate((node) => getComputedStyle(node).backgroundColor),
+    )
+    .toBe("rgba(0, 0, 0, 0)");
+  let favoriteHover: { background: string; color: string } | undefined;
+  if ((await favorite.getAttribute("aria-pressed")) === "false") {
+    await favorite.hover();
+    await expect
+      .poll(() =>
+        favorite.evaluate((node) => getComputedStyle(node).backgroundColor),
+      )
+      .not.toBe("rgba(0, 0, 0, 0)");
+    await favorite.evaluate(async (node) => {
+      await Promise.all(
+        node.getAnimations().map((animation) => animation.finished),
+      );
+    });
+    favoriteHover = await favorite.evaluate((node) => ({
+      background: getComputedStyle(node).backgroundColor,
+      color: getComputedStyle(node).color,
+    }));
+  }
+  await google.hover();
+  await expect
+    .poll(() =>
+      google.evaluate((node) => getComputedStyle(node).backgroundColor),
+    )
+    .not.toBe("rgba(0, 0, 0, 0)");
+  if (favoriteHover) {
+    await expect
+      .poll(() =>
+        google.evaluate((node) => ({
+          background: getComputedStyle(node).backgroundColor,
+          color: getComputedStyle(node).color,
+        })),
+      )
+      .toEqual(favoriteHover);
+  }
+  expect(
+    await google.evaluate((node) => getComputedStyle(node).textDecorationLine),
+  ).toBe("none");
+  expect(requireValue(await google.boundingBox()).height).toBe(before.height);
+  await favorite.focus();
+  await page.keyboard.press("Tab");
+  await expect(google).toBeFocused();
+  expect(
+    await google.evaluate((node) =>
+      Number.parseFloat(getComputedStyle(node).outlineWidth),
+    ),
+  ).toBeGreaterThan(0);
+}
 async function expectTextOnlyHover(page: Page, link: Locator) {
   await link.scrollIntoViewIfNeeded();
   await page.mouse.move(0, 0);
@@ -3316,7 +3391,7 @@ for (const width of [320, 390, 1440]) {
           requireValue(await google.getAttribute("href")),
         );
         expect(searchURL.origin).toBe("https://google.com");
-        expect(searchURL.pathname).toBe("/");
+        expect(searchURL.pathname).toBe("/search");
         expect([...searchURL.searchParams.keys()]).toEqual(["q"]);
         expect(searchURL.searchParams.get("q")).toBe(name);
         await expect(google).toHaveAttribute("target", "_blank");
@@ -3331,14 +3406,14 @@ for (const width of [320, 390, 1440]) {
         expect(googleBox.x + googleBox.width).toBeLessThanOrEqual(
           actionsBox.x + actionsBox.width + 1,
         );
-        expect(googleBox.height).toBeGreaterThanOrEqual(36);
+        expect(googleBox.height).toBeGreaterThanOrEqual(32);
         const overlap =
           googleBox.x < favoriteBox.x + favoriteBox.width &&
           googleBox.x + googleBox.width > favoriteBox.x &&
           googleBox.y < favoriteBox.y + favoriteBox.height &&
           googleBox.y + googleBox.height > favoriteBox.y;
         expect(overlap).toBe(false);
-        await expectTextOnlyHover(page, google);
+        await expectCompanyActionSizing(page, google, favorite);
         if (colorScheme === "light" && index === 1) {
           await page.context().route("https://google.com/**", (route) =>
             route.fulfill({
@@ -3437,7 +3512,18 @@ for (const width of [320, 390, 1440]) {
         requireValue(await directoryGoogle.getAttribute("href")),
       ).searchParams.get("q"),
     ).toBe(shortName);
+    expect(
+      new URL(requireValue(await directoryGoogle.getAttribute("href")))
+        .pathname,
+    ).toBe("/search");
     await expectUnobstructed(directoryGoogle);
+    await expectCompanyActionSizing(
+      page,
+      directoryGoogle,
+      directoryDialog.getByRole("button", {
+        name: new RegExp(`^${shortName}を気になる`),
+      }),
+    );
     await directoryGoogle.focus();
     await expect(directoryGoogle).toBeFocused();
 
