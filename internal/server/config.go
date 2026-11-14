@@ -9,21 +9,26 @@ import (
 )
 
 type Config struct {
-	UIOrigin        string
-	APIOrigin       string
-	AuthIssuer      string
-	ClientID        string
-	EncryptionKey   []byte
-	SecureCookies   bool
-	R2Endpoint      string
-	R2Bucket        string
-	R2AccessKeyID   string
-	R2SecretKey     string
-	TasklyAPIOrigin string
-	TasklyEventID   string
+	UIOrigin         string
+	APIOrigin        string
+	AuthIssuer       string
+	ClientID         string
+	EncryptionKey    []byte
+	SecureCookies    bool
+	R2Endpoint       string
+	R2Bucket         string
+	R2AccessKeyID    string
+	R2SecretKey      string
+	TasklyAPIOrigin  string
+	TasklyEventID    string
+	MCPEnabled       bool
+	MCPBackendSecret string
 }
 
 func ConfigFromEnv() (Config, error) {
+	if value := os.Getenv("MCP_ENABLED"); value != "" && value != "0" && value != "1" {
+		return Config{}, fmt.Errorf("MCP_ENABLED must be 0 or 1")
+	}
 	if storage := os.Getenv("DOCUMENT_STORAGE"); storage != "" && storage != "r2" {
 		return Config{}, fmt.Errorf("DOCUMENT_STORAGE must be r2")
 	}
@@ -34,6 +39,8 @@ func ConfigFromEnv() (Config, error) {
 	c := Config{UIOrigin: os.Getenv("UI_ORIGIN"), APIOrigin: os.Getenv("API_ORIGIN"), AuthIssuer: os.Getenv("AUTH_ISSUER"), ClientID: os.Getenv("AUTH_CLIENT_ID"), EncryptionKey: key,
 		R2Endpoint: os.Getenv("R2_ENDPOINT"), R2Bucket: os.Getenv("R2_BUCKET"), R2AccessKeyID: os.Getenv("R2_ACCESS_KEY_ID"), R2SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
 		TasklyAPIOrigin: os.Getenv("TASKLY_API_ORIGIN"), TasklyEventID: os.Getenv("TASKLY_GUIDANCE_EVENT_ID")}
+	c.MCPEnabled = os.Getenv("MCP_ENABLED") == "1"
+	c.MCPBackendSecret = os.Getenv("MCP_BACKEND_SECRET")
 	if c.ClientID == "" {
 		c.ClientID = "nnct-corp-guidance-2026"
 	}
@@ -44,6 +51,9 @@ func ConfigFromEnv() (Config, error) {
 	return c, nil
 }
 func (c Config) Validate() error {
+	if c.MCPEnabled && (len(c.MCPBackendSecret) < 32 || strings.TrimSpace(c.MCPBackendSecret) != c.MCPBackendSecret || c.TasklyAPIOrigin == "") {
+		return fmt.Errorf("MCP requires its dedicated backend secret and Taskly bridge configuration")
+	}
 	if len(c.EncryptionKey) != 32 {
 		return fmt.Errorf("SESSION_ENCRYPTION_KEY must decode to 32 bytes")
 	}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "taskly-nnct-corp-guidance": {
+      "type": "streamable-http",
+      "url": "https://api.nnct-corp-guidance-2026.taskly.iy0306.com/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "provided",
+              "clientId": "nnct-guidance-chatgpt",
+              "tokenEndpointAuthMethod": "none"
+            },
+            "baseScopes": ["guidance:read"],
+            "defaultScopes": ["guidance:read"]
+          }
+        }
+      }
+    }
+  }
+}

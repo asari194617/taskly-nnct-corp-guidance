@@ -90,11 +90,13 @@ jobs:
           mkdir -p coverage
           go test -race -coverprofile=coverage/go.out ./...
           node .github/scripts/coverage-summary.mjs go-profile coverage/go.out api.json 80
+          node .github/scripts/coverage-summary.mjs go-profile coverage/go.out mcp-api.json 80 --include-prefix 'github.com/asari194617/taskly-nnct-corp-guidance/internal/server/mcp'
           node .github/scripts/coverage-summary.mjs go-profile coverage/go.out importer.json 80 --include-path 'github.com/asari194617/taskly-nnct-corp-guidance/cmd/import-guidance/'
       - name: Test real MySQL integration and require 80% statement coverage
         run: |
           go test -race -run '^TestMySQL' -coverprofile=coverage/integration.out ./internal/server
           node .github/scripts/coverage-summary.mjs go-profile coverage/integration.out integration.json 80
+          node .github/scripts/coverage-summary.mjs go-profile coverage/integration.out mcp-integration.json 80 --include-prefix 'github.com/asari194617/taskly-nnct-corp-guidance/internal/server/mcp'
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -103,6 +105,8 @@ jobs:
             api.json
             importer.json
             integration.json
+            mcp-api.json
+            mcp-integration.json
             coverage/integration.out
             coverage/go.out
             coverage/govulncheck.txt
@@ -233,6 +237,77 @@ jobs:
             apps/web/test-results/
           retention-days: 14
           if-no-files-found: ignore
+  mcp-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: synthetic-ci-only
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    env:
+      MCP_E2E_MYSQL_PASSWORD: synthetic-ci-only
+      MCP_E2E_AUTH_DIR: ${{ github.workspace }}/.e2e/mcp-auth
+      MCP_E2E_TASKLY_DIR: ${{ github.workspace }}/.e2e/mcp-taskly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Checkout reviewed resource-bound authorization server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: asari194617/taskly-auth
+          ref: 45bae241b3c329966403d0f6441028ebb1bef75c
+          path: .e2e/mcp-auth
+          ssh-key: ${{ secrets.MCP_AUTH_REPO_SSH_KEY }}
+          persist-credentials: false
+      - name: Checkout reviewed delegated Taskly bridge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: asari194617/taskly
+          ref: aa546683094d3e6c12ff6ea438a88788e59309d8
+          path: .e2e/mcp-taskly
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tests/mcp-e2e-client/go.sum
+            .e2e/mcp-auth/go.sum
+            .e2e/mcp-taskly/apps/server/go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "26.13.1"
+      - name: Preserve the Auth, Guidance and probe toolchain
+        run: echo "MCP_E2E_GO=$(command -v go)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.26.10"
+          cache: false
+      - name: Preserve the exact Taskly toolchain independently
+        run: echo "MCP_E2E_TASKLY_GO=$(command -v go)" >> "$GITHUB_ENV"
+      - run: node --test scripts/mcp-e2e.test.mjs
+      - name: Test actual Auth, Guidance and Taskly HTTP services with official MCP SDK
+        run: node scripts/mcp-e2e.mjs
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mcp-http-e2e
+          path: coverage/mcp-e2e/
+          retention-days: 14
+          if-no-files-found: ignore
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-mcp-functional
+          path: coverage/mcp-e2e/mcp-functional.json
+          retention-days: 14
+          if-no-files-found: ignore
   production-build:
     runs-on: ubuntu-latest
     steps:
@@ -247,17 +322,17 @@ jobs:
       - run: docker build --tag guidance-ci:${{ github.sha }} .
   required-ci:
     if: always()
-    needs: [api, web, data-tools, e2e, production-build, quality]
+    needs: [api, web, data-tools, e2e, mcp-e2e, production-build, quality]
     runs-on: ubuntu-latest
     steps:
       - name: Require every quality check, test and production build
         env:
           RESULTS: ${{ join(needs.*.result, ',') }}
         run: |
-          test "$RESULTS" = 'success,success,success,success,success,success'
+          test "$RESULTS" = 'success,success,success,success,success,success,success'
   coverage-comment:
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [metadata, api, web, data-tools, e2e]
+    needs: [metadata, api, web, data-tools, e2e, mcp-e2e]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -294,19 +369,29 @@ jobs:
             const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
             if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
                 pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
-            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['Service worker unit execution (lines)', 'offline-worker'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
+            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['Service worker unit execution (lines)', 'offline-worker'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration'], ['MCP API suite component (Go statements)', 'mcp-api'], ['MCP real MySQL component (Go statements)', 'mcp-integration']].map(([name,id]) => {
               let value = 'Unavailable (test/setup failed)';
               try {
-                const {percent} = read(id);
-                if (typeof percent === 'number' && Number.isFinite(percent) && percent >= 0 && percent <= 100)
-                  value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
-              } catch {}
+                const {percent,covered,total} = read(id);
+                if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) throw Error('Invalid percentage');
+                const component = id === 'mcp-api' || id === 'mcp-integration';
+                if (component && (!Number.isSafeInteger(covered) || !Number.isSafeInteger(total) || covered < 0 || total < 1 || covered > total || total > 10000000 || Math.abs(percent - 100 * covered / total) > 1e-8)) throw Error('Invalid MCP statement counts');
+                value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
+                if (component) value += ` (${covered}/${total} statements)`;
+              } catch { value = 'Unavailable (test/setup failed)'; }
               return `| ${name} | ${value} | ${id === 'e2e' ? 'Measured' : '80%'} |`;
             });
+            let functional = 'Unavailable (test/setup failed)';
+            try {
+              const {passed,total} = read('mcp-functional');
+              if (Number.isSafeInteger(passed) && total === 18 && passed >= 0 && passed <= total)
+                functional = `${passed}/${total} tests ${passed === total ? '✅' : '❌'}`;
+            } catch {}
+            rows.push(`| MCP HTTP / official SDK (functional) | ${functional} | All 18 |`);
             const marker = '<!-- nnct-guidance-coverage -->';
-            const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
+            const body = [marker, '### Test coverage', '', '| Group | Coverage / result | Required |',
               '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
-              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction and standalone real MySQL integration require 80%. Page browser execution is reported separately; service worker coverage measures its actual runtime in Node, not page E2E execution.',
+              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction, standalone real MySQL integration and both MCP component profiles require 80%. Full API/MySQL denominators are unchanged. MCP HTTP functional scenarios and page browser execution are separate metrics; scenario counts are not coverage. Service worker coverage measures its actual runtime in Node.',
               `[CI run](${run.html_url})`].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments,
               {owner,repo,issue_number:metadata.number,per_page:100});

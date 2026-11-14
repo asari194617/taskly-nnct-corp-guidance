@@ -22,6 +22,8 @@ type Server struct {
 	documents  *s3.PresignClient
 	homeBudget *homeRequestBudget
 	flowLimit  *flowLimiter
+	mcpLimit   *flowLimiter
+	mcpBudget  *homeRequestBudget
 }
 type authenticatedAccessTokenKey struct{}
 type User struct {
@@ -42,7 +44,7 @@ func New(c Config, store Store, client *http.Client) (*Server, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c), homeBudget: &homeRequestBudget{}, flowLimit: newFlowLimiter(5, 60)}, nil
+	return &Server{config: c, store: store, client: client, aead: aead, documents: newDocumentPresigner(c), homeBudget: &homeRequestBudget{}, flowLimit: newFlowLimiter(5, 60), mcpLimit: newFlowLimiter(5, 60), mcpBudget: &homeRequestBudget{}}, nil
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -63,7 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/bookmarks", s.protect(s.bookmarks))
 	mux.HandleFunc("PUT /api/bookmarks/{companyID}", s.protect(s.addBookmark))
 	mux.HandleFunc("DELETE /api/bookmarks/{companyID}", s.protect(s.removeBookmark))
-	return s.middleware(mux)
+	return s.withMCP(s.middleware(mux))
 }
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
