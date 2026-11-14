@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import { Blob as NativeBlob } from "node:buffer";
 import { IDBFactory } from "fake-indexeddb";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -43,7 +44,7 @@ const account = () => screen.getByRole("button", { name: "ユーザーメニュ�
 const company = () =>
   screen.getByRole("heading", { name: dataset.companies[0].name });
 const favorite = () =>
-  within(company().closest("article")!).getByRole("button", {
+  within(requireValue(company().closest("article"))).getByRole("button", {
     name: /気になるから解除|気になるに追加/,
   });
 async function openMenu() {
@@ -58,7 +59,7 @@ async function seed() {
     bookmarks: ["AM-1"],
   });
   expect(pack).not.toBeNull();
-  return pack!;
+  return requireValue(pack);
 }
 async function onlineReady() {
   const mounted = render(<GuidanceApp />);
@@ -93,7 +94,7 @@ beforeEach(async () => {
     if (path === "/api/preferences") return json(profile);
     if (path === "/api/bookmarks") return json({ company_ids: [...bookmarks] });
     if (path.startsWith("/api/bookmarks/")) {
-      const id = decodeURIComponent(path.split("/").pop()!);
+      const id = decodeURIComponent(requireValue(path.split("/").pop()));
       if (init?.method === "DELETE") bookmarks.delete(id);
       else bookmarks.add(id);
       return new Response(null, { status: 204 });
@@ -127,9 +128,9 @@ describe("offline application lifecycle", () => {
     expect(pack?.guidance.documents.every((item) => item.url === "")).toBe(
       true,
     );
-    expect((await readOfflineMap(pack!.session, "floor-a"))?.type).toBe(
-      "image/png",
-    );
+    expect(
+      (await readOfflineMap(requireValue(pack).session, "floor-a"))?.type,
+    ).toBe("image/png");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("X-Amz-Signature=private"),
       expect.objectContaining({ credentials: "omit", cache: "no-store" }),
@@ -210,7 +211,7 @@ describe("offline application lifecycle", () => {
     await onlineReady();
     const previousName = dataset.companies[0].name;
     expect(localStorage.getItem("guidance-offline-reset")).toBeNull();
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -243,8 +244,8 @@ describe("offline application lifecycle", () => {
 
   it("ignores an old identity response after a newer verified generation has finished", async () => {
     await onlineReady();
-    const before = (await restoreOfflinePack())!;
-    const original = fetchMock.getMockImplementation()! as (
+    const before = requireValue(await restoreOfflinePack());
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -271,7 +272,7 @@ describe("offline application lifecycle", () => {
     await waitFor(() =>
       expect(availability()).toHaveAttribute("data-state", "ready"),
     );
-    const protectedPack = (await restoreOfflinePack())!;
+    const protectedPack = requireValue(await restoreOfflinePack());
     const resetBefore = localStorage.getItem("guidance-offline-reset");
     const cacheRead = vi.spyOn(offlineStorage, "restoreOfflinePack");
     await act(async () =>
@@ -313,7 +314,7 @@ describe("offline application lifecycle", () => {
     render(<GuidanceApp />);
     await waitFor(() => expect(signal).toBeDefined());
     expect(navigator.onLine).toBe(true);
-    act(() => abortBudget!());
+    act(() => requireValue(abortBudget)());
     await screen.findByRole("heading", { name: dataset.companies[0].name });
     expect(favorite()).toBeDisabled();
     expect(availability()).toHaveAttribute("data-offline", "true");
@@ -324,7 +325,7 @@ describe("offline application lifecycle", () => {
     failures.set("/api/me", new TypeError("offline"));
     render(<GuidanceApp />);
     await screen.findByRole("heading", { name: dataset.companies[0].name });
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -349,7 +350,7 @@ describe("offline application lifecycle", () => {
 
   it("drops an unsettled optimistic interest when the connection is lost", async () => {
     await onlineReady();
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -373,7 +374,7 @@ describe("offline application lifecycle", () => {
 
   it("never persists another company’s pending optimistic bookmark", async () => {
     await onlineReady();
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -382,21 +383,23 @@ describe("offline application lifecycle", () => {
       if (String(input).includes("/api/bookmarks/") && init?.method)
         return new Promise<Response>((resolve) =>
           settles.set(
-            new URL(String(input)).pathname.split("/").pop()!,
+            requireValue(new URL(String(input)).pathname.split("/").pop()),
             resolve,
           ),
         );
       return original(input, init);
     });
     await userEvent.click(favorite());
-    const second = screen
-      .getByRole("heading", { name: dataset.companies[1].name })
-      .closest("article")!;
+    const second = requireValue(
+      screen
+        .getByRole("heading", { name: dataset.companies[1].name })
+        .closest("article"),
+    );
     await userEvent.click(
       within(second).getByRole("button", { name: /気になるに追加/ }),
     );
     await act(async () =>
-      settles.get("AM-1")!(new Response(null, { status: 204 })),
+      requireValue(settles.get("AM-1"))(new Response(null, { status: 204 })),
     );
     await waitFor(async () =>
       expect((await restoreOfflinePack())?.bookmarks).toEqual([]),
@@ -405,7 +408,7 @@ describe("offline application lifecycle", () => {
       within(second).getByRole("button", { name: /気になるから解除/ }),
     ).toHaveAttribute("aria-busy", "true");
     await act(async () =>
-      settles.get("AM-2")!(new Response(null, { status: 204 })),
+      requireValue(settles.get("AM-2"))(new Response(null, { status: 204 })),
     );
     await waitFor(async () =>
       expect((await restoreOfflinePack())?.bookmarks).toEqual(["AM-2"]),
@@ -455,7 +458,7 @@ describe("offline application lifecycle", () => {
 
   it("clears another tab’s visible private state and fences its pending load", async () => {
     await onlineReady();
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;

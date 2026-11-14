@@ -13,14 +13,24 @@ export default async function reportBrowserCoverage() {
   // onboarding and map components, instead of silently keeping the initial scope.
   async function modules(directory) {
     const files = [];
-    for (const entry of await readdir(resolve(directory), { withFileTypes: true })) {
+    for (const entry of await readdir(resolve(directory), {
+      withFileTypes: true,
+    })) {
       const name = `${directory}/${entry.name}`;
-      if (entry.isDirectory()) files.push(...await modules(name));
-      else if (/\.[jt]sx?$/.test(name) && !name.endsWith(".d.ts") && name !== "lib/types.ts") files.push(name);
+      if (entry.isDirectory()) files.push(...(await modules(name)));
+      else if (
+        /\.[jt]sx?$/.test(name) &&
+        !name.endsWith(".d.ts") &&
+        name !== "lib/types.ts"
+      )
+        files.push(name);
     }
     return files;
   }
-  const expected = new Set([...await modules("components"), ...await modules("lib")]);
+  const expected = new Set([
+    ...(await modules("components")),
+    ...(await modules("lib")),
+  ]);
   const inputs = await readdir(resolve(output, "raw"));
   const sources = new Map(),
     processes = [];
@@ -55,17 +65,25 @@ export default async function reportBrowserCoverage() {
     converter.applyCoverage(entry.functions);
     for (const [name, data] of Object.entries(converter.toIstanbul())) {
       const normalized = name.replaceAll("\\", "/");
-      const relative = [...expected].find(file => normalized.endsWith(`/${file}`));
+      const relative = [...expected].find((file) =>
+        normalized.endsWith(`/${file}`),
+      );
       if (relative) {
         data.path = resolve(relative);
         coverage.addFileCoverage(data);
       }
     }
   }
-  const measured = new Set(coverage.files().map(file => file.replaceAll("\\", "/")));
-  const missing = [...expected].filter(file => !measured.has(resolve(file).replaceAll("\\", "/")));
+  const measured = new Set(
+    coverage.files().map((file) => file.replaceAll("\\", "/")),
+  );
+  const missing = [...expected].filter(
+    (file) => !measured.has(resolve(file).replaceAll("\\", "/")),
+  );
   if (missing.length)
-    throw Error(`Authored browser modules missing from source coverage: ${missing.join(", ")}`);
+    throw Error(
+      `Authored browser modules missing from source coverage: ${missing.join(", ")}`,
+    );
   await mkdir(output, { recursive: true });
   const context = libReport.createContext({
     dir: output,
@@ -76,7 +94,7 @@ export default async function reportBrowserCoverage() {
   const summary = coverage.getCoverageSummary().toJSON();
   await writeFile(
     resolve("../../e2e.json"),
-    JSON.stringify({ percent: summary.lines.pct }) + "\n",
+    `${JSON.stringify({ percent: summary.lines.pct })}\n`,
   );
   console.log(
     `Chromium E2E source line coverage: ${summary.lines.pct}% (V8 mapped to authored TypeScript; WebKit execution and unit coverage are separate).`,

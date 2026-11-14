@@ -86,13 +86,25 @@ async function waitReady(url, service) {
 }
 try {
   // Both harness checks use loopback ports and run before any long-lived stack.
-  await run(process.execPath, ["--test", "--test-concurrency=1", "scripts/e2e-object-store.test.mjs", "scripts/e2e-services.test.mjs"]);
-  const administrator = await mysql.createConnection({ host, port, user, password });
+  await run(process.execPath, [
+    "--test",
+    "--test-concurrency=1",
+    "scripts/e2e-object-store.test.mjs",
+    "scripts/e2e-services.test.mjs",
+  ]);
+  const administrator = await mysql.createConnection({
+    host,
+    port,
+    user,
+    password,
+  });
   try {
     // Exact synthetic name, never accepted from arbitrary environment input.
     // Taskly's harness additionally requires an entirely empty *_e2e database.
     await administrator.query(`DROP DATABASE IF EXISTS ${tasklyDatabase}`);
-    await administrator.query(`CREATE DATABASE ${tasklyDatabase} CHARACTER SET utf8mb4`);
+    await administrator.query(
+      `CREATE DATABASE ${tasklyDatabase} CHARACTER SET utf8mb4`,
+    );
   } finally {
     await administrator.end();
   }
@@ -208,9 +220,19 @@ try {
       venue: "架空ホール",
       description: "検証専用データ",
       task_actions: {
-        visit_survey: { url: "https://forms.example.test/synthetic-visit", due_at: "2030-05-15T09:00:00+09:00" },
-        overall_survey: { url: "https://forms.example.test/synthetic-overall", due_at: "2030-05-16T09:00:00+09:00" },
-        sheet_submission: { document_id: "guide", page: 25, due_at: "2030-05-17T09:00:00+09:00" },
+        visit_survey: {
+          url: "https://forms.example.test/synthetic-visit",
+          due_at: "2030-05-15T09:00:00+09:00",
+        },
+        overall_survey: {
+          url: "https://forms.example.test/synthetic-overall",
+          due_at: "2030-05-16T09:00:00+09:00",
+        },
+        sheet_submission: {
+          document_id: "guide",
+          page: 25,
+          due_at: "2030-05-17T09:00:00+09:00",
+        },
       },
     },
     companies,
@@ -363,7 +385,11 @@ try {
   if (process.env.E2E_SKIP_BUILD !== "1")
     await run("npm", ["run", "build"], web);
   await run("go", ["build", "-o", resolve(privateDir, "api"), "./cmd/api"]);
-  await run("go", ["build", "-o", resolve(privateDir, "taskly"), "./cmd/guidance-e2e"], tasklyServer);
+  await run(
+    "go",
+    ["build", "-o", resolve(privateDir, "taskly"), "./cmd/guidance-e2e"],
+    tasklyServer,
+  );
   await mkdir(resolve(web, "coverage/e2e/raw"), { recursive: true });
   objectStore = await startObjectStore(privateDir);
   stop = await startServices(resolve(web, "out"));

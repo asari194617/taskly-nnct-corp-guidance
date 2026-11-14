@@ -10,7 +10,10 @@
     "start": "npx serve out",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "lint": "node ../../scripts/quality.mjs lint",
+    "format": "node ../../scripts/quality.mjs format",
+    "format:check": "node ../../scripts/quality.mjs format:check"
   },
   "dependencies": {
     "@openameba/spindle-tokens": "1.10.0",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@bcoe/v8-coverage": "^1.0.2",
+    "@biomejs/biome": "2.6.7",
     "@playwright/test": "^1.65.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",

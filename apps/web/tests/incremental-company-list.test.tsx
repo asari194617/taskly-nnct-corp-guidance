@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,7 +71,7 @@ describe("incremental company rendering", () => {
   it("adds only one page per intersection batch without moving keyboard focus", () => {
     render(
       <>
-        <button>操作中の項目</button>
+        <button type="button">操作中の項目</button>
         {list()}
       </>,
     );
@@ -122,7 +123,7 @@ describe("incremental company rendering", () => {
   it("retains a focused fallback button when the observer reveals the final batch", () => {
     render(
       <>
-        <button>次の操作</button>
+        <button type="button">次の操作</button>
         {list(companies.slice(0, 53))}
       </>,
     );
@@ -166,7 +167,7 @@ describe("incremental company rendering", () => {
     rerender(list([...companies].reverse()));
     expect(rendered()).toHaveLength(48);
     expect(within(rendered()[0]).getByRole("link")).toHaveTextContent(
-      companies.at(-1)!.name,
+      requireValue(companies.at(-1)).name,
     );
   });
   it("disconnects on unmount and ignores an already queued intersection", () => {

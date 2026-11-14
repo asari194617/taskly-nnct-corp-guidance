@@ -2,9 +2,21 @@
 // Guidance's OAuth userinfo and Taskly's introspection must identify one user.
 export const syntheticIdentities = Object.fromEntries(
   [
-    "alice", "bob", "onboarding", "routing", "map", "outage", "mobile",
-    "documents", "presentation", "refresh", "menu", "home", "home-denied",
-    "home-failure", "home-other",
+    "alice",
+    "bob",
+    "onboarding",
+    "routing",
+    "map",
+    "outage",
+    "mobile",
+    "documents",
+    "presentation",
+    "refresh",
+    "menu",
+    "home",
+    "home-denied",
+    "home-failure",
+    "home-other",
   ].map((alias, index) => [alias, String(1001 + index)]),
 );
 

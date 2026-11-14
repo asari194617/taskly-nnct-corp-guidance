@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import { Blob as NativeBlob } from "node:buffer";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,7 +51,7 @@ const tasks: HomeTasksResponse = {
 async function seed() {
   const pack = await saveOfflinePack(input());
   expect(pack).not.toBeNull();
-  return pack!;
+  return requireValue(pack);
 }
 async function database() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -309,7 +310,7 @@ describe("verified offline snapshots in IndexedDB", () => {
     expect(maps[0]).not.toHaveProperty("blob");
     const restored = await readOfflineMap(pack.session, "floor-a");
     expect(restored).toBeInstanceOf(Blob);
-    expect(await restored!.text()).toBe("portable-map");
+    expect(await requireValue(restored).text()).toBe("portable-map");
   });
 
   it("finishes asynchronous byte extraction before opening its IndexedDB transaction", async () => {
@@ -363,7 +364,7 @@ describe("verified offline snapshots in IndexedDB", () => {
         }),
     );
     const pending = saveOfflineMap(pack.session, "floor-a", blob);
-    const current = (await saveOfflinePack(input()))!;
+    const current = requireValue(await saveOfflinePack(input()));
     resolve(new TextEncoder().encode("old").buffer);
     await pending;
     expect(await readOfflineMap(current.session, "floor-a")).toBeNull();
@@ -474,14 +475,18 @@ describe("verified offline snapshots in IndexedDB", () => {
     expect(await readOfflineHome(first.session)).toBeNull();
     expect(await readOfflineMap(first.session, "floor-a")).toBeNull();
     expect((await restoreOfflinePack())?.bookmarks).toEqual(["AM-1"]);
-    expect(await (await readOfflineMap(next!.session, "floor-a"))?.text()).toBe(
-      "first-map",
-    );
+    expect(
+      await (
+        await readOfflineMap(requireValue(next).session, "floor-a")
+      )?.text(),
+    ).toBe("first-map");
     // A fresh full pack cannot silently renew the old image or home snapshot.
     now = first.session.expiresAt + 1;
     expect(await restoreOfflinePack()).not.toBeNull();
-    expect(await readOfflineMap(next!.session, "floor-a")).toBeNull();
-    expect(await readOfflineHome(next!.session)).toBeNull();
+    expect(
+      await readOfflineMap(requireValue(next).session, "floor-a"),
+    ).toBeNull();
+    expect(await readOfflineHome(requireValue(next).session)).toBeNull();
   });
 
   it.each(["account", "roster", "event", "map-geometry"])(
@@ -499,10 +504,12 @@ describe("verified offline snapshots in IndexedDB", () => {
       if (change === "roster") values.preferences.roster_number = 8;
       if (change === "event") values.guidance.event.date = "2031-05-14";
       if (change === "map-geometry")
-        values.guidance.documents[0].booths![0].x = 0.2;
+        requireValue(values.guidance.documents[0].booths)[0].x = 0.2;
       const next = await saveOfflinePack(values);
       expect(next?.home).toBeUndefined();
-      expect(await readOfflineMap(next!.session, "floor-a")).toBeNull();
+      expect(
+        await readOfflineMap(requireValue(next).session, "floor-a"),
+      ).toBeNull();
       expect((await inspect()).maps).toEqual([]);
     },
   );
@@ -555,7 +562,7 @@ describe("verified offline snapshots in IndexedDB", () => {
   it("invalidates only the matching home generation after a permission denial", async () => {
     const first = await seed();
     await saveOfflineHome(first.session, tasks);
-    const next = (await saveOfflinePack(input()))!;
+    const next = requireValue(await saveOfflinePack(input()));
     await deleteOfflineHome(first.session);
     expect(await readOfflineHome(next.session)).not.toBeNull();
     await deleteOfflineHome(next.session);

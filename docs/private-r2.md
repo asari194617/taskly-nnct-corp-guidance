@@ -30,11 +30,11 @@ R2_SECRET_ACCESS_KEY=<bucket-scoped-read-only-secret>
 
 元PDFの抽出と検証は、引き続きGit外の非公開ディレクトリで行います。各文書をアップロードするときは、次のメタデータを設定します。
 
-| 項目 | 設定 |
-| --- | --- |
-| Content-Type | 文書の `mime_type`。PDFは `application/pdf`、地図は `image/png` |
-| Content-Disposition | `inline; filename="<file_name>"` |
-| Cache-Control | `no-store` |
+| 項目                | 設定                                                            |
+| ------------------- | --------------------------------------------------------------- |
+| Content-Type        | 文書の `mime_type`。PDFは `application/pdf`、地図は `image/png` |
+| Content-Disposition | `inline; filename="<file_name>"`                                |
+| Cache-Control       | `no-store`                                                      |
 
 [R2のオブジェクトAPI](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/objects/)またはS3互換APIを利用できます。Cloudflare CLIは `cf r2 buckets objects` で管理できます。CLIに必要なHTTPメタデータの指定がない場合は、REST APIのアップロードリクエストへ上記ヘッダーを付けます。
 
@@ -46,15 +46,23 @@ R2_SECRET_ACCESS_KEY=<bucket-scoped-read-only-secret>
 
 ```json
 {
-  "rules": [{
-    "allowed": {
-      "origins": ["https://nnct-corp-guidance-2026.taskly.iy0306.com"],
-      "methods": ["GET", "HEAD"],
-      "headers": ["Range", "Content-Type"]
-    },
-    "exposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges", "Content-Disposition"],
-    "maxAgeSeconds": 600
-  }]
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://nnct-corp-guidance-2026.taskly.iy0306.com"],
+        "methods": ["GET", "HEAD"],
+        "headers": ["Range", "Content-Type"]
+      },
+      "exposeHeaders": [
+        "ETag",
+        "Content-Length",
+        "Content-Range",
+        "Accept-Ranges",
+        "Content-Disposition"
+      ],
+      "maxAgeSeconds": 600
+    }
+  ]
 }
 ```
 

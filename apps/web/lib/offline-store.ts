@@ -218,8 +218,9 @@ function home(value: unknown): HomeTasksResponse {
       task.kind !== "assigned_visit" ||
       !task.completed ||
       task.completion_disabled ||
+      typeof task.term !== "number" ||
       !Number.isInteger(task.term) ||
-      task.term! <= 0 ||
+      task.term <= 0 ||
       typeof hint !== "string" ||
       hint.length > 128 ||
       !/^[A-Za-z][A-Za-z0-9_-]*(?::[1-9]\d*)?$/.test(hint)
@@ -401,9 +402,9 @@ function matches(
 ): record is StoredPack {
   return Boolean(
     record &&
-    record.pack.session.scope === session.scope &&
-    record.pack.session.generation === session.generation &&
-    record.pack.session.expiresAt === session.expiresAt,
+      record.pack.session.scope === session.scope &&
+      record.pack.session.generation === session.generation &&
+      record.pack.session.expiresAt === session.expiresAt,
   );
 }
 

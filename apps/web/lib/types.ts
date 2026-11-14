@@ -50,7 +50,8 @@ export type NoticeSection = {
   id: string;
   title: string;
   blocks: (
-    { type: "paragraph"; text: string } | { type: "list"; items: string[] }
+    | { type: "paragraph"; text: string }
+    | { type: "list"; items: string[] }
   )[];
 };
 export type Guidance = {
@@ -64,7 +65,10 @@ export type Guidance = {
 };
 
 export type HomeTaskKind =
-  "assigned_visit" | "visit_survey" | "overall_survey" | "sheet_submission";
+  | "assigned_visit"
+  | "visit_survey"
+  | "overall_survey"
+  | "sheet_submission";
 export type HomeTask = {
   id: string;
   kind: HomeTaskKind;

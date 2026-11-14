@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -347,7 +348,8 @@ describe("Taskly-backed home tasks", () => {
     const old = deferred<Response>();
     fetchMock.mockReturnValueOnce(old.promise);
     const previous = renderHook(() => useHomeTasks(onExpired));
-    const oldSignal = fetchMock.mock.calls[0][1]!.signal as AbortSignal;
+    const oldSignal = requireValue(fetchMock.mock.calls[0][1])
+      .signal as AbortSignal;
     previous.unmount();
     expect(oldSignal.aborted).toBe(true);
     fetchMock.mockResolvedValueOnce(
@@ -379,7 +381,8 @@ describe("Taskly-backed home tasks", () => {
     act(() => {
       writing = previous.result.current.toggle("visit_survey:1");
     });
-    const signal = fetchMock.mock.calls.at(-1)![1]!.signal as AbortSignal;
+    const signal = requireValue(requireValue(fetchMock.mock.calls.at(-1))[1])
+      .signal as AbortSignal;
     previous.unmount();
     expect(signal.aborted).toBe(true);
     fetchMock.mockResolvedValueOnce(
@@ -461,7 +464,7 @@ describe("Taskly-backed home tasks", () => {
       vi.useFakeTimers();
       const stalled = (_input: RequestInfo | URL, init?: RequestInit) =>
         new Promise<Response>((_, reject) => {
-          init!.signal!.addEventListener(
+          requireValue(requireValue(init).signal).addEventListener(
             "abort",
             () => reject(new DOMException("Aborted", "AbortError")),
             { once: true },
@@ -549,7 +552,7 @@ describe("Taskly-backed home tasks", () => {
     fetchMock.mockReturnValueOnce(resumed.promise);
     state = {
       ...state,
-      session: { ...state.session!, generation: "revalidated" },
+      session: { ...requireValue(state.session), generation: "revalidated" },
     };
     rerender();
     expect(result.current.readonly).toBe(true);
@@ -657,7 +660,7 @@ describe("Taskly-backed home tasks", () => {
     });
     state = {
       ...state,
-      session: { ...state.session!, generation: "new-generation" },
+      session: { ...requireValue(state.session), generation: "new-generation" },
     };
     rerender();
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -684,7 +687,9 @@ describe("Taskly-backed home tasks", () => {
     act(() => {
       writing = result.current.toggle("visit_survey:1");
     });
-    const signal = fetchMock.mock.calls.at(-1)![1]!.signal!;
+    const signal = requireValue(
+      requireValue(requireValue(fetchMock.mock.calls.at(-1))[1]).signal,
+    );
     expect(result.current.data?.tasks[0].completed).toBe(true);
     state = { ...state, offline: true };
     rerender();
@@ -782,7 +787,7 @@ describe("Taskly-backed home tasks", () => {
     });
     const writeSignals = fetchMock.mock.calls
       .filter(([, init]) => init?.method === "PUT")
-      .map(([, init]) => init!.signal!);
+      .map(([, init]) => requireValue(requireValue(init).signal));
     await act(async () => result.current.refresh());
     expect(writeSignals.every((signal) => signal.aborted)).toBe(true);
     expect(result.current).toMatchObject({ data: null, readonly: true });
@@ -877,7 +882,9 @@ describe("survey-owned assigned visit completion", () => {
       { ...initial[1], completed: true, auto_completed_by: initial[0].id },
     ]);
     expect(completionWrites()).toHaveLength(1);
-    expect(JSON.parse(String(completionWrites()[0][1]!.body))).toEqual({
+    expect(
+      JSON.parse(String(requireValue(completionWrites()[0][1]).body)),
+    ).toEqual({
       completed: true,
     });
     const acceptedVisit = {
@@ -1308,7 +1315,9 @@ describe("undoing a survey-owned assigned visit", () => {
     );
     expect(completionWrites()).toHaveLength(1);
     expect(completionWrites()[0][0]).toContain("/tasks/assigned_visit%3A1");
-    expect(JSON.parse(String(completionWrites()[0][1]!.body))).toEqual({
+    expect(
+      JSON.parse(String(requireValue(completionWrites()[0][1]).body)),
+    ).toEqual({
       completed: false,
     });
     const survey = {
@@ -1758,7 +1767,9 @@ describe("confirmed linked completions in offline storage", () => {
         writeB = mounted.result.current.toggle(second.id);
       });
       expect(mounted.result.current.pending.size).toBe(4);
-      const signals = completionWrites().map(([, init]) => init!.signal!);
+      const signals = completionWrites().map(([, init]) =>
+        requireValue(requireValue(init).signal),
+      );
       await act(async () => {
         if (operation === "GET") await mounted.result.current.refresh();
         else {
@@ -1839,7 +1850,7 @@ describe("confirmed linked completions in offline storage", () => {
       const pair = pairMutation(direction);
       let state: OfflineState = {
         ...offlineState(false),
-        session: pack!.session,
+        session: requireValue(pack).session,
       };
       fetchMock.mockResolvedValueOnce(json(pair.initial));
       const mounted = renderHook(() => useHomeTasks(onExpired), {
@@ -1848,7 +1859,7 @@ describe("confirmed linked completions in offline storage", () => {
         ),
       });
       await waitFor(() => expect(mounted.result.current.loading).toBe(false));
-      const oldCache = await store.readOfflineHome(pack!.session);
+      const oldCache = await store.readOfflineHome(requireValue(pack).session);
       expect(oldCache?.data.tasks.map((row) => row.completed)).toEqual(
         pair.initial.tasks.map((row) => row.completed),
       );
@@ -1858,13 +1869,17 @@ describe("confirmed linked completions in offline storage", () => {
       act(() => {
         writing = mounted.result.current.toggle(pair.id);
       });
-      const pendingCache = await store.readOfflineHome(pack!.session);
+      const pendingCache = await store.readOfflineHome(
+        requireValue(pack).session,
+      );
       expect(pendingCache?.data).toEqual(oldCache?.data);
       await act(async () => {
         response.resolve(json(pair.response));
         await writing;
       });
-      const confirmedCache = await store.readOfflineHome(pack!.session);
+      const confirmedCache = await store.readOfflineHome(
+        requireValue(pack).session,
+      );
       expect(confirmedCache?.data.tasks.map((row) => row.completed)).toEqual(
         pair.accepted.tasks.map((row) => row.completed),
       );

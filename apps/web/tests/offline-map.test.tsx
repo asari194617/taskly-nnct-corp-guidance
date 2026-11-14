@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import VenueMap from "../components/venue-map";
@@ -23,7 +24,9 @@ const session = {
 };
 const blob = new Blob(["synthetic-map"], { type: "image/png" });
 const data = fixture();
-const firstMap = data.documents.find((item) => item.kind === "map")!;
+const firstMap = requireValue(
+  data.documents.find((item) => item.kind === "map"),
+);
 function mount(offline: boolean) {
   const onExpired = vi.fn(),
     onOffline = vi.fn();

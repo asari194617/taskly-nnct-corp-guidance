@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import {
   act,
   fireEvent,
@@ -192,7 +193,7 @@ describe("interactive private venue map", () => {
     const options = props();
     const panel = (
       <section className="map-company-panel" aria-label="検証企業情報">
-        <button>企業情報を閉じる</button>
+        <button type="button">企業情報を閉じる</button>
       </section>
     );
     const view = render(
@@ -848,11 +849,11 @@ describe("interactive private venue map", () => {
     fireEvent.pointerMove(first, { clientX: 250, clientY: 180 });
     expect(schedule).toHaveBeenCalledTimes(1);
     expect(preview.style.left).toBe("112px");
-    act(() => frames.shift()!(0));
+    act(() => requireValue(frames.shift())(0));
     expect(preview.style.left).toBe("162px");
     expect(preview.style.top).toBe("132px");
     fireEvent.pointerMove(first, { clientX: 590, clientY: 350 });
-    act(() => frames.shift()!(0));
+    act(() => requireValue(frames.shift())(0));
     expect(preview.style.left).toBe("298px");
     expect(preview.style.top).toBe("214px");
     expect(area.scrollLeft).toBe(before.left);

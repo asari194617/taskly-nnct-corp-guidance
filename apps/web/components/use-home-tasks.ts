@@ -24,7 +24,12 @@ type Snapshot = {
 };
 
 function completionPartner(task: HomeTask, tasks: HomeTask[]) {
-  if (!Number.isInteger(task.term) || task.term! <= 0) return;
+  if (
+    typeof task.term !== "number" ||
+    !Number.isInteger(task.term) ||
+    task.term <= 0
+  )
+    return;
   const partnerKind =
     task.kind === "visit_survey"
       ? "assigned_visit"
@@ -76,14 +81,14 @@ export function useHomeTasks(onExpired: () => void) {
     setState(next);
   }, []);
 
-  const currentRequest = (
-    requestGeneration: number,
-    session: OfflineSession | null,
-  ) =>
-    mounted.current &&
-    requestGeneration === generation.current &&
-    session?.generation === offlineRef.current.session?.generation &&
-    session?.scope === offlineRef.current.session?.scope;
+  const currentRequest = useCallback(
+    (requestGeneration: number, session: OfflineSession | null) =>
+      mounted.current &&
+      requestGeneration === generation.current &&
+      session?.generation === offlineRef.current.session?.generation &&
+      session?.scope === offlineRef.current.session?.scope,
+    [],
+  );
   const persistConfirmed = useCallback((session: OfflineSession | null) => {
     if (session && confirmed.current)
       void saveOfflineHome(session, confirmed.current).catch(() => {});
@@ -153,7 +158,7 @@ export function useHomeTasks(onExpired: () => void) {
         readonly: true,
       }));
     },
-    [update],
+    [currentRequest, update],
   );
 
   const refresh = useCallback(async () => {
@@ -247,8 +252,16 @@ export function useHomeTasks(onExpired: () => void) {
       clearTimeout(timer);
       if (read.current === controller) read.current = null;
     }
-  }, [onExpired, forbidHome, persistConfirmed, restore, update]);
+  }, [
+    onExpired,
+    currentRequest,
+    forbidHome,
+    persistConfirmed,
+    restore,
+    update,
+  ]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new authenticated session generation must abort and refetch even when the account/profile scope stays the same.
   useEffect(() => {
     mounted.current = true;
     const scope = offline.session?.scope || "";
@@ -301,21 +314,21 @@ export function useHomeTasks(onExpired: () => void) {
 
   const toggle = useCallback(
     async (id: string) => {
-      const original = snapshot.current.data?.tasks.find(
-        (task) => task.id === id,
-      );
+      const currentTasks = snapshot.current.data?.tasks;
+      const original = currentTasks?.find((task) => task.id === id);
       if (
         !mounted.current ||
         offlineRef.current.offline ||
         navigator.onLine === false ||
         snapshot.current.readonly ||
+        !currentTasks ||
         !original ||
         pending.current.has(id) ||
         (original.completion_disabled && !original.completed) ||
         snapshot.current.error
       )
         return;
-      const partner = completionPartner(original, snapshot.current.data!.tasks);
+      const partner = completionPartner(original, currentTasks);
       const originals = new Map<string, HomeTask>([
         [original.id, original],
         ...(partner ? [[partner.id, partner] as const] : []),
@@ -326,9 +339,9 @@ export function useHomeTasks(onExpired: () => void) {
       // rejection instead of showing only half of the pair as completed.
       const blockedPartner = Boolean(
         partner &&
-        completed &&
-        partner.completion_disabled &&
-        !partner.completed,
+          completed &&
+          partner.completion_disabled &&
+          !partner.completed,
       );
       const requestGeneration = generation.current;
       const session = offlineRef.current.session;
@@ -395,17 +408,19 @@ export function useHomeTasks(onExpired: () => void) {
           throw new Error("Unexpected task response");
         if (related !== undefined && !Array.isArray(related))
           throw new Error("Unexpected related tasks");
+        const relatedTask = related?.[0];
         if (partner) {
           if (
             related?.length !== 1 ||
-            related[0].id !== partner.id ||
-            related[0].kind !== partner.kind ||
-            related[0].term !== original.term
+            !relatedTask ||
+            relatedTask.id !== partner.id ||
+            relatedTask.kind !== partner.kind ||
+            relatedTask.term !== original.term
           )
             throw new Error("Missing or unexpected related task response");
         } else if (related?.length) throw new Error("Unexpected related tasks");
         const acceptedTasks = new Map<string, HomeTask>([[id, task]]);
-        if (partner) acceptedTasks.set(partner.id, related![0]);
+        if (partner && relatedTask) acceptedTasks.set(partner.id, relatedTask);
         // Persist one authoritative snapshot for the entire accepted pair.
         // The UI may also contain other optimistic writes, which must not enter storage.
         if (confirmed.current) {
@@ -470,7 +485,7 @@ export function useHomeTasks(onExpired: () => void) {
         }
       }
     },
-    [onExpired, forbidHome, persistConfirmed, restore, update],
+    [onExpired, currentRequest, forbidHome, persistConfirmed, restore, update],
   );
 
   return { ...state, refresh, toggle };

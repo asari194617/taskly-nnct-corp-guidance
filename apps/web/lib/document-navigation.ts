@@ -2,7 +2,8 @@ export function documentHref(url: string, page?: number): string {
   const destination = new URL(url);
   if (destination.protocol !== "https:" && destination.protocol !== "http:")
     throw new Error("Unsupported document URL");
-  if (Number.isInteger(page) && page! > 0) destination.hash = `page=${page}`;
+  if (typeof page === "number" && Number.isInteger(page) && page > 0)
+    destination.hash = `page=${page}`;
   return destination.href;
 }
 

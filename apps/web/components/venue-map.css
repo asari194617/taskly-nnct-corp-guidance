@@ -148,14 +148,6 @@
   margin: 0;
   list-style: none;
 }
-.venue-map-sheet li + li {
-  border-top: 1px solid var(--color-border-low-emphasis);
-}
-.venue-map-sheet li button {
-  width: 100%;
-  text-align: left;
-  justify-content: flex-start;
-}
 .venue-map-zoom {
   right: var(--map-edge);
   bottom: calc(var(--map-edge) + env(safe-area-inset-bottom));
@@ -520,4 +512,12 @@
   .venue-map-legend li > span {
     background: var(--color-background);
   }
+}
+.venue-map-sheet li + li {
+  border-top: 1px solid var(--color-border-low-emphasis);
+}
+.venue-map-sheet li button {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
 }

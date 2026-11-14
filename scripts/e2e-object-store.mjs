@@ -128,27 +128,44 @@ export async function startObjectStore(
       // cannot call this endpoint, and production never imports this server.
       if (url.pathname === "/__test/clock") {
         const reply = (status, body) => {
-          res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.writeHead(status, {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+          });
           res.end(JSON.stringify(body));
         };
-        if (req.headers.host !== `127.0.0.1:${server.address().port}` ||
-            req.socket.remoteAddress !== "127.0.0.1" || req.headers.origin)
+        if (
+          req.headers.host !== `127.0.0.1:${server.address().port}` ||
+          req.socket.remoteAddress !== "127.0.0.1" ||
+          req.headers.origin
+        )
           return reply(403, { error: "forbidden" });
-        if (req.method !== "POST") return reply(405, { error: "method_not_allowed" });
+        if (req.method !== "POST")
+          return reply(405, { error: "method_not_allowed" });
         if (req.headers["content-type"] !== "application/json")
           return reply(415, { error: "json_required" });
         if (url.search) return reply(400, { error: "invalid_clock" });
         let body = "";
         for await (const part of req) {
           body += part;
-          if (Buffer.byteLength(body) > 256) return reply(413, { error: "oversized_clock" });
+          if (Buffer.byteLength(body) > 256)
+            return reply(413, { error: "oversized_clock" });
         }
         let value;
-        try { value = JSON.parse(body); }
-        catch { return reply(400, { error: "invalid_clock" }); }
-        if (!value || typeof value !== "object" || Array.isArray(value) ||
-            Object.keys(value).length !== 1 || !Number.isInteger(value.offset_ms) ||
-            value.offset_ms < 0 || value.offset_ms > 3_600_000)
+        try {
+          value = JSON.parse(body);
+        } catch {
+          return reply(400, { error: "invalid_clock" });
+        }
+        if (
+          !value ||
+          typeof value !== "object" ||
+          Array.isArray(value) ||
+          Object.keys(value).length !== 1 ||
+          !Number.isInteger(value.offset_ms) ||
+          value.offset_ms < 0 ||
+          value.offset_ms > 3_600_000
+        )
           return reply(400, { error: "invalid_clock" });
         clockOffset = value.offset_ms;
         return reply(200, { offset_ms: clockOffset });
@@ -205,10 +222,9 @@ export async function startObjectStore(
       if (req.headers.range) {
         const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);
         const first = range ? Number(range[1]) : NaN;
-        const last =
-          range && range[2]
-            ? Math.min(Number(range[2]), body.length - 1)
-            : body.length - 1;
+        const last = range?.[2]
+          ? Math.min(Number(range[2]), body.length - 1)
+          : body.length - 1;
         if (!Number.isFinite(first) || first > last || first >= body.length) {
           res.writeHead(416, { "Content-Range": `bytes */${body.length}` });
           return res.end();

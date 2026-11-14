@@ -6,15 +6,15 @@ CI は PR と main の全変更で動作します。パスによる省略やセ�
 
 ## 計測する範囲
 
-| レポート | 計測 | 合格基準 |
-| --- | --- | --- |
-| Go アプリケーション全体 | `go test -race -coverprofile`、API と各コマンド | statements 80%以上 |
-| インポーター | 同じ Go プロファイルの対象コマンド | statements 80%以上 |
-| Web | Vitest + V8、アプリケーションコード | lines 80%以上 |
-| Service Worker | 配備する関数そのものをNodeで実行 | lines・branches・functions 各80%以上 |
-| PDF 抽出器 | coverage.py、テストコードを除く scripts | statements 80%以上 |
-| 実 MySQL 結合テスト | `^TestMySQL` だけを実行し、`internal/server` 全体を計測 | statements 80%以上 |
-| ブラウザー E2E | Chromium の画面操作で実行されたソースの範囲を V8 で計測 | 実測値を報告 |
+| レポート                | 計測                                                    | 合格基準                             |
+| ----------------------- | ------------------------------------------------------- | ------------------------------------ |
+| Go アプリケーション全体 | `go test -race -coverprofile`、API と各コマンド         | statements 80%以上                   |
+| インポーター            | 同じ Go プロファイルの対象コマンド                      | statements 80%以上                   |
+| Web                     | Vitest + V8、アプリケーションコード                     | lines 80%以上                        |
+| Service Worker          | 配備する関数そのものをNodeで実行                        | lines・branches・functions 各80%以上 |
+| PDF 抽出器              | coverage.py、テストコードを除く scripts                 | statements 80%以上                   |
+| 実 MySQL 結合テスト     | `^TestMySQL` だけを実行し、`internal/server` 全体を計測 | statements 80%以上                   |
+| ブラウザー E2E          | Chromium の画面操作で実行されたソースの範囲を V8 で計測 | 実測値を報告                         |
 
 単体テストの合算値と結合・E2E 単独の実行範囲は別の指標です。後者の値を単体カバレッジと合算したり、操作が通っただけで100%と見なしたりしません。行カバレッジだけで全分岐の正しさは保証されないため、未認証・状態不一致・他ユーザー・不正パス・失効・障害時のケースもテストします。
 
@@ -63,7 +63,6 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 実 MySQL テストは使い捨ての専用 DB を用意し、`MYSQL_TEST_DSN` を渡して `go test -race -run '^TestMySQL' -coverprofile=/tmp/guidance-integration.out ./internal/server` を実行します。テストはスキーマを準備し、架空データを書き込みます。稼働データを含む DB の DSN を使わないでください。
 
 ブラウザー E2E は `E2E_MYSQL_PASSWORD` と `E2E_MYSQL_DATABASE` に別の使い捨て DB の接続先を指定し、`E2E_TASKLY_DIR` にレビュー済み Taskly チェックアウトのルートを指定します。MySQL アカウントには固定名 `taskly_guidance_e2e` の作成・削除権限も必要です。`npm --prefix apps/web exec -- playwright install --with-deps chromium webkit` で両ブラウザーをインストールしてから `node scripts/e2e-run.mjs` を実行すると、スクリプトが架空データの取り込み、ローカル OAuth サーバー、両サービスの Go API、Next.js 静的本番ビルドの配信を準備します。詳細な出力先はスクリプトと `apps/web/e2e` を参照してください。
-
 
 実 MySQL 結合テストは `TestMySQL` で始まるテストだけを選び、`internal/server` 全体の実行カバレッジを単独で測定し、80%以上を必須にします。API 全体のテストやブラウザー E2E の値を合算せず、ファイル・処理の除外も行いません。同一リポジトリと fork の PR コメントの両方で、結合テストの達成率と80%の基準を表示し、元のプロファイルを artifact に保存します。
 

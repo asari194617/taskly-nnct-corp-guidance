@@ -41,10 +41,25 @@ export async function startServices(output) {
     }
   };
   const issueTokens = (sub, family, refreshExpiry, expiresIn = 900) => {
-    const access = token(), refresh = token();
-    tokens.set(access, { sub, family, expiresAt: Date.now() + expiresIn * 1000 });
-    refreshTokens.set(refresh, { sub, family, expiresAt: refreshExpiry, used: false });
-    return { access_token: access, refresh_token: refresh, token_type: "Bearer", expires_in: expiresIn };
+    const access = token(),
+      refresh = token();
+    tokens.set(access, {
+      sub,
+      family,
+      expiresAt: Date.now() + expiresIn * 1000,
+    });
+    refreshTokens.set(refresh, {
+      sub,
+      family,
+      expiresAt: refreshExpiry,
+      used: false,
+    });
+    return {
+      access_token: access,
+      refresh_token: refresh,
+      token_type: "Bearer",
+      expires_in: expiresIn,
+    };
   };
   const issuer = createServer(async (req, res) => {
     try {
@@ -62,7 +77,7 @@ export async function startServices(output) {
         requests.set(id, Object.fromEntries(q));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         return res.end(
-          `<html lang="ja"><head><title>検証用ログイン</title></head><body><h1>検証用ログイン</h1><form method="POST" action="/mock/login"><input type="hidden" name="id" value="${id}"><label>検証アカウント<select name="subject">${subjects.map(subject => `<option value="${subject}">${subject}</option>`).join("")}</select></label><button type="submit">検証用アカウントで続ける</button></form></body></html>`,
+          `<html lang="ja"><head><title>検証用ログイン</title></head><body><h1>検証用ログイン</h1><form method="POST" action="/mock/login"><input type="hidden" name="id" value="${id}"><label>検証アカウント<select name="subject">${subjects.map((subject) => `<option value="${subject}">${subject}</option>`).join("")}</select></label><button type="submit">検証用アカウントで続ける</button></form></body></html>`,
         );
       }
       if (url.pathname === "/mock/login" && req.method === "POST") {
@@ -84,31 +99,61 @@ export async function startServices(output) {
         const q = await form(req);
         if (q.get("grant_type") === "refresh_token") {
           const refresh = refreshTokens.get(q.get("refresh_token"));
-          if (q.get("client_id") !== syntheticGuidanceClientID || !refresh ||
-              refresh.expiresAt <= Date.now() || revokedFamilies.has(refresh.family))
+          if (
+            q.get("client_id") !== syntheticGuidanceClientID ||
+            !refresh ||
+            refresh.expiresAt <= Date.now() ||
+            revokedFamilies.has(refresh.family)
+          )
             return json(res, 400, { error: "invalid_grant" });
           if (refresh.used) {
             revokeFamily(refresh.family);
             return json(res, 400, { error: "invalid_grant" });
           }
           refresh.used = true;
-          refreshCounts.set(refresh.sub, (refreshCounts.get(refresh.sub) || 0) + 1);
-          return json(res, 200, issueTokens(refresh.sub, refresh.family, refresh.expiresAt));
+          refreshCounts.set(
+            refresh.sub,
+            (refreshCounts.get(refresh.sub) || 0) + 1,
+          );
+          return json(
+            res,
+            200,
+            issueTokens(refresh.sub, refresh.family, refresh.expiresAt),
+          );
         }
         const code = codes.get(q.get("code"));
         if (
-          q.get("grant_type") !== "authorization_code" || !code ||
+          q.get("grant_type") !== "authorization_code" ||
+          !code ||
           q.get("client_id") !== code.client_id ||
           q.get("redirect_uri") !== code.redirect_uri ||
-          createHash("sha256").update(q.get("code_verifier") || "").digest("base64url") !== code.code_challenge
-        ) return json(res, 400, { error: "invalid_grant" });
+          createHash("sha256")
+            .update(q.get("code_verifier") || "")
+            .digest("base64url") !== code.code_challenge
+        )
+          return json(res, 400, { error: "invalid_grant" });
         codes.delete(q.get("code"));
-        return json(res, 200, issueTokens(code.sub, token(), Date.now() + 30 * 86400 * 1000, shortAccess.get(code.sub) || 900));
+        return json(
+          res,
+          200,
+          issueTokens(
+            code.sub,
+            token(),
+            Date.now() + 30 * 86400 * 1000,
+            shortAccess.get(code.sub) || 900,
+          ),
+        );
       }
       if (url.pathname === "/oauth/userinfo") {
         if (unavailable) return json(res, 503, { error: "synthetic_outage" });
-        const access = tokens.get((req.headers.authorization || "").replace(/^Bearer /, ""));
-        if (!access || access.expiresAt <= Date.now() || revokedFamilies.has(access.family))
+        const access = tokens.get(
+          (req.headers.authorization || "").replace(/^Bearer /, ""),
+        );
+        if (
+          !access ||
+          access.expiresAt <= Date.now() ||
+          revokedFamilies.has(access.family)
+        )
           return json(res, 401, { error: "invalid_token" });
         return json(res, 200, {
           sub: syntheticIdentities[access.sub],
@@ -123,7 +168,11 @@ export async function startServices(output) {
         if (unavailable) return json(res, 503, { error: "synthetic_outage" });
         const q = await form(req);
         const access = tokens.get(q.get("token"));
-        if (!access || access.expiresAt <= Date.now() || revokedFamilies.has(access.family))
+        if (
+          !access ||
+          access.expiresAt <= Date.now() ||
+          revokedFamilies.has(access.family)
+        )
           return json(res, 200, { active: false });
         return json(res, 200, {
           active: true,
@@ -137,29 +186,41 @@ export async function startServices(output) {
         });
       }
       if (url.pathname === "/oauth/revoke" && req.method === "POST") {
-        const q = await form(req), refresh = refreshTokens.get(q.get("token"));
+        const q = await form(req),
+          refresh = refreshTokens.get(q.get("token"));
         if (refresh) revokeFamily(refresh.family);
         else tokens.delete(q.get("token"));
         return json(res, 200, {});
       }
       if (url.pathname === "/__test/revoke" && req.method === "POST") {
         for (const value of [...tokens.values(), ...refreshTokens.values()])
-          if (value.sub === url.searchParams.get("subject")) revokeFamily(value.family);
+          if (value.sub === url.searchParams.get("subject"))
+            revokeFamily(value.family);
         return json(res, 200, {});
       }
       if (url.pathname === "/__test/short-token" && req.method === "POST") {
         const subject = url.searchParams.get("subject");
-        if (!subjects.includes(subject)) return json(res, 400, { error: "invalid_subject" });
+        if (!subjects.includes(subject))
+          return json(res, 400, { error: "invalid_subject" });
         shortAccess.set(subject, 2);
         return json(res, 200, {});
       }
       if (url.pathname === "/__test/refresh-count" && req.method === "GET") {
-        return json(res, 200, { count: refreshCounts.get(url.searchParams.get("subject")) || 0 });
+        return json(res, 200, {
+          count: refreshCounts.get(url.searchParams.get("subject")) || 0,
+        });
       }
       if (url.pathname === "/__test/active-families" && req.method === "GET") {
-        const families = new Set([...refreshTokens.values()]
-          .filter(value => value.sub === url.searchParams.get("subject") && value.expiresAt > Date.now() && !revokedFamilies.has(value.family))
-          .map(value => value.family));
+        const families = new Set(
+          [...refreshTokens.values()]
+            .filter(
+              (value) =>
+                value.sub === url.searchParams.get("subject") &&
+                value.expiresAt > Date.now() &&
+                !revokedFamilies.has(value.family),
+            )
+            .map((value) => value.family),
+        );
         return json(res, 200, { count: families.size });
       }
       if (url.pathname === "/__test/outage" && req.method === "POST") {

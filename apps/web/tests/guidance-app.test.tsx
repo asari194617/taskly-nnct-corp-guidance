@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import {
   act,
   fireEvent,
@@ -42,7 +43,9 @@ function json(value: unknown, status = 200) {
   });
 }
 function card(name: string) {
-  return screen.getByRole("heading", { name, level: 2 }).closest("article")!;
+  return requireValue(
+    screen.getByRole("heading", { name, level: 2 }).closest("article"),
+  );
 }
 function nav(name: string) {
   return within(
@@ -80,7 +83,7 @@ async function expectAccountNumber(number: number) {
   await userEvent.keyboard("{Escape}");
 }
 async function expandDetailMap(dialog: HTMLElement) {
-  const details = dialog.querySelector("details")!;
+  const details = requireValue(dialog.querySelector("details"));
   if (!details.open)
     await userEvent.click(
       within(dialog).getByText("会場マップ", { selector: "summary" }),
@@ -149,7 +152,7 @@ function installNextHistoryBridge(initialURL: string, flag: "__NA" | "_N") {
 }
 
 function holdBookmarkWrites(ids: string[]) {
-  const original = fetchMock.getMockImplementation()! as (
+  const original = requireValue(fetchMock.getMockImplementation()) as (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Promise<Response>;
@@ -169,7 +172,7 @@ function holdBookmarkWrites(ids: string[]) {
   fetchMock.mockImplementation(async (input, init) => {
     const path = new URL(String(input)).pathname;
     const id = path.startsWith("/api/bookmarks/")
-      ? decodeURIComponent(path.split("/").pop()!)
+      ? decodeURIComponent(requireValue(path.split("/").pop()))
       : "";
     const response = promises.get(id);
     if (!response) return original(input, init);
@@ -186,9 +189,9 @@ function holdBookmarkWrites(ids: string[]) {
   });
   return {
     finish: (id: string, status = 204) =>
-      pending.get(id)!.resolve(new Response(null, { status })),
+      requireValue(pending.get(id)).resolve(new Response(null, { status })),
     fail: (id: string, error = new Error("検証用の通信エラー")) =>
-      pending.get(id)!.reject(error),
+      requireValue(pending.get(id)).reject(error),
   };
 }
 beforeEach(() => {
@@ -242,7 +245,7 @@ beforeEach(() => {
     }
     if (path === "/api/bookmarks") return json({ company_ids: [...saved] });
     if (path.startsWith("/api/bookmarks/")) {
-      const id = decodeURIComponent(path.split("/").pop()!);
+      const id = decodeURIComponent(requireValue(path.split("/").pop()));
       if (init?.method === "DELETE") saved.delete(id);
       else saved.add(id);
       return new Response(null, { status: 204 });
@@ -429,7 +432,7 @@ describe("account menu", () => {
   });
   it("removes private state and disables sign-in while logout is pending", async () => {
     await ready();
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -764,7 +767,7 @@ describe("shareable routes and venue navigation", () => {
   });
   it("keeps refreshed Home tasks for the new roster when an old poll finishes late", async () => {
     window.history.replaceState(null, "", "/");
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -794,7 +797,7 @@ describe("shareable routes and venue navigation", () => {
         return new Promise<Response>((resolve) => {
           finishOldPoll = resolve;
         });
-      return json(responseFor(rosterNumber!));
+      return json(responseFor(requireValue(rosterNumber)));
     });
     await ready();
     await screen.findByRole("checkbox", { name: "検証名簿7番の指定企業" });
@@ -1100,7 +1103,10 @@ describe("shareable routes and venue navigation", () => {
     const company = dataset.companies[0];
     const dialog = await screen.findByRole("dialog", { name: company.name });
     const link = await expandDetailMap(dialog);
-    const target = new URL(link.getAttribute("href")!, window.location.origin);
+    const target = new URL(
+      requireValue(link.getAttribute("href")),
+      window.location.origin,
+    );
     for (const key of ["q", "industry", "saved", "assigned"])
       expect(target.searchParams.has(key)).toBe(false);
     expect(target.searchParams.get("focus")).toBe(company.id);
@@ -1307,6 +1313,56 @@ describe("shareable routes and venue navigation", () => {
 });
 
 describe("structured guide notices", () => {
+  it.each(["structured", "legacy"] as const)(
+    "renders repeated %s notice content without duplicate React keys",
+    async (kind) => {
+      const errors = vi.spyOn(console, "error");
+      try {
+        dataset.notice_sections =
+          kind === "structured"
+            ? [
+                {
+                  id: "repeated-content",
+                  title: "重複内容の検証",
+                  blocks: [
+                    { type: "paragraph", text: "同じ案内" },
+                    { type: "paragraph", text: "同じ案内" },
+                    { type: "list", items: ["同じ持参品", "同じ持参品"] },
+                    { type: "list", items: ["同じ持参品", "同じ持参品"] },
+                  ],
+                },
+              ]
+            : [];
+        dataset.notices = ["同じ案内", "同じ案内", "同じ案内"];
+        window.history.replaceState(null, "", "/documents/");
+        await ready();
+        expect(screen.getAllByText("同じ案内", { selector: "p" })).toHaveLength(
+          kind === "structured" ? 2 : 3,
+        );
+        if (kind === "structured") {
+          const section = requireValue(
+            screen
+              .getByRole("heading", { name: "重複内容の検証" })
+              .closest("section"),
+          );
+          expect(
+            within(section)
+              .getAllByRole("listitem")
+              .map((item) => item.textContent),
+          ).toEqual(["同じ持参品", "同じ持参品", "同じ持参品", "同じ持参品"]);
+        }
+        const keyWarnings = errors.mock.calls.filter((arguments_) =>
+          /same key|unique.*key|two children with the same/i.test(
+            arguments_.map(String).join(" "),
+          ),
+        );
+        expect(keyWarnings).toHaveLength(0);
+      } finally {
+        errors.mockRestore();
+      }
+    },
+  );
+
   it("opens guide sections on their own shareable page without adding them to the schedule", async () => {
     dataset.notice_sections = [
       {
@@ -1335,9 +1391,9 @@ describe("structured guide notices", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "配布資料の案内" }),
     ).toBeInTheDocument();
-    const first = screen
-      .getByRole("heading", { name: "検証用の準備" })
-      .closest("section")!;
+    const first = requireValue(
+      screen.getByRole("heading", { name: "検証用の準備" }).closest("section"),
+    );
     expect(
       within(first).getByText("持参品の確認 <script>"),
     ).toBeInTheDocument();
@@ -1438,11 +1494,11 @@ describe("guide PDF access", () => {
   it("disables all document controls and deduplicates signing until the current request settles", async () => {
     window.history.replaceState(null, "", "/documents/");
     dataset.documents.push({
-      ...dataset.documents.find((item) => item.id === "guide")!,
+      ...requireValue(dataset.documents.find((item) => item.id === "guide")),
       id: "second-guide",
       title: "検証用の別資料",
     });
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -1477,7 +1533,7 @@ describe("guide PDF access", () => {
   });
   it("aborts signing on logout and never navigates to a late signed URL", async () => {
     window.history.replaceState(null, "", "/documents/");
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -1795,7 +1851,7 @@ describe("company filtering and persistent bookmarks", () => {
   });
   it("does not send duplicate bookmark writes while a write is pending", async () => {
     await ready();
-    const original = fetchMock.getMockImplementation()! as (
+    const original = requireValue(fetchMock.getMockImplementation()) as (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Promise<Response>;
@@ -2119,12 +2175,17 @@ describe("personal-plan sections", () => {
     ).toEqual(
       dataset.assignments[0].visits.map(
         (visit) =>
-          dataset.companies.find((company) => company.id === visit.company_id)!
-            .name,
+          requireValue(
+            dataset.companies.find(
+              (company) => company.id === visit.company_id,
+            ),
+          ).name,
       ),
     );
     expect(
-      within(interests.closest("section")!).getAllByRole("article"),
+      within(requireValue(interests.closest("section"))).getAllByRole(
+        "article",
+      ),
     ).toHaveLength(1);
   });
 });
@@ -2234,7 +2295,7 @@ describe("retained interest cards", () => {
     "ignores a late bookmark response (%s) after logout",
     async (status) => {
       await ready();
-      const original = fetchMock.getMockImplementation()! as (
+      const original = requireValue(fetchMock.getMockImplementation()) as (
         input: RequestInfo | URL,
         init?: RequestInit,
       ) => Promise<Response>;

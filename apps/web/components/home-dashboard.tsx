@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
 import { Checkbox } from "@openameba/spindle-ui/Form/Checkbox";
@@ -87,18 +87,17 @@ export default function HomeDashboard({
     session: route.session,
   };
   const recommendationScope = `${preferences.department}:${preferences.grade}:${preferences.roster_number}:${route.session}`;
-  const initialRecommendations = useMemo(
-    () => suggestRecommendations({ ...options, limit: 4 }),
-    [data, assignment, recommendationScope],
+  const recommendationIDs = useRef<{ scope: string; ids: string[] } | null>(
+    null,
   );
-  const recommendationIDs = useRef({
-    scope: recommendationScope,
-    ids: initialRecommendations.map((item) => item.company.id),
-  });
-  if (recommendationIDs.current.scope !== recommendationScope) {
+  // Keep the chosen cards stable while saved-company state changes; only their
+  // reasons update until the profile/session scope changes or Home remounts.
+  if (recommendationIDs.current?.scope !== recommendationScope) {
     recommendationIDs.current = {
       scope: recommendationScope,
-      ids: initialRecommendations.map((item) => item.company.id),
+      ids: suggestRecommendations({ ...options, limit: 4 }).map(
+        (item) => item.company.id,
+      ),
     };
   }
   const recommendations = recommendationIDs.current.ids.flatMap((id) => {
@@ -146,6 +145,7 @@ export default function HomeDashboard({
     };
   }
   function row(task: HomeTask) {
+    const documentID = task.document_id;
     const company = data.companies.find((item) => item.id === task.company_id);
     const slot = data.schedule.find((item) => item.term === task.term);
     const pending = tasks.pending.has(task.id);
@@ -219,10 +219,10 @@ export default function HomeDashboard({
                 回答する
               </TextLink>
             ))}
-          {task.document_id && (
+          {documentID && (
             <TextButton
               disabled={offline || openingDocument}
-              onClick={() => void openDocument(task.document_id!, task.page)}
+              onClick={() => void openDocument(documentID, task.page)}
             >
               <Icon name="document" size={16} />
               資料を見る
@@ -248,6 +248,7 @@ export default function HomeDashboard({
             <div className="home-task-summary">
               {tasks.data && (
                 <span
+                  role="status"
                   className="home-count"
                   aria-label={`${all.length}件中${completed}件完了`}
                 >

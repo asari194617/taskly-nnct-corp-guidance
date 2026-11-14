@@ -1,3 +1,4 @@
+import { requireValue } from "./required";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -170,7 +171,9 @@ describe("current-tab signed document navigation", () => {
       act(() => {
         opening = result.current.openDocument("guide", 25);
       });
-      const signal = fetchMock.mock.calls[0][1]!.signal!;
+      const signal = requireValue(
+        requireValue(fetchMock.mock.calls[0][1]).signal,
+      );
       unmount();
       expect(signal.aborted).toBe(true);
       await act(async () => {
@@ -195,7 +198,9 @@ describe("current-tab signed document navigation", () => {
       act(() => {
         oldOpening = result.current.openDocument("old", 25);
       });
-      const oldSignal = fetchMock.mock.calls[0][1]!.signal!;
+      const oldSignal = requireValue(
+        requireValue(fetchMock.mock.calls[0][1]).signal,
+      );
       rerender({ scope: "student-b" });
       expect(oldSignal.aborted).toBe(true);
       expect(result.current).toMatchObject({ opening: false, error: "" });
@@ -217,7 +222,7 @@ describe("current-tab signed document navigation", () => {
     fetchMock.mockImplementationOnce(
       (_input, init) =>
         new Promise((_resolve, reject) => {
-          init!.signal!.addEventListener(
+          requireValue(requireValue(init).signal).addEventListener(
             "abort",
             () => reject(new DOMException("aborted", "AbortError")),
             { once: true },
@@ -233,7 +238,9 @@ describe("current-tab signed document navigation", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       await opening;
     });
-    expect(fetchMock.mock.calls[0][1]!.signal!.aborted).toBe(true);
+    expect(
+      requireValue(requireValue(fetchMock.mock.calls[0][1]).signal).aborted,
+    ).toBe(true);
     expect(result.current).toMatchObject({
       opening: false,
       error: failureMessage,
@@ -285,7 +292,9 @@ describe("current-tab signed document navigation", () => {
     act(() => {
       opening = result.current.openDocument("guide");
     });
-    const signal = fetchMock.mock.calls[0][1]!.signal!;
+    const signal = requireValue(
+      requireValue(fetchMock.mock.calls[0][1]).signal,
+    );
     state = { ...state, offline: true };
     rerender();
     expect(signal.aborted).toBe(true);

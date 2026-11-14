@@ -147,13 +147,18 @@ test("the loopback object store serves signed bytes and ranges, rejects unsigned
 
 test("the synthetic clock expires real signed requests and resets without exposing credentials", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "synthetic-object-clock-"));
-  await writeFile(resolve(directory, "guide.pdf"), "%PDF-1.4 synthetic clock object");
+  await writeFile(
+    resolve(directory, "guide.pdf"),
+    "%PDF-1.4 synthetic clock object",
+  );
   const store = await startObjectStore(directory, { port: 0, now: () => now });
   const clock = new URL("/__test/clock", store.origin);
-  const update = (value, headers = {}, target = clock) => fetch(target, {
-    method: "POST", headers: { "Content-Type": "application/json", ...headers },
-    body: typeof value === "string" ? value : JSON.stringify(value),
-  });
+  const update = (value, headers = {}, target = clock) =>
+    fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: typeof value === "string" ? value : JSON.stringify(value),
+    });
   try {
     const document = signed(store.origin);
     assert.equal((await fetch(document)).status, 200);
@@ -165,23 +170,58 @@ test("the synthetic clock expires real signed requests and resets without exposi
     assert.equal((await update({ offset_ms: 0 })).status, 200);
     assert.equal((await fetch(document)).status, 200);
 
-    for (const invalid of [null, [], {}, { offset_ms: -1 }, { offset_ms: 3_600_001 },
-      { offset_ms: 1.5 }, { offset_ms: "0" }, { offset_ms: 0, extra: true }, "invalid JSON"])
+    for (const invalid of [
+      null,
+      [],
+      {},
+      { offset_ms: -1 },
+      { offset_ms: 3_600_001 },
+      { offset_ms: 1.5 },
+      { offset_ms: "0" },
+      { offset_ms: 0, extra: true },
+      "invalid JSON",
+    ])
       assert.equal((await update(invalid)).status, 400);
     assert.equal((await update(" ".repeat(257))).status, 413);
     assert.equal((await fetch(clock)).status, 405);
-    assert.equal((await update({ offset_ms: 0 }, { "Content-Type": "text/plain" })).status, 415);
-    assert.equal((await update({ offset_ms: 0 }, { Origin: "http://127.0.0.1:3300" })).status, 403);
+    assert.equal(
+      (await update({ offset_ms: 0 }, { "Content-Type": "text/plain" })).status,
+      415,
+    );
+    assert.equal(
+      (await update({ offset_ms: 0 }, { Origin: "http://127.0.0.1:3300" }))
+        .status,
+      403,
+    );
     const forgedHostStatus = await new Promise((done, fail) => {
-      const request = httpRequest(clock, {
-        method: "POST", headers: { Host: "untrusted.example", "Content-Type": "application/json" },
-      }, response => { response.resume(); response.on("end", () => done(response.statusCode)); });
+      const request = httpRequest(
+        clock,
+        {
+          method: "POST",
+          headers: {
+            Host: "untrusted.example",
+            "Content-Type": "application/json",
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => done(response.statusCode));
+        },
+      );
       request.on("error", fail);
       request.end(JSON.stringify({ offset_ms: 0 }));
     });
     assert.equal(forgedHostStatus, 403);
-    assert.equal((await update({ offset_ms: 0 }, {}, new URL("?unexpected=1", clock))).status, 400);
-    assert.equal((await fetch(document)).status, 200, "rejected clock changes preserve the current time");
+    assert.equal(
+      (await update({ offset_ms: 0 }, {}, new URL("?unexpected=1", clock)))
+        .status,
+      400,
+    );
+    assert.equal(
+      (await fetch(document)).status,
+      200,
+      "rejected clock changes preserve the current time",
+    );
   } finally {
     await update({ offset_ms: 0 });
     await store.close();

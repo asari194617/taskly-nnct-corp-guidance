@@ -16,7 +16,10 @@
 本番の taskly-auth に public client を追加する際は、既存配列を保って次の登録を追加します。
 
 ```json
-{"client_id":"nnct-corp-guidance-2026","redirect_uri":"https://api.nnct-corp-guidance-2026.taskly.iy0306.com/auth/callback"}
+{
+  "client_id": "nnct-corp-guidance-2026",
+  "redirect_uri": "https://api.nnct-corp-guidance-2026.taskly.iy0306.com/auth/callback"
+}
 ```
 
 confidential client、既存利用者、認証の移行フラグは変更しません。API は PKCE と state をブラウザーに結び付け、callback の issuer を検証します。ローカルセッションと Cookie はログインから30日間有効です。15分の OAuth access token とローテーションする refresh token をサーバー側でまとめて暗号化し、期限が近づくと taskly-auth の既存 refresh grant で更新します。更新してもローカルセッションの30日の期限は延長しません。保護されたリクエストごとに userinfo で失効と同一利用者であることを確認し、ログアウト時は refresh token のファミリー全体を失効させます。
@@ -51,11 +54,11 @@ API の配備・readiness・未認証アクセスの拒否を確認してから 
 
 すべて GitHub ホストのランナーで実行します。配備後は企業情報・個人設定・保存情報・資料 URL 発行が未認証なら401、無効な署名 URL は403になることを検査し、画面の CSP・共有 URL・資料案内ページも確認します。成功したコミットと公開 URL は Actions の実行サマリーに記録します。
 
-| 環境 | 種別 | 名前 |
-| --- | --- | --- |
-| production-ui | secrets | R2_ACCOUNT_ID、R2_ACCESS_KEY_ID、R2_SECRET_ACCESS_KEY |
-| production-ui | variable | R2_BUCKET |
-| production-api | secret | PROD_SSH_KEY |
+| 環境           | 種別      | 名前                                                      |
+| -------------- | --------- | --------------------------------------------------------- |
+| production-ui  | secrets   | R2_ACCOUNT_ID、R2_ACCESS_KEY_ID、R2_SECRET_ACCESS_KEY     |
+| production-ui  | variable  | R2_BUCKET                                                 |
+| production-api | secret    | PROD_SSH_KEY                                              |
 | production-api | variables | PROD_HOST、PROD_USER、PROD_SSH_PORT、PROD_SSH_KNOWN_HOSTS |
 
 UI配備用のR2資格情報はUI専用1バケットのObject Read & Writeに限定します。API 配備鍵は新規サービス専用で、サーバー側の authorized_keys は `restrict,command=".../deploy-entrypoint.sh"` を設定します。private key を Actions に登録する際はユーザーの明示的な承認を得てください。
