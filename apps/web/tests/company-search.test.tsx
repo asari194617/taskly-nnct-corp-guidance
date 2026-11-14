@@ -5,6 +5,7 @@ import {
   MapCompanyPanel,
 } from "../components/company-details";
 import { OfflineProvider } from "../components/offline-context";
+import { googleCompanySearchURL } from "../lib/company-search";
 import { fixture } from "./fixtures";
 
 const name = "株式会社テスト & Co. ?source=別項目 #研究/開発";
@@ -41,7 +42,7 @@ describe.each(["dialog", "map"] as const)(
       });
       const url = new URL(google.getAttribute("href") || "");
       expect(url.origin).toBe("https://google.com");
-      expect(url.pathname).toBe("/");
+      expect(url.pathname).toBe("/search");
       expect([...url.searchParams.keys()]).toEqual(["q"]);
       expect(url.searchParams.get("q")).toBe(name);
       expect(url.hash).toBe("");
@@ -73,10 +74,11 @@ describe.each(["dialog", "map"] as const)(
       expect(
         within(identity).queryByRole("link", { name: "Googleで調べる" }),
       ).toBeNull();
-      expect(within(identity).getByText("Googleで調べる")).toHaveAttribute(
-        "aria-disabled",
-        "true",
-      );
+      const google = within(identity).getByRole("button", {
+        name: "Googleで調べる",
+      });
+      expect(google).toBeDisabled();
+      expect(google).toHaveAttribute("aria-disabled", "true");
       expect(
         within(identity).getByRole("button", {
           name: `${name}を気になるに追加`,
@@ -85,3 +87,22 @@ describe.each(["dialog", "map"] as const)(
     });
   },
 );
+
+describe("Google company search URL", () => {
+  it.each([
+    "株式会社テスト",
+    "ACME & Co. ?source=別項目 #研究/開発",
+    "https://example.invalid/?q=別企業&extra=true",
+  ])(
+    "encodes %s as one company query at the search endpoint",
+    (companyName) => {
+      const url = new URL(googleCompanySearchURL(companyName));
+      expect(url.origin).toBe("https://google.com");
+      expect(url.pathname).toBe("/search");
+      expect([...url.searchParams]).toEqual([["q", companyName]]);
+      expect(url.hash).toBe("");
+      expect(url.username).toBe("");
+      expect(url.password).toBe("");
+    },
+  );
+});
