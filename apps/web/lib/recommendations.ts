@@ -101,19 +101,16 @@ function scoringContext({
     assignedIDs.has(company.id),
   );
   // Several favourites in the same industry must not multiply its weight.
-  const interests = new Map<string, Set<string>>();
+  const interests = new Set<string>();
   for (const company of unique.values()) {
     if (!savedIDs.has(company.id)) continue;
-    for (const industry of industryNames(company)) {
-      const owners = interests.get(industry) || new Set<string>();
-      owners.add(company.id);
-      interests.set(industry, owners);
-    }
+    for (const industry of industryNames(company)) interests.add(industry);
   }
   const floors = data.documents.map(locations).filter((floor) => floor.size);
   const companies = [...unique.values()].filter(
     (company) =>
       !assignedIDs.has(company.id) &&
+      !savedIDs.has(company.id) &&
       (session === "all" || company.session === session),
   );
   function assess(company: Company) {
@@ -124,15 +121,9 @@ function scoringContext({
       score += 35;
       reasons.push("電子制御に関連する業種");
     }
-    if (savedIDs.has(company.id)) {
-      score += 20;
-      reasons.push("気になる企業");
-    }
-    // A saved company's own industry is not additional evidence about it.
-    const sharedInterest = industries.some((industry) => {
-      const owners = interests.get(industry);
-      return owners && (owners.size > 1 || !owners.has(company.id));
-    });
+    const sharedInterest = industries.some((industry) =>
+      interests.has(industry),
+    );
     if (sharedInterest) {
       score += 18;
       reasons.push("気になる企業と同じ業種");
@@ -211,4 +202,42 @@ export function suggestRecommendations(
       shownIndustries.set(industry, (shownIndustries.get(industry) || 0) + 1);
   }
   return recommendations;
+}
+
+/** Retain visible order, fill saved-card vacancies, and keep history for rollback. */
+export function reconcileRecommendations(
+  options: RecommendationOptions,
+  history: readonly string[],
+): { history: string[]; recommendations: Recommendation[] } {
+  const limit = options.limit ?? 6;
+  const count = Math.min(
+    12,
+    Math.max(0, Math.floor(Number.isFinite(limit) ? limit : 6)),
+  );
+  const nextHistory = [...new Set(history)];
+  const context = scoringContext(options);
+  const available = new Map(
+    context.companies.map((company) => [company.id, company]),
+  );
+  const selected = new Map<string, Company>();
+  for (const id of nextHistory) {
+    const company = available.get(id);
+    if (company && selected.size < count) selected.set(id, company);
+  }
+  if (selected.size < count) {
+    for (const item of suggestRecommendations({ ...options, limit: 12 })) {
+      const { company } = item;
+      if (selected.has(company.id)) continue;
+      selected.set(company.id, company);
+      if (!nextHistory.includes(company.id)) nextHistory.push(company.id);
+      if (selected.size === count) break;
+    }
+  }
+  return {
+    history: nextHistory,
+    recommendations: [...selected.values()].map((company) => ({
+      company,
+      reasons: context.assess(company).reasons,
+    })),
+  };
 }

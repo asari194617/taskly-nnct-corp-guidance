@@ -1960,6 +1960,14 @@ test("Home recommendation details, interest toggles and booth links preserve rea
     await accountAction(page, "名簿番号の設定");
     await chooseRoster(page, 9);
   }
+  expect(
+    (
+      await page.request.delete(`${API}/api/bookmarks/AM-2`, {
+        headers: { Origin: "http://127.0.0.1:3300" },
+      })
+    ).status(),
+  ).toBe(204);
+  await page.reload();
   const recommendations = page.getByRole("region", {
     name: "おすすめ",
     exact: true,
@@ -1968,30 +1976,67 @@ test("Home recommendation details, interest toggles and booth links preserve rea
   const recommendation = recommendations
     .locator(".home-recommendation")
     .filter({ hasText: "架空いろは機械" });
-  const favorite = recommendation.getByRole("button", {
-    name: /^架空いろは機械を気になる/,
+  const companyLink = recommendation.getByRole("link", {
+    name: "架空いろは機械",
+    exact: true,
   });
-  const previous = await favorite.getAttribute("aria-pressed");
-  await favorite.click();
-  await expect(favorite).toHaveAttribute(
-    "aria-pressed",
-    previous === "true" ? "false" : "true",
+  const companyURL = new URL(
+    requireValue(await companyLink.getAttribute("href")),
+    page.url(),
   );
-  await expect(favorite).toBeEnabled();
-  await expect(recommendations.locator(".home-recommendation")).toHaveCount(2);
+  const remainingNames = (
+    await recommendations.locator(".home-recommendation h3 a").allTextContents()
+  ).filter((name) => name !== "架空いろは機械");
+  const before = await (await page.request.get(`${API}/api/bookmarks`)).json();
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url() === `${API}/api/bookmarks/AM-2` &&
+      response.request().method() === "PUT",
+  );
   await recommendation
-    .getByRole("link", { name: "架空いろは機械", exact: true })
+    .getByRole("button", {
+      name: "架空いろは機械を気になるに追加",
+      exact: true,
+    })
     .click();
+  // This fixture has only two unassigned companies, so no third candidate can
+  // fill the vacancy. Check the live result before waiting for PUT or reloading.
+  await expect(recommendation).toHaveCount(0);
+  await expect(recommendations.locator(".home-recommendation")).toHaveCount(1);
+  expect(
+    await recommendations
+      .locator(".home-recommendation h3 a")
+      .allTextContents(),
+  ).toEqual(remainingNames);
+  await expect(nav(page, "気になる").locator(".saved-count")).toHaveText(
+    String(before.company_ids.length + 1),
+  );
+  expect((await saved).status()).toBe(204);
+  const persisted = await (
+    await page.request.get(`${API}/api/bookmarks`)
+  ).json();
+  expect(persisted.company_ids).toContain("AM-2");
+  await page.goto(companyURL.href);
   const dialog = page.getByRole("dialog", {
     name: "架空いろは機械",
     exact: true,
   });
   await expect(dialog).toBeVisible();
+  const favorite = dialog.getByRole("button", {
+    name: "架空いろは機械を気になるから解除",
+    exact: true,
+  });
+  await expect(favorite).toHaveAttribute("aria-pressed", "true");
+  await expect(favorite).toBeEnabled();
   expect(new URL(page.url()).pathname).toBe("/");
   expect(new URL(page.url()).searchParams.get("company")).toBe("AM-2");
   await page.reload();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(recommendations.locator(".home-recommendation")).toHaveCount(1);
+  await expect(
+    recommendations.getByRole("link", { name: "架空いろは機械", exact: true }),
+  ).toHaveCount(0);
   const assigned = homeTask(page, "assigned-visit-1");
   const booth = assigned.getByRole("link", { name: "ブース 1", exact: true });
   const target = new URL(

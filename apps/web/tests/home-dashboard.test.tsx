@@ -523,7 +523,7 @@ describe("Taskly-backed guidance home", () => {
     );
   });
 
-  it("renders explainable recommendation cards and keeps their identity stable while favorites change", async () => {
+  it("removes a saved recommendation while preserving company, search and explanatory actions", async () => {
     const props = options();
     props.data.companies.push({
       ...props.data.companies[0],
@@ -552,19 +552,15 @@ describe("Taskly-backed guidance home", () => {
       expect.objectContaining({ id: "AM-3" }),
     );
     view.rerender(<HomeDashboard {...props} savedIDs={new Set(["AM-3"])} />);
+    expect(title).not.toBeInTheDocument();
     expect(
-      within(recommendation).getByRole("link", {
-        name: "追加の検証ソフト企業",
+      within(recommendation).getByText("条件に合う企業はありません"),
+    ).toBeInTheDocument();
+    expect(
+      within(recommendation).queryByRole("button", {
+        name: /気になるから解除/,
       }),
-    ).toBe(title);
-    expect(
-      within(recommendation).getByRole("list", { name: "おすすめの理由" }),
-    ).toHaveTextContent("気になる企業");
-    expect(
-      within(recommendation).getByRole("button", {
-        name: "追加の検証ソフト企業を気になるから解除",
-      }),
-    ).toHaveAttribute("aria-pressed", "true");
+    ).not.toBeInTheDocument();
     await userEvent.click(
       within(recommendation).getByRole("link", { name: "探す" }),
     );
@@ -573,6 +569,140 @@ describe("Taskly-backed guidance home", () => {
       company: "",
     });
     expect(writes()).toHaveLength(0);
+  });
+
+  it("backfills concurrent optimistic saves and restores failed saves in their original slot without replacing unaffected DOM", async () => {
+    const props = options();
+    const candidates = Array.from({ length: 6 }, (_, index) => ({
+      ...props.data.companies[0],
+      id: `REC-${index + 1}`,
+      booth: 20 + index,
+      session: "AM" as const,
+      name: `候補企業${index + 1}`,
+      industries: ["機械"],
+    }));
+    props.data.companies.push(...candidates);
+    const view = await ready(props);
+    const recommendations = screen.getByRole("region", { name: "おすすめ" });
+    const names = () =>
+      within(recommendations)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent);
+    const originalFirst = within(recommendations).getByRole("link", {
+      name: "候補企業1",
+    });
+    const originalFourth = within(recommendations).getByRole("link", {
+      name: "候補企業4",
+    });
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業2",
+      "候補企業3",
+      "候補企業4",
+    ]);
+    view.rerender(<HomeDashboard {...props} savedIDs={new Set(["REC-2"])} />);
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業3",
+      "候補企業4",
+      "候補企業5",
+    ]);
+    expect(
+      within(recommendations).getByRole("link", { name: "候補企業1" }),
+    ).toBe(originalFirst);
+    expect(
+      within(recommendations).getByRole("link", { name: "候補企業4" }),
+    ).toBe(originalFourth);
+    view.rerender(
+      <HomeDashboard {...props} savedIDs={new Set(["REC-2", "REC-3"])} />,
+    );
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業4",
+      "候補企業5",
+      "候補企業6",
+    ]);
+    view.rerender(<HomeDashboard {...props} savedIDs={new Set(["REC-3"])} />);
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業2",
+      "候補企業4",
+      "候補企業5",
+    ]);
+    view.rerender(<HomeDashboard {...props} savedIDs={new Set()} />);
+    expect(names()).toEqual([
+      "候補企業1",
+      "候補企業2",
+      "候補企業3",
+      "候補企業4",
+    ]);
+    expect(
+      within(recommendations).getByRole("link", { name: "候補企業1" }),
+    ).toBe(originalFirst);
+    expect(
+      within(recommendations).getByRole("link", { name: "候補企業4" }),
+    ).toBe(originalFourth);
+  });
+
+  it("resets recommendation priority for a new session, roster and event instead of carrying old slots across scopes", async () => {
+    const props = options();
+    const candidates = [
+      {
+        ...props.data.companies[0],
+        id: "REC-A",
+        name: "候補A",
+        booth: 20,
+        session: "AM" as const,
+      },
+      {
+        ...props.data.companies[0],
+        id: "REC-B",
+        name: "候補B",
+        booth: 21,
+        session: "PM" as const,
+      },
+    ];
+    props.data.companies.push(...candidates);
+    const view = await ready(props);
+    const recommendations = screen.getByRole("region", { name: "おすすめ" });
+    const names = () =>
+      within(recommendations)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent);
+    expect(names()).toEqual(["候補A", "候補B"]);
+    view.rerender(
+      <HomeDashboard {...props} route={{ ...props.route, session: "PM" }} />,
+    );
+    expect(names()).toEqual(["候補B"]);
+    const renamed = {
+      ...props.data,
+      companies: props.data.companies.map((company) =>
+        company.id === "REC-A" ? { ...company, name: "候補Z" } : company,
+      ),
+    };
+    view.rerender(
+      <HomeDashboard
+        {...props}
+        data={renamed}
+        preferences={{ ...props.preferences, roster_number: 8 }}
+      />,
+    );
+    expect(names()).toEqual(["候補B", "候補Z"]);
+    const newEvent = {
+      ...renamed,
+      event: { ...renamed.event, date: "2030-05-15" },
+      companies: renamed.companies.map((company) =>
+        company.id === "REC-A" ? { ...company, name: "候補A" } : company,
+      ),
+    };
+    view.rerender(
+      <HomeDashboard
+        {...props}
+        data={newEvent}
+        preferences={{ ...props.preferences, roster_number: 8 }}
+      />,
+    );
+    expect(names()).toEqual(["候補A", "候補B"]);
   });
 
   it("preserves native link behavior when another handler already claimed the click", async () => {
