@@ -16,6 +16,10 @@
 
 `npm --prefix apps/web run build` は静的出力後に `deploy/r2/offline-shell.mjs` で公開資産のマニフェストとService Workerを生成します。R2への配備時はCSPを入れた最終HTMLから再生成し、JS/CSS等 → HTML → Service Workerの順でアップロードします。`offline-worker.js` は `text/javascript; charset=utf-8` と `Cache-Control: no-cache`、ハッシュ付き `_next/static/` は1年間immutableです。登録時も `updateViaCache: none` を指定します。既存のR2 custom domainとURL rewriteを利用するため、新しいWorkerサービスや公開データ用バケットは不要です。
 
+HTMLの取得先とキャッシュキーは `/`・`/search/` などの正規ページURLを使い、それぞれの出力先 `index.html` の最終バイト列でSHA-256を検証します。公開環境で302転送される `/index.html` は先行取得しません。クエリや旧URLのオフライン訪問も同じ正規キーへ対応させ、ダウンロード時の `redirect: error` は維持します。E2E用の静的サーバーも同じ302転送を返して確認します。
+
+本番のCloudflareでは、正確なUI hostと `/offline-worker.js` だけを対象に、Browser TTLを `respect_origin`、edge cacheを無効にするCache Ruleも必要です。R2上の `no-cache` がゾーン既定の4時間へ上書きされることを防ぎ、他の画面・資産のキャッシュは維持します。この初回設定と公開応答の検証手順は [本番運用](deployment.md) を参照してください。
+
 インストール時はファイルのHTTP成功とSHA-256が全て一致してから使用可能にします。配備途中の異なる版が混じったときはインストールを失敗させます。新しいService Workerは既存の画面を強制切替せず、その画面が閉じられてから有効になります。有効化後に自分の旧シェルキャッシュだけを削除し、他のキャッシュには触れません。配備済みの旧ハッシュ付き資産もR2から削除しません。通常のHTMLアクセスを優先し、通信断や5xxでは期限内の保存済み画面に戻ります。画面応答が4秒間ない場合も保存済み画面へ戻ります。資産取得は15秒で中断し、初回準備の完了待ちは20秒で打ち切ります。
 
 CSPは既存のスクリプトSHAと `frame-src 'none'` / `object-src 'none'` を維持し、`worker-src 'self'`、同一originと指定R2 originへの `connect-src`、画像に限定した `img-src blob:` を追加します。R2の許可は配備アカウントから組み立てた正確なS3 originに限定します。PDF・APIに対する汎用的なService Workerキャッシュや新たなCDN Cache Everythingルールは追加しません。

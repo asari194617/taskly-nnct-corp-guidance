@@ -6,33 +6,45 @@ import { startOfflineWorker } from "./offline-worker.mjs";
 
 const pages = ["", "search", "favorites", "schedule", "documents", "map"];
 export async function generateOfflineShell(root) {
-  const paths = pages.map((page) =>
-    page ? `/${page}/index.html` : "/index.html",
-  );
-  paths.push("/taskly-logo.svg");
+  // Public canonical routes are served from these files by Cloudflare's URL
+  // rewrites. Fetching /index.html instead redirects and is correctly rejected
+  // by the worker's redirect:error policy during installation.
+  const paths = pages.map((page) => ({
+    path: page ? `/${page}/` : "/",
+    file: page ? `/${page}/index.html` : "/index.html",
+  }));
+  paths.push({ path: "/taskly-logo.svg", file: "/taskly-logo.svg" });
   async function collect(directory) {
     for (const item of await readdir(directory, { withFileTypes: true })) {
       const path = resolve(directory, item.name);
       if (item.isSymbolicLink())
         throw new Error("Offline shell symlinks are forbidden");
       if (item.isDirectory()) await collect(path);
-      else if (item.isFile() && /\.(js|css|woff2?|svg|png)$/.test(item.name))
-        paths.push("/" + relative(root, path).replaceAll("\\", "/"));
+      else if (item.isFile() && /\.(js|css|woff2?|svg|png)$/.test(item.name)) {
+        const file = `/${relative(root, path).replaceAll("\\", "/")}`;
+        paths.push({ path: file, file });
+      }
     }
   }
   await collect(resolve(root, "_next/static"));
   const assets = await Promise.all(
-    paths.sort().map(async (path) => ({
-      path,
-      sha256: createHash("sha256")
-        .update(await readFile(resolve(root, "." + path)))
-        .digest("hex"),
-    })),
+    paths
+      .sort((a, b) => a.path.localeCompare(b.path))
+      .map(async ({ path, file }) => ({
+        path,
+        sha256: createHash("sha256")
+          .update(await readFile(resolve(root, `.${file}`)))
+          .digest("hex"),
+      })),
   );
   const routes = pages.flatMap((page) => {
     const route = page ? `/${page}/` : "/";
     const file = `${route}index.html`;
-    return [[route, file], [file, file], ...(page ? [[`/${page}`, file]] : [])];
+    return [
+      [route, route],
+      [file, route],
+      ...(page ? [[`/${page}`, route]] : []),
+    ];
   });
   const runtime = startOfflineWorker.toString();
   const revision = createHash("sha256")

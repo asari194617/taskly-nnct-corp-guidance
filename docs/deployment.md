@@ -67,9 +67,30 @@ API イメージは GitHub のランナーでビルドし、コミット SHA と
 
 Compose と強制コマンドはサーバーに初回設置したファイルを使用します。これらの運用設定を変更する PR では、レビュー済みのファイルを管理者が明示的に同期してください。この検査を有効にするには `deploy/deploy-entrypoint.sh` をサーバーの `deploy-entrypoint.sh` へ、`deploy/validate-image-archive.py` を同じディレクトリの `validate-image-archive.py` へ、同時に設置します。設置後は強制コマンドが新しいスクリプトを指し、両ファイルが所有者以外から書き換えられないことを確認します。日常配備はイメージだけを送り、設定・鍵・データを上書きしません。
 
-R2 配備は immutable asset を先、HTML を最後にアップロードし、旧 asset を保持します。HTML の Next.js bootstrap inline script から CSP の SHA-256 を生成し、meta CSP に埋め込みます。CSS の動的スタイルと設定したR2 endpoint originの署名付き地図画像を許可し、スクリプトの `unsafe-inline` は使用しません。PDF は別タブで開き、iframe・object の埋め込みは許可しません。Cloudflare の応答ヘッダールールは新 UI host にだけ限定します。
+R2 配備は immutable asset → HTML → `offline-worker.js` の順でアップロードし、旧 asset を保持します。HTML の Next.js bootstrap inline script から CSP の SHA-256 を生成し、meta CSP に埋め込みます。CSS の動的スタイルと設定したR2 endpoint originの署名付き地図画像を許可し、スクリプトの `unsafe-inline` は使用しません。PDF は同じタブで開き、iframe・object の埋め込みは許可しません。Cloudflare の応答ヘッダールールは新 UI host にだけ限定します。
 
 Cloudflareのrewriteは画面コードのデプロイでは更新されません。UI hostのルートと上記5ページだけを対象に、それぞれの `index.html` へ内部書き換えし、`company`・`focus`・複数の `industry` などのクエリを保持します。末尾スラッシュの補完はその5ページだけに限定します。ルートから `/index.html` への旧302ルールは併存させません。配備後は各ページへの直接訪問・再読み込み・末尾スラッシュなし・`index.html` 別名・旧 `?view=` を確認し、各ページが固有のcanonicalを持つ静的HTMLを返すことも検査します。
+
+### Service Worker の公開キャッシュ
+
+Cloudflare の Browser Cache TTL は、R2 に保存した `Cache-Control: no-cache` を上書きする場合があります。本番ではゾーンの既定値14400秒により、`offline-worker.js` の公開応答が `max-age=14400` になることを確認しました。Service Worker の更新確認を維持するため、`http_request_cache_settings` のゾーンエントリーポイントに、次の1ルールを設定します。既存ルールを置き換えず追加し、ゾーン全体の TTL や他のホスト・ハッシュ付き資産は変更しません。
+
+```json
+{
+  "description": "nnct-guidance-offline-worker-respect-origin",
+  "expression": "(http.host eq \"nnct-corp-guidance-2026.taskly.iy0306.com\" and http.request.uri.path eq \"/offline-worker.js\")",
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "cache": false,
+    "browser_ttl": { "mode": "respect_origin" }
+  },
+  "enabled": true
+}
+```
+
+このルールは Cloudflare 側の初回設定で、通常の R2 アップロードでは作成されません。公式CLIの固定版 `cf@1.0.0-beta.32` でリクエストを `--dry-run` と `--validate-only` で検証し、既存ルールを保存してから適用します。仕様は [Browser Cache TTL](https://developers.cloudflare.com/cache/how-to/edge-browser-cache-ttl/) と [Cache Rules API](https://developers.cloudflare.com/cache/how-to/cache-rules/create-api/) を参照してください。
+
+公開URLへのGETで `Content-Type: text/javascript; charset=utf-8` と `Cache-Control: no-cache`、配備したファイルとの内容一致を確認します。同時に現在の `_next/static/` の資産が `public, max-age=31536000, immutable` のままであることを確認します。CDはこのService Workerの公開応答を検査するため、失敗時はR2の保存メタデータとCloudflareの公開応答を比較し、検査を緩めたり原因未確認の再実行をしたりしません。
 
 ## 初回起動・データ更新
 

@@ -5,11 +5,11 @@ import { startOfflineWorker } from "./offline-worker.mjs";
 
 const origin = "https://guidance.example.test";
 const prefix = "taskly-guidance-shell-v1-";
-const cacheName = prefix + "synthetic";
-const stampURL = origin + "/.offline-shell-stamp";
+const cacheName = `${prefix}synthetic`;
+const stampURL = `${origin}/.offline-shell-stamp`;
 const bodies = new Map([
-  ["/index.html", "<html>Public home shell</html>"],
-  ["/map/index.html", "<html>Public map shell</html>"],
+  ["/", "<html>Public home shell</html>"],
+  ["/map/", "<html>Public map shell</html>"],
   ["/_next/static/build.js", 'console.log("synthetic public build");'],
 ]);
 const manifest = {
@@ -19,11 +19,11 @@ const manifest = {
     sha256: createHash("sha256").update(body).digest("hex"),
   })),
   routes: [
-    ["/", "/index.html"],
-    ["/index.html", "/index.html"],
-    ["/map/", "/map/index.html"],
-    ["/map", "/map/index.html"],
-    ["/map/index.html", "/map/index.html"],
+    ["/", "/"],
+    ["/index.html", "/"],
+    ["/map/", "/map/"],
+    ["/map", "/map/"],
+    ["/map/index.html", "/map/"],
   ],
 };
 
@@ -137,7 +137,7 @@ test("installs an exact hash-checked public shell without cookies, then activate
     assert.equal(options.redirect, "error");
     assert.ok(options.signal instanceof AbortSignal);
   }
-  await h.caches.open(prefix + "old");
+  await h.caches.open(`${prefix}old`);
   await h.caches.open("unrelated-private-cache");
   await h.emit("activate").done();
   assert.equal(h.scope.claimed, true);
@@ -198,6 +198,7 @@ test("offline navigation normalizes only known paths while preserving query stat
     "/map?focus=AM-1",
     "/map/index.html?session=AM",
     "/?view=map",
+    "/index.html?company=AM-1",
   ]) {
     const event = h.emit("fetch", request(path));
     const response = await event.response;
@@ -225,10 +226,7 @@ test("online navigation remains authoritative and does not cache session failure
   assert.equal((await event.response).status, 401);
   await event.done();
   const cache = await h.caches.open(cacheName);
-  assert.equal(
-    await (await cache.match(origin + "/index.html")).text(),
-    bodies.get("/index.html"),
-  );
+  assert.equal(await (await cache.match(`${origin}/`)).text(), bodies.get("/"));
 });
 
 test("server outage uses saved shell; an uncached outage preserves its status", async () => {
@@ -281,7 +279,7 @@ test("immutable static assets use the current shell cache and fall through when 
     bodies.get("/_next/static/build.js"),
   );
   await event.done();
-  h.stores.get(cacheName).delete(origin + "/_next/static/build.js");
+  h.stores.get(cacheName).delete(`${origin}/_next/static/build.js`);
   event = h.emit("fetch", request("/_next/static/build.js", { mode: "cors" }));
   assert.equal(await (await event.response).text(), "network bytes");
   await event.done();
@@ -323,11 +321,8 @@ test("a mixed deployment cannot renew or corrupt the previous complete shell", a
     stale,
   );
   assert.equal(
-    await h.stores
-      .get(cacheName)
-      .get(origin + "/index.html")
-      .text(),
-    bodies.get("/index.html"),
+    await h.stores.get(cacheName).get(`${origin}/`).text(),
+    bodies.get("/"),
   );
 });
 
