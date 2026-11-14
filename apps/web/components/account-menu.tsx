@@ -147,6 +147,15 @@ export default function AccountMenu({
             <DropdownMenu.Title>名簿番号の設定</DropdownMenu.Title>
           </DropdownMenu.ListItem>
           <DropdownMenu.ListItem
+            icon={<Icon name="document" />}
+            onClick={() => {
+              close();
+              window.location.href = "https://policies.taskly.iy0306.com/";
+            }}
+          >
+            <DropdownMenu.Title>規約とポリシー</DropdownMenu.Title>
+          </DropdownMenu.ListItem>
+          <DropdownMenu.ListItem
             icon={<Icon name="logout" />}
             onClick={() => {
               close();
