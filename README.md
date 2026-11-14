@@ -118,6 +118,8 @@ go run ./cmd/import-guidance -input /absolute/path/to/private-guidance/guidance.
 
 ## 検証とデプロイ
 
+[開発への参加](CONTRIBUTING.md)と[セキュリティ方針・非公開の報告窓口](SECURITY.md)を用意しています。
+
 [テストとカバレッジ](docs/testing.md)、[lint・format](docs/code-quality.md)、[本番運用と切り戻し](docs/deployment.md)を参照してください。CI はすべて GitHub ホストの `ubuntu-latest` ランナーで動作します。
 
 既存 DB を更新する場合は、新しい API の配備前に `migrations/001_preferences.sql` を管理者権限で適用してください。新規 DB の `schema.sql` には同じ設定用テーブルが含まれています。
