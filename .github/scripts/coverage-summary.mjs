@@ -1,9 +1,15 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
-const [kind, input, output, minimumArg = "0", includePattern = ""] = process.argv.slice(2);
+const [kind, input, output, minimumArg = "0", ...filterArgs] = process.argv.slice(2);
 if (!kind || !input || !output) {
-  throw new Error("Usage: coverage-summary.mjs <go|go-profile|istanbul> <input> <output> [minimum] [include-regex]");
+  throw new Error("Usage: coverage-summary.mjs <go|go-profile|istanbul> <input> <output> [minimum] [--include-path <literal-file-or-directory/>]");
 }
+const includePath = filterArgs[1];
+if (filterArgs.length && (
+  kind !== "go-profile" || filterArgs.length !== 2 || filterArgs[0] !== "--include-path" ||
+  !includePath || includePath.length > 4096 || includePath.trim() !== includePath || /[\s\\\0]/.test(includePath) ||
+  includePath.split("/").some((segment, index, parts) => segment === "." || segment === ".." || (!segment && index !== parts.length - 1))
+)) throw new Error("Invalid literal Go coverage include path");
 
 let percent;
 if (kind === "go") {
@@ -11,14 +17,14 @@ if (kind === "go") {
   if (!match) throw new Error(`Go coverage total is missing from ${input}`);
   percent = Number(match[1]);
 } else if (kind === "go-profile") {
-  const include = includePattern ? new RegExp(includePattern) : null;
   let covered = 0;
   let total = 0;
   for (const line of readFileSync(input, "utf8").split("\n").slice(1)) {
     if (!line.trim()) continue;
     const match = line.match(/^(.*):\d+\.\d+,\d+\.\d+\s+(\d+)\s+(\d+)$/);
     if (!match) throw new Error(`Invalid Go coverage profile line: ${line}`);
-    if (include && !include.test(match[1])) continue;
+    // A trailing slash selects a directory; otherwise select exactly one file.
+    if (includePath && (includePath.endsWith("/") ? !match[1].startsWith(includePath) : match[1] !== includePath)) continue;
     const statements = Number(match[2]);
     total += statements;
     if (Number(match[3]) > 0) covered += statements;
