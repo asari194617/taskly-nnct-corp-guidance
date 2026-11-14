@@ -68,7 +68,7 @@ jobs:
           mkdir -p coverage
           go test -race -coverprofile=coverage/go.out ./...
           node .github/scripts/coverage-summary.mjs go-profile coverage/go.out api.json 80
-          node .github/scripts/coverage-summary.mjs go-profile coverage/go.out importer.json 80 '/cmd/import-guidance/'
+          node .github/scripts/coverage-summary.mjs go-profile coverage/go.out importer.json 80 --include-path 'github.com/asari194617/taskly-nnct-corp-guidance/cmd/import-guidance/'
       - name: Measure real MySQL integration execution
         run: |
           go test -race -run '^TestMySQLIntegration$' -coverprofile=coverage/integration.out ./internal/server
