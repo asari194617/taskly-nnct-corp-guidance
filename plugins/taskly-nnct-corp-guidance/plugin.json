@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "taskly-nnct-corp-guidance",
+  "version": "0.1.0",
+  "description": "長岡高専の企業ガイダンス情報を確認し、明示的に依頼された気になる企業とやることを更新します。",
+  "homepage": "https://nnct-corp-guidance-2026.taskly.iy0306.com",
+  "repository": "https://github.com/asari194617/taskly-nnct-corp-guidance",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Taskly企業ガイダンス",
+        "shortDescription": "企業探しと見学の進捗を確認",
+        "longDescription": "長岡高専の企業ガイダンスで、企業検索、指定企業、スケジュール、気になる企業、Tasklyと共有するやることをチャットから確認します。気になる企業と完了状態の変更は、利用者から明示的な依頼がある場合に行います。専用の対話画面は含みません。",
+        "category": "Education & Research",
+        "capabilities": [],
+        "logo": "./assets/taskly-icon.png",
+        "composerIcon": "./assets/taskly-icon.png",
+        "defaultPrompt": [
+          "気になる企業を確認したい",
+          "指定企業とスケジュールを確認したい",
+          "ガイダンスのやることを確認したい"
+        ]
+      }
+    }
+  }
+}

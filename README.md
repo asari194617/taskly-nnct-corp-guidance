@@ -26,6 +26,7 @@
 | ------------------ | --------------------------------------------------------------------------- |
 | 画面と利用者設定   | [機能の詳細](docs/features.md)                                              |
 | Tasklyのやること   | [連携設定](docs/taskly-integration.md)                                      |
+| ChatGPTからの利用  | [プラグイン](docs/chatgpt-plugin.md)、[MCP・OAuth設定](docs/mcp.md)         |
 | 品質チェック       | [lint・format](docs/code-quality.md)、[テストとカバレッジ](docs/testing.md) |
 | 本番環境           | [配備・切り戻し](docs/deployment.md)、[非公開R2](docs/private-r2.md)        |
 | 通信できない場合   | [オフライン参照](docs/offline.md)                                           |

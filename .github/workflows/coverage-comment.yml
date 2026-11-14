@@ -42,19 +42,29 @@ jobs:
             const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
             if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
                 pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
-            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['Service worker unit execution (lines)', 'offline-worker'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration']].map(([name,id]) => {
+            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['Service worker unit execution (lines)', 'offline-worker'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration'], ['MCP API suite component (Go statements)', 'mcp-api'], ['MCP real MySQL component (Go statements)', 'mcp-integration']].map(([name,id]) => {
               let value = 'Unavailable (test/setup failed)';
               try {
-                const {percent} = read(id);
-                if (typeof percent === 'number' && Number.isFinite(percent) && percent >= 0 && percent <= 100)
-                  value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
-              } catch {}
+                const {percent,covered,total} = read(id);
+                if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) throw Error('Invalid percentage');
+                const component = id === 'mcp-api' || id === 'mcp-integration';
+                if (component && (!Number.isSafeInteger(covered) || !Number.isSafeInteger(total) || covered < 0 || total < 1 || covered > total || total > 10000000 || Math.abs(percent - 100 * covered / total) > 1e-8)) throw Error('Invalid MCP statement counts');
+                value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
+                if (component) value += ` (${covered}/${total} statements)`;
+              } catch { value = 'Unavailable (test/setup failed)'; }
               return `| ${name} | ${value} | ${id === 'e2e' ? 'Measured' : '80%'} |`;
             });
+            let functional = 'Unavailable (test/setup failed)';
+            try {
+              const {passed,total} = read('mcp-functional');
+              if (Number.isSafeInteger(passed) && total === 18 && passed >= 0 && passed <= total)
+                functional = `${passed}/${total} tests ${passed === total ? '✅' : '❌'}`;
+            } catch {}
+            rows.push(`| MCP HTTP / official SDK (functional) | ${functional} | All 18 |`);
             const marker = '<!-- nnct-guidance-coverage -->';
-            const body = [marker, '### Test coverage', '', '| Group | Coverage | Required |',
+            const body = [marker, '### Test coverage', '', '| Group | Coverage / result | Required |',
               '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
-              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction and standalone real MySQL integration require 80%. Page browser execution is reported separately; service worker coverage measures its actual runtime in Node, not page E2E execution.',
+              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction, standalone real MySQL integration and both MCP component profiles require 80%. Full API/MySQL denominators are unchanged. MCP HTTP functional scenarios and page browser execution are separate metrics; scenario counts are not coverage. Service worker coverage measures its actual runtime in Node.',
               `[CI run](${run.html_url})`].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments,
               {owner,repo,issue_number:metadata.number,per_page:100});
