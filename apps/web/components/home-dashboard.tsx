@@ -316,26 +316,24 @@ export default function HomeDashboard({
                     className="home-surveys"
                     aria-labelledby="home-surveys-title"
                   >
+                    <div className="home-group-heading">
+                      <h3 id="home-surveys-title">アンケート</h3>
+                    </div>
                     <div className="home-surveys-heading">
-                      <h3>
-                        <TextButton
-                          aria-expanded={surveyOpen}
-                          aria-controls={
-                            surveyOpen ? "home-survey-tasks" : undefined
-                          }
-                          onClick={() => setSurveyOpen((value) => !value)}
-                        >
-                          <Icon
-                            name={surveyOpen ? "minus" : "plus"}
-                            size={16}
-                          />
-                          <span id="home-surveys-title">見学アンケート</span>
-                          <span className="home-survey-count">
-                            {surveys.filter((task) => task.completed).length}/
-                            {surveys.length}
-                          </span>
-                        </TextButton>
-                      </h3>
+                      <TextButton
+                        aria-expanded={surveyOpen}
+                        aria-controls={
+                          surveyOpen ? "home-survey-tasks" : undefined
+                        }
+                        onClick={() => setSurveyOpen((value) => !value)}
+                      >
+                        <Icon name={surveyOpen ? "minus" : "plus"} size={16} />
+                        <span>見学アンケート</span>
+                        <span className="home-survey-count">
+                          {surveys.filter((task) => task.completed).length}/
+                          {surveys.length}
+                        </span>
+                      </TextButton>
                       {currentSurvey &&
                         (currentSurvey.url || offline) &&
                         (offline ? (

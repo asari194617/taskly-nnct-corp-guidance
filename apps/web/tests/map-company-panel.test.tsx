@@ -60,7 +60,7 @@ describe("map company card close action", () => {
     expect(returnFocus).toHaveBeenCalledOnce();
   });
 
-  it("keeps the floating action keyboard reachable after the favorite and activates it with Enter", async () => {
+  it("keeps Google search and the floating close action keyboard reachable after the favorite", async () => {
     const { returnFocus } = mountPanel();
     await userEvent.tab();
     expect(
@@ -68,6 +68,8 @@ describe("map company card close action", () => {
         name: "あおばテスト株式会社を気になるに追加",
       }),
     ).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole("link", { name: "Googleで調べる" })).toHaveFocus();
     await userEvent.tab();
     expect(
       screen.getByRole("button", { name: "企業情報を閉じる" }),

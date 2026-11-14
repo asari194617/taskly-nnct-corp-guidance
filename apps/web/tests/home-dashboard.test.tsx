@@ -212,14 +212,20 @@ describe("Taskly-backed guidance home", () => {
       within(assignments).queryByRole("link", { name: "Taskly" }),
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Taskly" })).toHaveLength(1);
-    const surveys = screen.getByRole("region", { name: "見学アンケート" });
+    const surveys = screen.getByRole("region", { name: "アンケート" });
     const surveyHeading = within(surveys).getByRole("heading", {
-      name: /見学アンケート.*0\/8/,
+      name: "アンケート",
       level: 3,
     });
-    const expand = within(surveyHeading).getByRole("button", {
-      name: /見学アンケート/,
+    const expand = within(surveys).getByRole("button", {
+      name: /見学アンケート.*0\/8/,
     });
+    expect(within(surveyHeading).queryByRole("button")).not.toBeInTheDocument();
+    expect(expand.closest("h3")).toBeNull();
+    expect(
+      surveyHeading.compareDocumentPosition(expand) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(
       within(assignments).getByRole("heading", {
         name: "指定企業の見学",
@@ -253,7 +259,7 @@ describe("Taskly-backed guidance home", () => {
 
   it("opens the current survey without falsely recording it as answered", async () => {
     await ready();
-    const surveys = screen.getByRole("region", { name: "見学アンケート" });
+    const surveys = screen.getByRole("region", { name: "アンケート" });
     const current = within(surveys).getByRole("link", {
       name: "ターム 2 の回答",
     });
@@ -310,7 +316,7 @@ describe("Taskly-backed guidance home", () => {
       Date.parse("2030-05-13T09:00:00+09:00"),
     );
     await ready(props);
-    const surveys = screen.getByRole("region", { name: "見学アンケート" });
+    const surveys = screen.getByRole("region", { name: "アンケート" });
     expect(
       within(surveys).getByRole("link", { name: "回答する" }),
     ).toHaveAttribute("href", "https://forms.example.invalid/visit/2");
