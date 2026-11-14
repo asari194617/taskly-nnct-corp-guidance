@@ -1,5 +1,5 @@
+import { requireValue } from "./required";
 import {
-  act,
   fireEvent,
   render,
   screen,
@@ -138,7 +138,9 @@ beforeEach(() => {
       if (path.startsWith("/api/home/tasks/") && init?.method === "PUT") {
         const id = decodeURIComponent(path.slice("/api/home/tasks/".length));
         const completed = JSON.parse(String(init.body)).completed;
-        const current = snapshot.tasks.find((row) => row.id === id)!;
+        const current = requireValue(
+          snapshot.tasks.find((row) => row.id === id),
+        );
         const updated = { ...current, completed };
         if (current.kind === "assigned_visit") delete updated.auto_completed_by;
         const partner =
@@ -298,7 +300,9 @@ describe("Taskly-backed guidance home", () => {
   });
 
   it("falls back to the next incomplete questionnaire outside the event day", async () => {
-    snapshot.tasks.find((row) => row.id === "survey:1")!.completed = true;
+    requireValue(
+      snapshot.tasks.find((row) => row.id === "survey:1"),
+    ).completed = true;
     const props = options();
     props.eventTime = getEventTimeState(
       props.data.event.date,
@@ -343,9 +347,11 @@ describe("Taskly-backed guidance home", () => {
       within(assigned).getByRole("link", { name: company.name }),
     );
     expect(props.onSelectCompany).toHaveBeenCalledWith(company);
-    const row = within(assigned)
-      .getByRole("checkbox", { name: "指定企業ターム1" })
-      .closest("li")!;
+    const row = requireValue(
+      within(assigned)
+        .getByRole("checkbox", { name: "指定企業ターム1" })
+        .closest("li"),
+    );
     const map = within(row).getByRole("link", { name: "ブース 1" });
     expect(map).toHaveAttribute("href", "/map/?focus=AM-1&session=AM");
     await userEvent.click(map);
@@ -492,11 +498,15 @@ describe("Taskly-backed guidance home", () => {
   });
 
   it("respects Taskly completion restrictions and allows undoing a prior completion", async () => {
-    snapshot.tasks.find((row) => row.id === "overall")!.completion_disabled =
-      true;
+    requireValue(
+      snapshot.tasks.find((row) => row.id === "overall"),
+    ).completion_disabled = true;
     Object.assign(
-      snapshot.tasks.find((row) => row.id === "sheet")!,
-      { completion_disabled: true, completed: true },
+      requireValue(snapshot.tasks.find((row) => row.id === "sheet")),
+      {
+        completion_disabled: true,
+        completed: true,
+      },
     );
     await ready();
     expect(

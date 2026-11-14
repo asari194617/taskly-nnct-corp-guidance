@@ -18,6 +18,7 @@ export function useDocumentNavigation(onExpired: () => void, scope = "") {
   const request = useRef<AbortController | null>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Profile and connectivity changes must cancel pending navigation, including responses resolving after abort.
   useEffect(() => {
     mounted.current = true;
     setOpening(false);

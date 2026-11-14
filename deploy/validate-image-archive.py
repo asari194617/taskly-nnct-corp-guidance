@@ -43,8 +43,10 @@ def read_json(archive, member):
 
 def canonical_name(member):
     name = member.name.rstrip("/") if member.isdir() else member.name
-    if not name or name.startswith("/") or any(
-        part in ("", ".", "..") for part in name.split("/")
+    if (
+        not name
+        or name.startswith("/")
+        or any(part in ("", ".", "..") for part in name.split("/"))
     ):
         raise InvalidArchive("noncanonical archive path")
     if not (member.isfile() or member.isdir()):
@@ -77,7 +79,11 @@ def validate(source_path, output_path, sha):
     if not isinstance(manifest, list) or len(manifest) != 1:
         raise InvalidArchive("expected one image in manifest")
     image = manifest[0]
-    if not isinstance(image, dict) or set(image) != {"Config", "RepoTags", "Layers"} or image.get("RepoTags") != [expected_tag]:
+    if (
+        not isinstance(image, dict)
+        or set(image) != {"Config", "RepoTags", "Layers"}
+        or image.get("RepoTags") != [expected_tag]
+    ):
         raise InvalidArchive("unexpected image tag")
     config_name = image.get("Config")
     if not isinstance(config_name, str) or not (
@@ -91,14 +97,19 @@ def validate(source_path, output_path, sha):
     if not isinstance(config, dict) or not isinstance(config.get("config"), dict):
         raise InvalidArchive("missing image config")
     labels = config["config"].get("Labels")
-    if not isinstance(labels, dict) or labels.get("org.opencontainers.image.revision") != sha:
+    if (
+        not isinstance(labels, dict)
+        or labels.get("org.opencontainers.image.revision") != sha
+    ):
         raise InvalidArchive("image revision mismatch")
     layers = image.get("Layers")
     if not isinstance(layers, list) or not layers or len(layers) > 128:
         raise InvalidArchive("unexpected image layers")
-    if any(not isinstance(layer, str) or not (
-        LEGACY_LAYER.fullmatch(layer) or OCI_BLOB.fullmatch(layer)
-    ) for layer in layers):
+    if any(
+        not isinstance(layer, str)
+        or not (LEGACY_LAYER.fullmatch(layer) or OCI_BLOB.fullmatch(layer))
+        for layer in layers
+    ):
         raise InvalidArchive("unexpected layer path")
     if len(set(layers)) != len(layers):
         raise InvalidArchive("unexpected layer path")
@@ -108,9 +119,15 @@ def validate(source_path, output_path, sha):
         if any(not OCI_BLOB.fullmatch(layer) for layer in layers):
             raise InvalidArchive("mixed archive formats")
         blob_names = [name for name in members if OCI_BLOB.fullmatch(name)]
-        if len(blob_names) > MAX_OCI_BLOBS or "index.json" not in members or "oci-layout" not in members:
+        if (
+            len(blob_names) > MAX_OCI_BLOBS
+            or "index.json" not in members
+            or "oci-layout" not in members
+        ):
             raise InvalidArchive("invalid OCI archive")
-        allowed.update(("blobs", "blobs/sha256", "index.json", "oci-layout", *blob_names))
+        allowed.update(
+            ("blobs", "blobs/sha256", "index.json", "oci-layout", *blob_names)
+        )
         image_manifests = []
         with tarfile.open(source_path, "r:gz") as archive:
             for name in blob_names:
@@ -126,18 +143,35 @@ def validate(source_path, output_path, sha):
                     continue  # Layer contents are opaque to this validator.
                 # Docker save can omit mediaType or use Docker's media type,
                 # depending on the image store. Shape and references matter.
-                if (isinstance(data, dict) and data.get("schemaVersion") == 2
-                        and "config" in data and "layers" in data):
+                if (
+                    isinstance(data, dict)
+                    and data.get("schemaVersion") == 2
+                    and "config" in data
+                    and "layers" in data
+                ):
                     image_manifests.append(data)
         expected_config_digest = "sha256:" + config_name.rsplit("/", 1)[1]
-        expected_layer_digests = ["sha256:" + layer.rsplit("/", 1)[1] for layer in layers]
+        expected_layer_digests = [
+            "sha256:" + layer.rsplit("/", 1)[1] for layer in layers
+        ]
+
         def is_target_oci_image(candidate):
             config = candidate.get("config")
             image_layers = candidate.get("layers")
-            return (isinstance(config, dict) and config.get("digest") == expected_config_digest
-                    and isinstance(image_layers, list)
-                    and [layer.get("digest") if isinstance(layer, dict) else None for layer in image_layers] == expected_layer_digests)
-        targets = [candidate for candidate in image_manifests if is_target_oci_image(candidate)]
+            return (
+                isinstance(config, dict)
+                and config.get("digest") == expected_config_digest
+                and isinstance(image_layers, list)
+                and [
+                    layer.get("digest") if isinstance(layer, dict) else None
+                    for layer in image_layers
+                ]
+                == expected_layer_digests
+            )
+
+        targets = [
+            candidate for candidate in image_manifests if is_target_oci_image(candidate)
+        ]
         if len(targets) != 1:
             raise InvalidArchive("expected one OCI image")
         for candidate in image_manifests:
@@ -147,9 +181,16 @@ def validate(source_path, output_path, sha):
             image_layers = candidate.get("layers")
             # BuildKit provenance is a non-runnable OCI attestation manifest.
             # Older engines omit artifactType/subject, so inspect its media types.
-            if (not isinstance(config, dict) or not isinstance(image_layers, list)
-                    or not image_layers
-                    or any(not isinstance(layer, dict) or layer.get("mediaType") != "application/vnd.in-toto+json" for layer in image_layers)):
+            if (
+                not isinstance(config, dict)
+                or not isinstance(image_layers, list)
+                or not image_layers
+                or any(
+                    not isinstance(layer, dict)
+                    or layer.get("mediaType") != "application/vnd.in-toto+json"
+                    for layer in image_layers
+                )
+            ):
                 raise InvalidArchive("archive contains an additional OCI image")
     else:
         if any(not LEGACY_LAYER.fullmatch(layer) for layer in layers):
@@ -166,12 +207,19 @@ def validate(source_path, output_path, sha):
         if not isinstance(repositories, dict) or set(repositories) != {REPOSITORY}:
             raise InvalidArchive("unexpected legacy image tag")
         tags = repositories[REPOSITORY]
-        if not isinstance(tags, dict) or set(tags) != {sha} or not isinstance(tags[sha], str):
+        if (
+            not isinstance(tags, dict)
+            or set(tags) != {sha}
+            or not isinstance(tags[sha], str)
+        ):
             raise InvalidArchive("unexpected legacy image tag")
 
     # Rebuild the archive without legacy metadata or untrusted per-layer files.
     # docker load sees only the validated manifest, config, and layer tarballs.
-    with tarfile.open(source_path, "r|gz") as archive, tarfile.open(output_path, "w") as output:
+    with (
+        tarfile.open(source_path, "r|gz") as archive,
+        tarfile.open(output_path, "w") as output,
+    ):
         for member in archive:
             if member.name not in selected:
                 continue

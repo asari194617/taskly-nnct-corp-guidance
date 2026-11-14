@@ -204,7 +204,8 @@ export function suggestRecommendations(
     candidates.sort(
       (a, b) => adjusted(b) - adjusted(a) || companyOrder(a.company, b.company),
     );
-    const next = candidates.shift()!;
+    const next = candidates.shift();
+    if (!next) break;
     recommendations.push({ company: next.company, reasons: next.reasons });
     for (const industry of next.industries)
       shownIndustries.set(industry, (shownIndustries.get(industry) || 0) + 1);

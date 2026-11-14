@@ -52,6 +52,7 @@ export default function IncrementalCompanyList({
     }));
   }, [listKey, companies.length]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Re-arm the one-shot observer after each batch and filter reset, even while hasMore stays true.
   useEffect(() => {
     if (
       !hasMore ||

@@ -5,24 +5,31 @@ import { describe, expect, it, vi } from "vitest";
 import { MapCompanyPanel } from "../components/company-details";
 import { fixture } from "./fixtures";
 
+function Example({
+  onSave,
+  returnFocus,
+}: {
+  onSave: () => Promise<void>;
+  returnFocus: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  return open ? (
+    <MapCompanyPanel
+      company={fixture().companies[0]}
+      saved={false}
+      assigned
+      onSave={onSave}
+      focusOnOpen
+      onClose={() => setOpen(false)}
+      returnFocus={returnFocus}
+    />
+  ) : null;
+}
+
 function mountPanel() {
   const onSave = vi.fn(async () => {});
   const returnFocus = vi.fn();
-  function Example() {
-    const [open, setOpen] = useState(true);
-    return open ? (
-      <MapCompanyPanel
-        company={fixture().companies[0]}
-        saved={false}
-        assigned
-        onSave={onSave}
-        focusOnOpen
-        onClose={() => setOpen(false)}
-        returnFocus={returnFocus}
-      />
-    ) : null;
-  }
-  render(<Example />);
+  render(<Example onSave={onSave} returnFocus={returnFocus} />);
   return { onSave, returnFocus };
 }
 

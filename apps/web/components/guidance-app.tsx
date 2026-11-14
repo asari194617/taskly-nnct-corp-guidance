@@ -112,6 +112,7 @@ function Brand({ homeHref }: { homeHref: string }) {
       href={homeHref}
       aria-label="Taskly 企業ガイダンス ホーム"
     >
+      {/* biome-ignore lint/performance/noImgElement: The fixed SVG logo is served unchanged from R2; this static export has no image optimization server. */}
       <img
         className="brand-logo"
         src="/taskly-logo.svg"
@@ -165,6 +166,16 @@ function sessionLabel(value: string) {
 }
 function normalized(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase("ja").replace(/\s+/g, "");
+}
+
+function withContentKeys<T>(items: T[], content: (item: T) => string) {
+  const occurrences = new Map<string, number>();
+  return items.map((item) => {
+    const text = content(item);
+    const occurrence = occurrences.get(text) || 0;
+    occurrences.set(text, occurrence + 1);
+    return { item, key: JSON.stringify([text, occurrence]) };
+  });
 }
 
 type BookmarkState = {
@@ -847,6 +858,7 @@ export default function GuidanceApp({
                 {mobile ? item.short : item.title}
                 {item.id === "plan" && saved.size > 0 ? (
                   <span
+                    role="status"
                     className="saved-count"
                     aria-label={`気になる${saved.size}件`}
                   >
@@ -1384,7 +1396,7 @@ function Companies({
       </div>
       <section className="company-search" aria-label="企業の検索と絞り込み">
         <div className="search-row">
-          <label className="search-field">
+          <label className="search-field" htmlFor="company-search">
             <span className="sr-only">企業名・業種・ブース番号で検索</span>
             <span className="company-search-icon" aria-hidden="true">
               <Icon name="search" size={20} />
@@ -1586,6 +1598,7 @@ function CompanyDialog({
     assigned: false,
   });
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Native Escape dismissal is handled by onCancel; this click handler only dismisses the backdrop.
     <dialog
       ref={ref}
       className="company-dialog"
@@ -1661,6 +1674,9 @@ function Schedule({
   onInformation: () => void;
   eventTime: EventTimeState;
 }) {
+  const nextSlot = data.schedule.find(
+    (slot) => slot.id === eventTime.nextSlotId,
+  );
   return (
     <>
       <div className="view-heading">
@@ -1691,14 +1707,8 @@ function Schedule({
               }
             </strong>
           )}
-          {!eventTime.currentSlotId && eventTime.nextSlotId && (
-            <span>
-              次は{" "}
-              {timeLabel(
-                data.schedule.find((slot) => slot.id === eventTime.nextSlotId)!
-                  .start,
-              )}
-            </span>
+          {!eventTime.currentSlotId && nextSlot && (
+            <span>次は {timeLabel(nextSlot.start)}</span>
           )}
           {eventTime.phase === "ended" && (
             <span>本日のスケジュールは終了しました</span>
@@ -1827,20 +1837,28 @@ function Information({
                   aria-labelledby={`notice-${section.id}`}
                 >
                   <h2 id={`notice-${section.id}`}>{section.title}</h2>
-                  {section.blocks.map((block, index) =>
+                  {withContentKeys(section.blocks, (block) =>
+                    block.type === "paragraph"
+                      ? block.text
+                      : JSON.stringify(block.items),
+                  ).map(({ item: block, key }) =>
                     block.type === "paragraph" ? (
-                      <p key={index}>{block.text}</p>
+                      <p key={key}>{block.text}</p>
                     ) : (
-                      <ul key={index}>
-                        {block.items.map((item, itemIndex) => (
-                          <li key={itemIndex}>{item}</li>
-                        ))}
+                      <ul key={key}>
+                        {withContentKeys(block.items, (item) => item).map(
+                          ({ item, key: itemKey }) => (
+                            <li key={itemKey}>{item}</li>
+                          ),
+                        )}
                       </ul>
                     ),
                   )}
                 </section>
               ))
-            : data.notices.map((notice, index) => <p key={index}>{notice}</p>)}
+            : withContentKeys(data.notices, (notice) => notice).map(
+                ({ item: notice, key }) => <p key={key}>{notice}</p>,
+              )}
         </div>
       ) : (
         <Empty title="配布資料の案内はありません" />

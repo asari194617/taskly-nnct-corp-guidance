@@ -34,31 +34,45 @@ test("the synthetic issuer joins userinfo and authenticated introspection to the
     assert.equal(response.status, 200);
     const id = (await response.text()).match(/name="id" value="([^"]+)"/)[1];
     const login = await fetch(`${issuer}/mock/login`, {
-      method: "POST", redirect: "manual",
+      method: "POST",
+      redirect: "manual",
       body: new URLSearchParams({ id, subject: "home" }),
     });
     assert.equal(login.status, 302);
-    const code = new URL(login.headers.get("location")).searchParams.get("code");
+    const code = new URL(login.headers.get("location")).searchParams.get(
+      "code",
+    );
     const issued = await fetch(`${issuer}/oauth/token`, {
       method: "POST",
       body: new URLSearchParams({
-        grant_type: "authorization_code", code,
+        grant_type: "authorization_code",
+        code,
         client_id: syntheticGuidanceClientID,
-        redirect_uri: redirect, code_verifier: verifier,
+        redirect_uri: redirect,
+        code_verifier: verifier,
       }),
     });
     assert.equal(issued.status, 200);
     const { access_token: access } = await issued.json();
-    const user = await (await fetch(`${issuer}/oauth/userinfo`, {
-      headers: { Authorization: `Bearer ${access}` },
-    })).json();
+    const user = await (
+      await fetch(`${issuer}/oauth/userinfo`, {
+        headers: { Authorization: `Bearer ${access}` },
+      })
+    ).json();
     assert.equal(user.sub, syntheticIdentities.home);
-    const introspect = (authorization) => fetch(`${issuer}/oauth/introspect`, {
-      method: "POST",
-      headers: { Authorization: authorization },
-      body: new URLSearchParams({ token: access, token_type_hint: "access_token" }),
-    });
-    assert.equal((await introspect("Basic invalid-synthetic-client")).status, 401);
+    const introspect = (authorization) =>
+      fetch(`${issuer}/oauth/introspect`, {
+        method: "POST",
+        headers: { Authorization: authorization },
+        body: new URLSearchParams({
+          token: access,
+          token_type_hint: "access_token",
+        }),
+      });
+    assert.equal(
+      (await introspect("Basic invalid-synthetic-client")).status,
+      401,
+    );
     const basic = `Basic ${Buffer.from(`${syntheticTasklyClientID}:${syntheticTasklyClientSecret}`).toString("base64")}`;
     const identity = await (await introspect(basic)).json();
     assert.equal(identity.active, true);
@@ -71,9 +85,14 @@ test("the synthetic issuer joins userinfo and authenticated introspection to the
     assert.ok(identity.exp > Date.now() / 1000);
     await fetch(`${issuer}/__test/revoke?subject=home`, { method: "POST" });
     assert.deepEqual(await (await introspect(basic)).json(), { active: false });
-    assert.equal((await fetch(`${issuer}/oauth/userinfo`, {
-      headers: { Authorization: `Bearer ${access}` },
-    })).status, 401);
+    assert.equal(
+      (
+        await fetch(`${issuer}/oauth/userinfo`, {
+          headers: { Authorization: `Bearer ${access}` },
+        })
+      ).status,
+      401,
+    );
   } finally {
     if (stop) await stop();
     await rm(output, { force: true, recursive: true });

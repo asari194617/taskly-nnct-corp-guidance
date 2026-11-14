@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -147,7 +148,7 @@ export default function VenueMap({
     height: number;
   } | null>(null);
   const highlighted = useRef<HTMLButtonElement | null>(null);
-  const viewport = useRef<HTMLDivElement | null>(null);
+  const viewport = useRef<HTMLElement | null>(null);
   const mapRoot = useRef<HTMLElement | null>(null);
   const bottomControls = useRef<HTMLDivElement | null>(null);
   const previewTooltip = useRef<HTMLDivElement | null>(null);
@@ -155,7 +156,7 @@ export default function VenueMap({
   const previewFrame = useRef<number | null>(null);
   const supportsHoverPreview = () =>
     window.matchMedia?.("(hover: hover) and (pointer: fine)").matches === true;
-  function positionPreview() {
+  const positionPreview = useCallback(() => {
     const tooltip = previewTooltip.current;
     const root = mapRoot.current;
     const point = previewPoint.current;
@@ -172,7 +173,7 @@ export default function VenueMap({
       top = point.y - bounds.top - size.height - gap;
     tooltip.style.left = `${Math.max(edge, Math.min(left, bounds.width - size.width - edge))}px`;
     tooltip.style.top = `${Math.max(edge, Math.min(top, bounds.height - size.height - edge))}px`;
-  }
+  }, []);
   function movePreview(x: number, y: number) {
     previewPoint.current = { x, y };
     if (previewFrame.current !== null) return;
@@ -196,43 +197,47 @@ export default function VenueMap({
   const suppressClick = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [focusedBooth, setFocusedBooth] = useState<number | null>(null);
-  function changeZoom(
-    value: number,
-    point?: { x: number; y: number },
-    previousPoint?: { x: number; y: number },
-  ) {
-    const next = clampZoom(value),
-      element = viewport.current;
-    if (element) {
-      const bounds = element.getBoundingClientRect();
-      const x = point ? point.x - bounds.left : element.clientWidth / 2;
-      const y = point ? point.y - bounds.top : element.clientHeight / 2;
-      const previousX = previousPoint ? previousPoint.x - bounds.left : x;
-      const previousY = previousPoint ? previousPoint.y - bounds.top : y;
-      const ratio = next / zoomValue.current;
-      zoomAnchor.current = {
-        left:
-          (element.scrollLeft + previousX - element.clientWidth / 2) * ratio +
-          element.clientWidth / 2 -
-          x,
-        top:
-          (element.scrollTop + previousY - element.clientHeight / 2) * ratio +
-          element.clientHeight / 2 -
-          y,
-      };
-    }
-    if (next === zoomValue.current && element && zoomAnchor.current) {
-      element.scrollLeft = zoomAnchor.current.left;
-      element.scrollTop = zoomAnchor.current.top;
-      zoomAnchor.current = null;
-    }
-    zoomValue.current = next;
-    setZoom(next);
-  }
+  const changeZoom = useCallback(
+    (
+      value: number,
+      point?: { x: number; y: number },
+      previousPoint?: { x: number; y: number },
+    ) => {
+      const next = clampZoom(value),
+        element = viewport.current;
+      if (element) {
+        const bounds = element.getBoundingClientRect();
+        const x = point ? point.x - bounds.left : element.clientWidth / 2;
+        const y = point ? point.y - bounds.top : element.clientHeight / 2;
+        const previousX = previousPoint ? previousPoint.x - bounds.left : x;
+        const previousY = previousPoint ? previousPoint.y - bounds.top : y;
+        const ratio = next / zoomValue.current;
+        zoomAnchor.current = {
+          left:
+            (element.scrollLeft + previousX - element.clientWidth / 2) * ratio +
+            element.clientWidth / 2 -
+            x,
+          top:
+            (element.scrollTop + previousY - element.clientHeight / 2) * ratio +
+            element.clientHeight / 2 -
+            y,
+        };
+      }
+      if (next === zoomValue.current && element && zoomAnchor.current) {
+        element.scrollLeft = zoomAnchor.current.left;
+        element.scrollTop = zoomAnchor.current.top;
+        zoomAnchor.current = null;
+      }
+      zoomValue.current = next;
+      setZoom(next);
+    },
+    [],
+  );
   function resetView() {
     changeZoom(100);
     setViewReset((value) => value + 1);
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Floor/mode changes can replace or resize the viewport before a resize event occurs.
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element) return;
@@ -263,6 +268,7 @@ export default function VenueMap({
       zoomAnchor.current = null;
     }
   }, [zoom]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Reattach to the viewport when switching floor documents; changeZoom only reads stable refs.
   useEffect(() => {
     const element = viewport.current;
     if (!element) return;
@@ -276,8 +282,8 @@ export default function VenueMap({
     };
     element.addEventListener("wheel", wheel, { passive: false });
     return () => element.removeEventListener("wheel", wheel);
-  }, [floor]);
-  function pointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+  }, [floor, changeZoom]);
+  function pointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (!pointers.current.size) suppressClick.current = false;
     pointers.current.set(event.pointerId, {
@@ -302,7 +308,7 @@ export default function VenueMap({
       event.preventDefault();
     }
   }
-  function pointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+  function pointerMove(event: ReactPointerEvent<HTMLElement>) {
     if (!pointers.current.has(event.pointerId) || !gesture.current) return;
     const oldPoints = [...pointers.current.values()];
     pointers.current.set(event.pointerId, {
@@ -344,7 +350,7 @@ export default function VenueMap({
     setDragging(true);
     event.preventDefault();
   }
-  function pointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+  function pointerEnd(event: ReactPointerEvent<HTMLElement>) {
     pointers.current.delete(event.pointerId);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -459,6 +465,7 @@ export default function VenueMap({
 
   // Reserve the actual control stack height, including wrapped floor names.
   // The controls keep their right-bottom anchor when a company pane opens.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Document/mode changes recreate the measured controls even when their refs keep the same identity.
   useLayoutEffect(() => {
     const controls = bottomControls.current;
     const root = mapRoot.current;
@@ -480,7 +487,7 @@ export default function VenueMap({
 
   useLayoutEffect(() => {
     if (previewCompanyId) positionPreview();
-  }, [previewCompanyId]);
+  }, [previewCompanyId, positionPreview]);
   useEffect(() => {
     const media = window.matchMedia?.("(hover: hover) and (pointer: fine)");
     const changed = () => {
@@ -494,7 +501,8 @@ export default function VenueMap({
       if (previewFrame.current !== null)
         cancelAnimationFrame(previewFrame.current);
     };
-  }, []);
+  }, [positionPreview]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A session switch must dismiss a preview even though the reset only writes state.
   useEffect(() => {
     setPreviewCompanyId(null);
   }, [session]);
@@ -505,6 +513,7 @@ export default function VenueMap({
     if (arena) setFloor(arena.id);
   }, [selectedCompanyId, images]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry attempts and account generations deliberately abort and restart map loading.
   useEffect(() => {
     setPreviewCompanyId(null);
     if (!floor) return;
@@ -617,6 +626,7 @@ export default function VenueMap({
   }, [embedded]);
 
   // Selection can reveal a booth, but never changes a user's chosen zoom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Every listed state changes the selected booth or an overlay's DOM geometry, which is read through refs below.
   useEffect(() => {
     const element = viewport.current,
       target = highlighted.current;
@@ -687,7 +697,9 @@ export default function VenueMap({
     reveal();
     if (overlays.length && typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(reveal);
-      overlays.forEach((overlay) => observer.observe(overlay));
+      overlays.forEach((overlay) => {
+        observer.observe(overlay);
+      });
       return () => observer.disconnect();
     }
   }, [
@@ -863,8 +875,9 @@ export default function VenueMap({
             </section>
           )}
           <div ref={bottomControls} className="venue-map-bottom-right">
-            <div
+            <fieldset
               className="venue-map-zoom venue-map-floating"
+              style={{ margin: 0, minWidth: 0 }}
               aria-label="マップの拡大縮小"
             >
               <IconButton
@@ -894,10 +907,11 @@ export default function VenueMap({
               >
                 <Icon name="minus" size={18} />
               </IconButton>
-            </div>
+            </fieldset>
             {!embedded && (
-              <div
+              <fieldset
                 className="venue-map-floors venue-map-floating"
+                style={{ margin: 0, minWidth: 0 }}
                 aria-label="会場マップの切り替え"
               >
                 {images.map((item) => (
@@ -911,7 +925,7 @@ export default function VenueMap({
                     {item.title}
                   </Button>
                 ))}
-              </div>
+              </fieldset>
             )}
           </div>
           {!embedded &&
@@ -960,12 +974,12 @@ export default function VenueMap({
               </div>
             </div>
           )}
-          <div
+          <section
             className="venue-map-viewport"
             ref={viewport}
-            role="region"
             aria-label="操作できる会場マップ"
             aria-describedby={`${componentId}-keyboard-help`}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: This map region handles arrow-key panning and keyboard zoom without traversing every booth.
             tabIndex={0}
             data-dragging={dragging || undefined}
             onPointerDown={pointerDown}
@@ -1013,6 +1027,7 @@ export default function VenueMap({
                 }}
               >
                 <div className="venue-map-canvas">
+                  {/* biome-ignore lint/performance/noImgElement: Static export displays authenticated presigned R2/blob map images directly; an image optimizer cannot authenticate or preserve this offline source. */}
                   <img
                     src={url}
                     alt={current.title}
@@ -1163,7 +1178,7 @@ export default function VenueMap({
                 </Button>
               </div>
             )}
-          </div>
+          </section>
         </>
       ) : (
         <p className="venue-map-empty">マップはまだ登録されていません。</p>

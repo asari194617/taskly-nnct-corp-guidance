@@ -93,7 +93,7 @@ export function CompanyDetailContent({
           {assigned && <span className="assignment-badge">指定</span>}
         </span>
       </div>
-      <div className="company-identity" role="group" aria-labelledby={titleId}>
+      <fieldset className="company-identity" aria-labelledby={titleId}>
         <div className="company-detail-heading">
           <h2
             id={titleId}
@@ -109,7 +109,7 @@ export function CompanyDetailContent({
           ))}
         </div>
         <FavoriteButton company={company} saved={saved} onToggle={onSave} />
-      </div>
+      </fieldset>
       {notification}
       <div className="booth-detail">
         <Icon name="location" size={27} />
@@ -138,6 +138,7 @@ export function MapCompanyPanel({
 }) {
   const panel = useRef<HTMLElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new selected company must receive keyboard focus even when focusOnOpen stays true.
   useLayoutEffect(() => {
     if (focusOnOpen) heading.current?.focus({ preventScroll: true });
   }, [company.id, focusOnOpen]);

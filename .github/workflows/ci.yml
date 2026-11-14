@@ -9,6 +9,28 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: npm --prefix apps/web ci
+      - run: python3 -m pip install -r requirements-lint.txt
+      - run: npm --prefix apps/web run lint
+      - run: npm --prefix apps/web run format:check
   metadata:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -35,7 +57,7 @@ jobs:
         env:
           MYSQL_DATABASE: guidance_test
           MYSQL_ROOT_PASSWORD: synthetic-ci-only
-        ports: ['3306:3306']
+        ports: ["3306:3306"]
         options: >-
           --health-cmd="mysqladmin ping -h localhost --silent"
           --health-interval=5s --health-timeout=3s --health-retries=30
@@ -51,11 +73,11 @@ jobs:
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '26.13.1'
+          node-version: "26.13.1"
       - run: go vet ./...
       - name: Check API vulnerabilities for the production platform
         env:
-          CGO_ENABLED: '0'
+          CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: amd64
         run: |
@@ -99,7 +121,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '26.13.1'
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
@@ -126,10 +148,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '26.13.1'
+          node-version: "26.13.1"
       - run: python -m pip install -r scripts/requirements-data.txt coverage
       - name: Test importer/extractor with synthetic fixtures
         run: |
@@ -166,7 +188,7 @@ jobs:
         env:
           MYSQL_DATABASE: guidance_e2e
           MYSQL_ROOT_PASSWORD: synthetic-ci-only
-        ports: ['3306:3306']
+        ports: ["3306:3306"]
         options: >-
           --health-cmd="mysqladmin ping -h localhost --silent"
           --health-interval=5s --health-timeout=3s --health-retries=30
@@ -193,7 +215,7 @@ jobs:
             .e2e/taskly/apps/server/go.sum
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '26.13.1'
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm --prefix apps/web ci
@@ -225,14 +247,14 @@ jobs:
       - run: docker build --tag guidance-ci:${{ github.sha }} .
   required-ci:
     if: always()
-    needs: [api, web, data-tools, e2e, production-build]
+    needs: [api, web, data-tools, e2e, production-build, quality]
     runs-on: ubuntu-latest
     steps:
-      - name: Require every test and production build
+      - name: Require every quality check, test and production build
         env:
           RESULTS: ${{ join(needs.*.result, ',') }}
         run: |
-          test "$RESULTS" = 'success,success,success,success,success'
+          test "$RESULTS" = 'success,success,success,success,success,success'
   coverage-comment:
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [metadata, api, web, data-tools, e2e]

@@ -27,14 +27,7 @@ describe("event-day time in Asia/Tokyo", () => {
     ["2030-05-15T00:00:00+09:00", false, null, "outside", null, "00:00"],
   ] as const)(
     "classifies %s without relying on the machine timezone",
-    (
-      instant,
-      isEventDay,
-      automaticSession,
-      phase,
-      currentSlotId,
-      timeLabel,
-    ) => {
+    (instant, isEventDay, automaticSession, phase, currentSlotId, timeLabel) => {
       expect(at(instant)).toMatchObject({
         isEventDay,
         automaticSession,
