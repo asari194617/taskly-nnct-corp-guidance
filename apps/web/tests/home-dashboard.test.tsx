@@ -162,12 +162,29 @@ describe("Taskly-backed guidance home", () => {
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Taskly" })).toHaveLength(1);
     const surveys = screen.getByRole("region", { name: "見学アンケート" });
-    const expand = within(surveys).getByRole("button", {
+    const surveyHeading = within(surveys).getByRole("heading", {
+      name: /見学アンケート.*0\/8/,
+      level: 3,
+    });
+    const expand = within(surveyHeading).getByRole("button", {
       name: /見学アンケート/,
     });
+    expect(
+      within(assignments).getByRole("heading", {
+        name: "指定企業の見学",
+        level: 3,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "全体アンケート", level: 3 }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "見学シート提出", level: 3 }),
+    ).toBeInTheDocument();
     expect(expand).toHaveAttribute("aria-expanded", "false");
     expect(within(surveys).queryByRole("checkbox")).not.toBeInTheDocument();
-    await userEvent.click(expand);
+    expand.focus();
+    await userEvent.keyboard("{Enter}");
     expect(within(surveys).getAllByRole("checkbox")).toHaveLength(8);
     expect(screen.getAllByRole("checkbox")).toHaveLength(14);
     expect(screen.getByLabelText("14件中0件完了")).toHaveTextContent("0/14");
@@ -177,7 +194,8 @@ describe("Taskly-backed guidance home", () => {
     expect(
       screen.getByRole("checkbox", { name: "見学シート提出" }),
     ).not.toBeChecked();
-    await userEvent.click(expand);
+    await userEvent.keyboard(" ");
+    expect(expand).toHaveAttribute("aria-expanded", "false");
     expect(within(surveys).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(writes()).toHaveLength(0);
   });
