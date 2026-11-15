@@ -2331,6 +2331,10 @@ test("Account actions, interest labels and document guidance are available witho
     name: "規約とポリシー",
     exact: true,
   });
+  const about = menu.getByRole("menuitem", {
+    name: "このサービスについて",
+    exact: true,
+  });
   const logout = menu.getByRole("menuitem", {
     name: "ログアウト",
     exact: true,
@@ -2341,6 +2345,8 @@ test("Account actions, interest labels and document guidance are available witho
   await expect(roster).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(logout).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(about).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(policies).toBeFocused();
   await page.keyboard.press("Escape");
