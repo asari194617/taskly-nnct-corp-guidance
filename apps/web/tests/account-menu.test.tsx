@@ -56,10 +56,7 @@ it("places the info action immediately before logout and opens a minimal service
   ).toBeVisible();
   expect(
     within(dialog).getByRole("link", { name: "利用規約" }),
-  ).toHaveAttribute(
-    "href",
-    "https://policies.taskly.iy0306.com/terms/",
-  );
+  ).toHaveAttribute("href", "https://policies.taskly.iy0306.com/terms/");
   expect(within(dialog).getByRole("link", { name: "asari" })).toHaveAttribute(
     "href",
     "https://x.com/asari194617",
