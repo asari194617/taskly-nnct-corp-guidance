@@ -2224,6 +2224,20 @@ test("Account actions, interest labels and document guidance are available witho
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, "menu");
+  const policyNavigation = page.getByRole("navigation", {
+    name: "規約とポリシー",
+  });
+  for (const [name, path] of [
+    ["利用規約", "terms"],
+    ["プライバシーポリシー", "privacy"],
+    ["セキュリティポリシー", "security"],
+    ["サービスの継続性", "continuity"],
+  ]) {
+    await expect(policyNavigation.getByRole("link", { name })).toHaveAttribute(
+      "href",
+      `https://policies.taskly.iy0306.com/${path}/`,
+    );
+  }
   const trigger = page.getByRole("button", {
     name: "ユーザーメニュー",
     exact: true,
@@ -2305,12 +2319,20 @@ test("Account actions, interest labels and document guidance are available witho
   ).toHaveCount(0);
   const menu = await openAccount(page);
   await expect(menu).toContainText("検証ユーザー menu");
-  await expect(menu.getByRole("menuitem")).toHaveCount(3);
+  await expect(menu.getByRole("menuitem")).toHaveCount(4);
   await expect(
     menu.getByRole("menuitem", { name: "配布資料の案内", exact: true }),
   ).toHaveCount(0);
   const roster = menu.getByRole("menuitem", {
     name: "名簿番号の設定",
+    exact: true,
+  });
+  const policies = menu.getByRole("menuitem", {
+    name: "規約とポリシー",
+    exact: true,
+  });
+  const about = menu.getByRole("menuitem", {
+    name: "このサービスについて",
     exact: true,
   });
   const logout = menu.getByRole("menuitem", {
@@ -2323,6 +2345,10 @@ test("Account actions, interest labels and document guidance are available witho
   await expect(roster).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(logout).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(about).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(policies).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).not.toBeVisible();
   await expect(trigger).toBeFocused();
@@ -3670,7 +3696,7 @@ async function expectServiceInformation(page: Page, width: number) {
   const author = dialog.getByRole("link", { name: "asari", exact: true });
   await expect(terms).toHaveAttribute(
     "href",
-    "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
+    "https://policies.taskly.iy0306.com/terms/",
   );
   await expect(author).toHaveAttribute("href", "https://x.com/asari194617");
   for (const link of [terms, author]) {
@@ -3734,7 +3760,7 @@ async function expectServiceInformation(page: Page, width: number) {
     await expect(dialog).toBeVisible();
     await expect(terms).toHaveAttribute(
       "href",
-      "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
+      "https://policies.taskly.iy0306.com/terms/",
     );
     await close.click();
     await expect(dialog).not.toBeVisible();

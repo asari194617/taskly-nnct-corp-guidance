@@ -45,7 +45,33 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body>
+        {children}
+        <footer className="policy-footer">
+          <nav aria-label="規約とポリシー">
+            <ul>
+              <li>
+                <a href="https://policies.taskly.iy0306.com/terms/">利用規約</a>
+              </li>
+              <li>
+                <a href="https://policies.taskly.iy0306.com/privacy/">
+                  プライバシーポリシー
+                </a>
+              </li>
+              <li>
+                <a href="https://policies.taskly.iy0306.com/security/">
+                  セキュリティポリシー
+                </a>
+              </li>
+              <li>
+                <a href="https://policies.taskly.iy0306.com/continuity/">
+                  サービスの継続性
+                </a>
+              </li>
+            </ul>
+          </nav>
+        </footer>
+      </body>
     </html>
   );
 }

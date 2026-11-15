@@ -41,11 +41,12 @@ it("places the info action immediately before logout and opens a minimal service
   const items = within(menu).getAllByRole("menuitem");
   expect(items.map((item) => item.textContent)).toEqual([
     "名簿番号の設定",
+    "規約とポリシー",
     "このサービスについて",
     "ログアウト",
   ]);
-  expect(items[1].querySelector('svg[aria-hidden="true"]')).not.toBeNull();
-  await userEvent.click(items[1]);
+  expect(items[2].querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  await userEvent.click(items[2]);
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   expect(trigger).toHaveAttribute("aria-expanded", "false");
   const dialog = screen.getByRole("dialog", { name: "このサービスについて" });
@@ -55,10 +56,7 @@ it("places the info action immediately before logout and opens a minimal service
   ).toBeVisible();
   expect(
     within(dialog).getByRole("link", { name: "利用規約" }),
-  ).toHaveAttribute(
-    "href",
-    "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
-  );
+  ).toHaveAttribute("href", "https://policies.taskly.iy0306.com/terms/");
   expect(within(dialog).getByRole("link", { name: "asari" })).toHaveAttribute(
     "href",
     "https://x.com/asari194617",
@@ -90,7 +88,7 @@ it("opens from the keyboard and returns focus to the account button after native
   renderAccount();
   const trigger = screen.getByRole("button", { name: "ユーザーメニュー" });
   trigger.focus();
-  await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
   const dialog = screen.getByRole("dialog", { name: "このサービスについて" });
   // jsdom has no native dialog Escape behavior; the browser test covers it.
   const canceled = fireEvent(dialog, new Event("cancel", { cancelable: true }));

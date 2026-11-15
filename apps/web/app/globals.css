@@ -18,6 +18,9 @@
 }
 body {
   margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 button,
 input,
@@ -50,6 +53,33 @@ button,
 .spui-TextButton,
 .spui-TextButton:hover {
   text-decoration: none;
+}
+.policy-footer {
+  margin-top: auto;
+  padding: var(--spacing-relative-spacing-lv8);
+  padding-bottom: calc(
+    var(--spacing-relative-spacing-lv8) +
+    var(--app-bottom-nav-height)
+  );
+  border-top: 1px solid var(--color-border-low-emphasis);
+  background: var(--color-surface-primary);
+  font-size: 0.875rem;
+}
+.policy-footer ul {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-relative-spacing-lv4) var(--spacing-relative-spacing-lv8);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.policy-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 .spui-TextLink,
 .spui-TextButton {
