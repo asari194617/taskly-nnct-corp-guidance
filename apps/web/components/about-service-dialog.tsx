@@ -60,7 +60,7 @@ export default function AboutServiceDialog({
         />
         <h2>Taskly 企業ガイダンス</h2>
         <TextLink
-          href="https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242"
+          href="https://policies.taskly.iy0306.com/terms/"
           target="_blank"
           rel="noopener noreferrer"
         >

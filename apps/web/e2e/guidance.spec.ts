@@ -2319,7 +2319,7 @@ test("Account actions, interest labels and document guidance are available witho
   ).toHaveCount(0);
   const menu = await openAccount(page);
   await expect(menu).toContainText("検証ユーザー menu");
-  await expect(menu.getByRole("menuitem")).toHaveCount(3);
+  await expect(menu.getByRole("menuitem")).toHaveCount(4);
   await expect(
     menu.getByRole("menuitem", { name: "配布資料の案内", exact: true }),
   ).toHaveCount(0);
@@ -3690,7 +3690,7 @@ async function expectServiceInformation(page: Page, width: number) {
   const author = dialog.getByRole("link", { name: "asari", exact: true });
   await expect(terms).toHaveAttribute(
     "href",
-    "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
+    "https://policies.taskly.iy0306.com/terms/",
   );
   await expect(author).toHaveAttribute("href", "https://x.com/asari194617");
   for (const link of [terms, author]) {
