@@ -370,11 +370,11 @@ describe("account menu", () => {
     const roster = within(menu).getByRole("menuitem", {
       name: "名簿番号の設定",
     });
-    const policies = within(menu).getByRole("menuitem", {
-      name: "規約とポリシー",
+    const about = within(menu).getByRole("menuitem", {
+      name: "このサービスについて",
     });
     const logout = within(menu).getByRole("menuitem", { name: "ログアウト" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(4);
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
     expect(
       within(menu).queryByRole("menuitem", { name: "配布資料の案内" }),
     ).not.toBeInTheDocument();
@@ -387,7 +387,7 @@ describe("account menu", () => {
     await userEvent.keyboard("{ArrowDown}");
     expect(roster).toHaveFocus();
     await userEvent.keyboard("{ArrowDown}");
-    expect(policies).toHaveFocus();
+    expect(about).toHaveFocus();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();

@@ -60,11 +60,11 @@ export default function AboutServiceDialog({
         />
         <h2>Taskly 企業ガイダンス</h2>
         <TextLink
-          href="https://policies.taskly.iy0306.com/terms/"
+          href="https://policies.taskly.iy0306.com/"
           target="_blank"
           rel="noopener noreferrer"
         >
-          利用規約
+          規約とポリシー
         </TextLink>
         <p className="about-service-copyright">
           © 2026{" "}
