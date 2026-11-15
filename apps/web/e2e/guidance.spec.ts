@@ -3754,7 +3754,7 @@ async function expectServiceInformation(page: Page, width: number) {
     await expect(dialog).toBeVisible();
     await expect(terms).toHaveAttribute(
       "href",
-      "https://ritzy-lift-e38.notion.site/28ba3874f8c880a783ddf9d39aea1242",
+      "https://policies.taskly.iy0306.com/terms/",
     );
     await close.click();
     await expect(dialog).not.toBeVisible();
