@@ -2319,16 +2319,12 @@ test("Account actions, interest labels and document guidance are available witho
   ).toHaveCount(0);
   const menu = await openAccount(page);
   await expect(menu).toContainText("検証ユーザー menu");
-  await expect(menu.getByRole("menuitem")).toHaveCount(4);
+  await expect(menu.getByRole("menuitem")).toHaveCount(3);
   await expect(
     menu.getByRole("menuitem", { name: "配布資料の案内", exact: true }),
   ).toHaveCount(0);
   const roster = menu.getByRole("menuitem", {
     name: "名簿番号の設定",
-    exact: true,
-  });
-  const policies = menu.getByRole("menuitem", {
-    name: "規約とポリシー",
     exact: true,
   });
   const about = menu.getByRole("menuitem", {
@@ -2347,8 +2343,6 @@ test("Account actions, interest labels and document guidance are available witho
   await expect(logout).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(about).toBeFocused();
-  await page.keyboard.press("ArrowUp");
-  await expect(policies).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).not.toBeVisible();
   await expect(trigger).toBeFocused();
@@ -3692,14 +3686,17 @@ async function expectServiceInformation(page: Page, width: number) {
     dialog.getByRole("heading", { name: "Taskly 企業ガイダンス", exact: true }),
   ).toBeVisible();
   await expect(dialog).toContainText("© 2026 asari");
-  const terms = dialog.getByRole("link", { name: "利用規約", exact: true });
+  const policies = dialog.getByRole("link", {
+    name: "規約とポリシー",
+    exact: true,
+  });
   const author = dialog.getByRole("link", { name: "asari", exact: true });
-  await expect(terms).toHaveAttribute(
+  await expect(policies).toHaveAttribute(
     "href",
-    "https://policies.taskly.iy0306.com/terms/",
+    "https://policies.taskly.iy0306.com/",
   );
   await expect(author).toHaveAttribute("href", "https://x.com/asari194617");
-  for (const link of [terms, author]) {
+  for (const link of [policies, author]) {
     await expect(link).toHaveAttribute("target", "_blank");
     await expect(link).toHaveAttribute("rel", "noopener noreferrer");
     expect(
@@ -3709,11 +3706,11 @@ async function expectServiceInformation(page: Page, width: number) {
   const close = dialog.getByRole("button", { name: "閉じる", exact: true });
   await expect(dialog.getByRole("button")).toHaveCount(1);
   await expect(close).toBeFocused();
-  for (const control of [terms, author, close]) {
+  for (const control of [policies, author, close]) {
     await page.keyboard.press("Tab");
     await expect(control).toBeFocused();
   }
-  for (const control of [author, terms, close]) {
+  for (const control of [author, policies, close]) {
     await page.keyboard.press("Shift+Tab");
     await expect(control).toBeFocused();
   }
@@ -3758,9 +3755,9 @@ async function expectServiceInformation(page: Page, width: number) {
       .getByRole("menuitem", { name: "このサービスについて", exact: true })
       .click();
     await expect(dialog).toBeVisible();
-    await expect(terms).toHaveAttribute(
+    await expect(policies).toHaveAttribute(
       "href",
-      "https://policies.taskly.iy0306.com/terms/",
+      "https://policies.taskly.iy0306.com/",
     );
     await close.click();
     await expect(dialog).not.toBeVisible();

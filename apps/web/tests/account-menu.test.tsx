@@ -41,12 +41,11 @@ it("places the info action immediately before logout and opens a minimal service
   const items = within(menu).getAllByRole("menuitem");
   expect(items.map((item) => item.textContent)).toEqual([
     "名簿番号の設定",
-    "規約とポリシー",
     "このサービスについて",
     "ログアウト",
   ]);
-  expect(items[2].querySelector('svg[aria-hidden="true"]')).not.toBeNull();
-  await userEvent.click(items[2]);
+  expect(items[1].querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  await userEvent.click(items[1]);
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   expect(trigger).toHaveAttribute("aria-expanded", "false");
   const dialog = screen.getByRole("dialog", { name: "このサービスについて" });
@@ -55,8 +54,8 @@ it("places the info action immediately before logout and opens a minimal service
     within(dialog).getByRole("heading", { name: "Taskly 企業ガイダンス" }),
   ).toBeVisible();
   expect(
-    within(dialog).getByRole("link", { name: "利用規約" }),
-  ).toHaveAttribute("href", "https://policies.taskly.iy0306.com/terms/");
+    within(dialog).getByRole("link", { name: "規約とポリシー" }),
+  ).toHaveAttribute("href", "https://policies.taskly.iy0306.com/");
   expect(within(dialog).getByRole("link", { name: "asari" })).toHaveAttribute(
     "href",
     "https://x.com/asari194617",
@@ -70,7 +69,9 @@ it("places the info action immediately before logout and opens a minimal service
   const close = within(dialog).getByRole("button", { name: "閉じる" });
   expect(close).toHaveFocus();
   await userEvent.tab();
-  expect(within(dialog).getByRole("link", { name: "利用規約" })).toHaveFocus();
+  expect(
+    within(dialog).getByRole("link", { name: "規約とポリシー" }),
+  ).toHaveFocus();
   await userEvent.tab({ shift: true });
   expect(close).toHaveFocus();
   await userEvent.tab({ shift: true });
@@ -88,7 +89,7 @@ it("opens from the keyboard and returns focus to the account button after native
   renderAccount();
   const trigger = screen.getByRole("button", { name: "ユーザーメニュー" });
   trigger.focus();
-  await userEvent.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
   const dialog = screen.getByRole("dialog", { name: "このサービスについて" });
   // jsdom has no native dialog Escape behavior; the browser test covers it.
   const canceled = fireEvent(dialog, new Event("cancel", { cancelable: true }));
@@ -102,7 +103,9 @@ it("keeps service information available offline without invoking account or netw
   vi.stubGlobal("fetch", fetchMock);
   const { onConfigure, onLogout } = renderAccount(true);
   const dialog = await openAbout();
-  expect(within(dialog).getByRole("link", { name: "利用規約" })).toBeVisible();
+  expect(
+    within(dialog).getByRole("link", { name: "規約とポリシー" }),
+  ).toBeVisible();
   await userEvent.click(within(dialog).getByRole("button", { name: "閉じる" }));
   expect(onConfigure).not.toHaveBeenCalled();
   expect(onLogout).not.toHaveBeenCalled();
