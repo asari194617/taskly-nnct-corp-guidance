@@ -26,7 +26,7 @@ jobs:
           cache: true
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: "3.14.10"
       - run: npm --prefix apps/web ci
       - run: python3 -m pip install -r requirements-lint.txt
       - run: npm --prefix apps/web run lint
@@ -152,7 +152,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: "3.14.10"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "26.13.1"
