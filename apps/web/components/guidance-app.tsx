@@ -844,6 +844,7 @@ export default function GuidanceApp({
             >
               <TextLink
                 href={routeHref({ ...route, view: item.id, company: "" })}
+                data-tour-target={item.id}
                 variant={route.view === item.id ? undefined : "subtle"}
                 icon={
                   mobile ? (

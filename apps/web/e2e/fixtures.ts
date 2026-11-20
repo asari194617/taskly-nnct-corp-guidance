@@ -17,7 +17,7 @@ export const test = base.extend<{
               {
                 origin: new URL(baseURL).origin,
                 localStorage: [
-                  { name: "guidance-first-visit-tour", value: "1" },
+                  { name: "guidance-first-visit-tour-v2", value: "1" },
                 ],
               },
             ],

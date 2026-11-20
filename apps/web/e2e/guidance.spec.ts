@@ -133,24 +133,26 @@ test.describe("First-visit guide tour", () => {
   async function loginToTour(page: Page, path: string) {
     await login(page, "presentation", path, false);
     if (await rosterDialog(page).isVisible()) await chooseRoster(page, 7);
-    return page.getByRole("dialog", { name: "ガイドツアー" });
+    return page.getByRole("region", { name: "ガイドツアー" });
   }
 
-  test("covers the six main features and preserves the entry URL", async ({
+  test("focuses each real desktop link and preserves the entry URL", async ({
     page,
   }) => {
     const path = "/search/?session=AM";
     const tour = await loginToTour(page, path);
-    const home = tour.getByRole("heading", { name: "ホーム" });
+    const home = nav(page, "ホーム");
     await expect(home).toBeFocused();
     await expect(tour.getByRole("button", { name: "戻る" })).toBeDisabled();
     await page.keyboard.press("Shift+Tab");
     await expect(tour.getByRole("button", { name: "次へ" })).toBeFocused();
     await page.keyboard.press("Tab");
+    await expect(home).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(tour.getByRole("button", { name: "スキップ" })).toBeFocused();
 
     await tour.getByRole("button", { name: "次へ" }).click();
-    await expect(tour.getByRole("heading", { name: "探す" })).toBeFocused();
+    await expect(nav(page, "探す")).toBeFocused();
     await tour.getByRole("button", { name: "戻る" }).click();
     await expect(home).toBeFocused();
     for (const [index, title] of [
@@ -161,29 +163,49 @@ test.describe("First-visit guide tour", () => {
       "配布資料の案内",
     ].entries()) {
       await tour.getByRole("button", { name: "次へ" }).click();
-      await expect(tour.getByRole("heading", { name: title })).toBeFocused();
+      const target =
+        title === "配布資料の案内" ? documentLink(page) : nav(page, title);
+      await expect(target).toBeFocused();
+      await expect(tour.getByRole("heading", { name: title })).toBeVisible();
       await expect(tour.getByText(`${index + 2} / 6`)).toBeVisible();
     }
     await tour.getByRole("button", { name: "はじめる" }).click();
     await expect(tour).toBeHidden();
     await expect(page.getByRole("main")).toBeFocused();
+    await expect(documentLink(page)).not.toHaveAttribute("aria-describedby");
     await expect(page).toHaveURL(path);
     await page.reload();
     await expect(page.getByRole("heading", { name: "探す" })).toBeVisible();
     await expect(tour).toBeHidden();
   });
 
-  test("fits a narrow screen and remembers skipping across direct links", async ({
+  test("highlights the usable mobile navigation and remembers skipping", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     const tour = await loginToTour(page, "/documents/");
-    await expect(tour.getByRole("button", { name: "次へ" })).toBeInViewport();
-    const dialogSize = await tour.evaluate((dialog) => ({
-      scroll: dialog.scrollWidth,
-      inner: dialog.clientWidth,
+    const mobile = page.getByRole("navigation", {
+      name: "モバイルナビゲーション",
+    });
+    const next = tour.getByRole("button", { name: "次へ" });
+    await expect(mobile.getByRole("link", { name: "ホーム" })).toBeFocused();
+    await expect(next).toBeInViewport();
+    const panelSize = await tour.evaluate((panel) => ({
+      scroll: panel.scrollWidth,
+      inner: panel.clientWidth,
     }));
-    expect(dialogSize.scroll).toBe(dialogSize.inner);
+    expect(panelSize.scroll).toBe(panelSize.inner);
+    await next.click();
+    const search = mobile.getByRole("link", { name: "探す" });
+    await expect(search).toBeFocused();
+    expect(requireValue(await tour.boundingBox()).y).toBeLessThan(
+      requireValue(await search.boundingBox()).y,
+    );
+    await search.click();
+    await expect(page).toHaveURL("/search/");
+    await expect(tour).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(nav(page, "探す")).toBeFocused();
     await tour.getByRole("button", { name: "スキップ" }).click();
     await expect(tour).toBeHidden();
     await page.goto("/favorites/");
