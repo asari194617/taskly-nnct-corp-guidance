@@ -126,6 +126,74 @@ async function login(
       page.getByRole("button", { name: "ユーザーメニュー", exact: true }),
     ).toBeVisible();
 }
+
+test.describe("First-visit guide tour", () => {
+  test.use({ firstVisitTour: true });
+
+  async function loginToTour(page: Page, path: string) {
+    await login(page, "presentation", path, false);
+    if (await rosterDialog(page).isVisible()) await chooseRoster(page, 7);
+    return page.getByRole("dialog", { name: "ガイドツアー" });
+  }
+
+  test("covers the six main features and preserves the entry URL", async ({
+    page,
+  }) => {
+    const path = "/search/?session=AM";
+    const tour = await loginToTour(page, path);
+    const home = tour.getByRole("heading", { name: "ホーム" });
+    await expect(home).toBeFocused();
+    await expect(tour.getByRole("button", { name: "戻る" })).toBeDisabled();
+    await page.keyboard.press("Shift+Tab");
+    await expect(tour.getByRole("button", { name: "次へ" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(tour.getByRole("button", { name: "スキップ" })).toBeFocused();
+
+    await tour.getByRole("button", { name: "次へ" }).click();
+    await expect(tour.getByRole("heading", { name: "探す" })).toBeFocused();
+    await tour.getByRole("button", { name: "戻る" }).click();
+    await expect(home).toBeFocused();
+    for (const [index, title] of [
+      "探す",
+      "スケジュール",
+      "会場マップ",
+      "気になる",
+      "配布資料の案内",
+    ].entries()) {
+      await tour.getByRole("button", { name: "次へ" }).click();
+      await expect(tour.getByRole("heading", { name: title })).toBeFocused();
+      await expect(tour.getByText(`${index + 2} / 6`)).toBeVisible();
+    }
+    await tour.getByRole("button", { name: "はじめる" }).click();
+    await expect(tour).toBeHidden();
+    await expect(page.getByRole("main")).toBeFocused();
+    await expect(page).toHaveURL(path);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "探す" })).toBeVisible();
+    await expect(tour).toBeHidden();
+  });
+
+  test("fits a narrow screen and remembers skipping across direct links", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    const tour = await loginToTour(page, "/documents/");
+    await expect(tour.getByRole("button", { name: "次へ" })).toBeInViewport();
+    const dialogSize = await tour.evaluate((dialog) => ({
+      scroll: dialog.scrollWidth,
+      inner: dialog.clientWidth,
+    }));
+    expect(dialogSize.scroll).toBe(dialogSize.inner);
+    await tour.getByRole("button", { name: "スキップ" }).click();
+    await expect(tour).toBeHidden();
+    await page.goto("/favorites/");
+    await expect(
+      page.getByRole("heading", { name: "気になる", exact: true }),
+    ).toBeVisible();
+    await expect(tour).toBeHidden();
+  });
+});
+
 async function assertCompanyCount(page: Page, count: number) {
   await expect(page.locator(".company-card")).toHaveCount(count);
 }

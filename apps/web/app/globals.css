@@ -508,7 +508,8 @@ h2 {
 }
 .company-dialog,
 .roster-dialog,
-.about-service-dialog {
+.about-service-dialog,
+.first-visit-tour {
   padding: 0;
   width: calc(100% - 32px);
   max-width: 560px;
@@ -521,7 +522,8 @@ h2 {
 }
 .company-dialog::backdrop,
 .roster-dialog::backdrop,
-.about-service-dialog::backdrop {
+.about-service-dialog::backdrop,
+.first-visit-tour::backdrop {
   background: rgba(0, 0, 0, 0.5);
 }
 .dialog-inner {
@@ -539,6 +541,57 @@ h2 {
 .about-service-copyright {
   color: var(--color-text-medium-emphasis);
   font-size: 0.875rem;
+}
+.first-visit-tour {
+  max-width: 440px;
+}
+.tour-content {
+  display: grid;
+  gap: var(--spacing-relative-spacing-lv10);
+}
+.tour-header,
+.tour-controls,
+.tour-step-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-relative-spacing-lv4);
+}
+.tour-header,
+.tour-controls {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.tour-header {
+  color: var(--color-text-medium-emphasis);
+  font-size: 0.875rem;
+}
+.tour-header h2 {
+  font-size: inherit;
+}
+.tour-feature {
+  display: grid;
+  gap: var(--spacing-relative-spacing-lv4);
+  min-height: 11rem;
+  align-content: start;
+}
+.tour-feature h3,
+.tour-feature p {
+  margin: 0;
+}
+.tour-feature h3 {
+  font-size: 1.375rem;
+}
+.tour-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: var(--color-surface-secondary);
+  color: var(--color-text-accent-primary);
+}
+.tour-controls button {
+  min-height: 44px;
 }
 .dialog-top {
   display: flex;

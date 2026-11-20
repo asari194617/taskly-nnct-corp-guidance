@@ -2,9 +2,19 @@ import { test as base, expect } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-export const test = base.extend<{ browserCoverage: undefined }>({
+export const test = base.extend<{
+  browserCoverage: undefined;
+  firstVisitTour: boolean;
+}>({
+  firstVisitTour: [false, { option: true }],
   browserCoverage: [
-    async ({ page, browserName }, use, info) => {
+    async ({ page, browserName, baseURL, firstVisitTour }, use, info) => {
+      if (!firstVisitTour) {
+        await page.addInitScript((url) => {
+          if (url && location.origin === new URL(url).origin)
+            localStorage.setItem("guidance-first-visit-tour", "1");
+        }, baseURL);
+      }
       if (browserName !== "chromium") {
         info.annotations.push({
           type: "coverage",

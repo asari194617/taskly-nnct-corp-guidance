@@ -31,6 +31,7 @@ import HeaderActions from "./header-actions";
 import IncrementalCompanyList from "./incremental-company-list";
 import IndustryChips from "./industry-chips";
 import HomeDashboard from "./home-dashboard";
+import FirstVisitTour from "./first-visit-tour";
 import { useDocumentNavigation } from "./use-document-navigation";
 import { useEventTime } from "./use-event-time";
 import { formatScheduleTime, type EventTimeState } from "../lib/event-time";
@@ -251,6 +252,7 @@ export default function GuidanceApp({
   const [settingNumber, setSettingNumber] = useState(false);
   const bookmarkRequests = useRef(new Set<string>());
   const mapReturnFocus = useRef<HTMLElement | null>(null);
+  const mainContent = useRef<HTMLElement>(null);
   const mapInteraction = useRef<"pointer" | "keyboard">("keyboard");
   const panelKeyboardFocus = useRef(true);
   const returnMapFocus = useCallback(() => {
@@ -992,6 +994,8 @@ export default function GuidanceApp({
           <>
             <main
               id="main"
+              ref={mainContent}
+              tabIndex={-1}
               className={route.view === "map" ? "map-main" : "main-content"}
               data-offline={offline ? "true" : "false"}
               onPointerDownCapture={() => {
@@ -1177,6 +1181,9 @@ export default function GuidanceApp({
             onSelect={openCompany}
             onExpired={expireSession}
           />
+        )}
+        {ready && !settingNumber && !selected && (
+          <FirstVisitTour returnFocusRef={mainContent} />
         )}
       </FavoritePendingProvider>
     </OfflineProvider>
