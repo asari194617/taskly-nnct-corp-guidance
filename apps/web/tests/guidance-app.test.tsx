@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GuidanceApp from "../components/guidance-app";
+import { firstVisitTourKey } from "../components/first-visit-tour";
 import { fixture, largeFixture } from "./fixtures";
 
 const documentNavigation = vi.hoisted(() => ({ assign: vi.fn() }));
@@ -200,6 +201,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/search/");
   window.sessionStorage.clear();
   window.localStorage.clear();
+  window.localStorage.setItem(firstVisitTourKey, "1");
   dataset = fixture();
   saved = new Set();
   rosterNumber = 7;
@@ -263,8 +265,76 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
+describe("first-visit guide tour", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(firstVisitTourKey);
+  });
+
+  it("waits for roster onboarding and remembers an Escape dismissal", async () => {
+    rosterNumber = null;
+    const mounted = await ready();
+    const roster = screen.getByRole("dialog", { name: "名簿番号の設定" });
+    const tour = { name: "ガイドツアー" };
+    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(firstVisitTourKey)).toBeNull();
+
+    await userEvent.click(
+      within(roster).getByRole("button", { name: "あとで" }),
+    );
+    const dialog = await screen.findByRole("dialog", tour);
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveFocus();
+    mounted.unmount();
+    await ready();
+    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(firstVisitTourKey)).toBe("1");
+  });
+
+  it("counts a visit even if the user leaves before reaching the end", async () => {
+    const tour = { name: "ガイドツアー" };
+    const mounted = await ready();
+    expect(await screen.findByRole("dialog", tour)).toBeVisible();
+    mounted.unmount();
+    await ready();
+    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+  });
+
+  it("leaves a linked company open before offering the tour", async () => {
+    window.history.replaceState(null, "", "/search/?company=AM-1");
+    await ready();
+    const dialog = screen.getByRole("dialog", {
+      name: dataset.companies[0].name,
+    });
+    const tour = { name: "ガイドツアー" };
+    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "閉じる" }),
+    );
+    expect(await screen.findByRole("dialog", tour)).toBeVisible();
+  });
+
+  it("keeps the app usable if the browser rejects writing the visit marker", async () => {
+    const setItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === firstVisitTourKey) throw new DOMException("Storage blocked");
+      setItem.call(this, key, value);
+    });
+    await ready();
+    expect(
+      screen.queryByRole("dialog", { name: "ガイドツアー" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "探す" })).toBeVisible();
+  });
+});
+
 describe("authentication and private content", () => {
   it("shows only Taskly sign-in and branding before authentication", async () => {
+    window.localStorage.removeItem(firstVisitTourKey);
     failures.set("/api/me", 401);
     render(<GuidanceApp />);
     expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
@@ -283,6 +353,7 @@ describe("authentication and private content", () => {
       screen.queryByText(dataset.companies[0].name),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(firstVisitTourKey)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
   it("retries unavailable connections without exposing the dataset", async () => {

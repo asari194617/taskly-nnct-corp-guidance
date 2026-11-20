@@ -2,7 +2,28 @@ import { test as base, expect } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-export const test = base.extend<{ browserCoverage: undefined }>({
+export const test = base.extend<{
+  browserCoverage: undefined;
+  firstVisitTour: boolean;
+}>({
+  firstVisitTour: [false, { option: true }],
+  storageState: async ({ baseURL, firstVisitTour }, use) => {
+    await use(
+      firstVisitTour || !baseURL
+        ? undefined
+        : {
+            cookies: [],
+            origins: [
+              {
+                origin: new URL(baseURL).origin,
+                localStorage: [
+                  { name: "guidance-first-visit-tour", value: "1" },
+                ],
+              },
+            ],
+          },
+    );
+  },
   browserCoverage: [
     async ({ page, browserName }, use, info) => {
       if (browserName !== "chromium") {
