@@ -27,6 +27,7 @@ export default function HeaderActions({
     <div className="header-actions">
       <TextLink
         href="/documents/"
+        data-tour-target="info"
         variant={currentView === "info" ? undefined : "subtle"}
         aria-label="配布資料の案内"
         aria-current={currentView === "info" ? "page" : undefined}

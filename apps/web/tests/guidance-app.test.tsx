@@ -275,43 +275,44 @@ describe("first-visit guide tour", () => {
     const mounted = await ready();
     const roster = screen.getByRole("dialog", { name: "名簿番号の設定" });
     const tour = { name: "ガイドツアー" };
-    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", tour)).not.toBeInTheDocument();
     expect(window.localStorage.getItem(firstVisitTourKey)).toBeNull();
 
     await userEvent.click(
       within(roster).getByRole("button", { name: "あとで" }),
     );
-    const dialog = await screen.findByRole("dialog", tour);
-    fireEvent(dialog, new Event("cancel", { cancelable: true }));
-    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    await screen.findByRole("region", tour);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("region", tour)).not.toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveFocus();
     mounted.unmount();
     await ready();
-    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", tour)).not.toBeInTheDocument();
     expect(window.localStorage.getItem(firstVisitTourKey)).toBe("1");
   });
 
-  it("counts a visit even if the user leaves before reaching the end", async () => {
+  it("offers the new tour once to users who saw the previous version", async () => {
+    window.localStorage.setItem("guidance-first-visit-tour", "1");
     const tour = { name: "ガイドツアー" };
     const mounted = await ready();
-    expect(await screen.findByRole("dialog", tour)).toBeVisible();
+    expect(await screen.findByRole("region", tour)).toBeVisible();
     mounted.unmount();
     await ready();
-    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", tour)).not.toBeInTheDocument();
   });
 
   it("leaves a linked company open before offering the tour", async () => {
     window.history.replaceState(null, "", "/search/?company=AM-1");
     await ready();
-    const dialog = screen.getByRole("dialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: dataset.companies[0].name,
     });
     const tour = { name: "ガイドツアー" };
-    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", tour)).not.toBeInTheDocument();
     await userEvent.click(
       within(dialog).getByRole("button", { name: "閉じる" }),
     );
-    expect(await screen.findByRole("dialog", tour)).toBeVisible();
+    expect(await screen.findByRole("region", tour)).toBeVisible();
   });
 
   it("keeps the app usable if the browser rejects writing the visit marker", async () => {
@@ -326,7 +327,7 @@ describe("first-visit guide tour", () => {
     });
     await ready();
     expect(
-      screen.queryByRole("dialog", { name: "ガイドツアー" }),
+      screen.queryByRole("region", { name: "ガイドツアー" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "探す" })).toBeVisible();
   });
@@ -353,6 +354,9 @@ describe("authentication and private content", () => {
       screen.queryByText(dataset.companies[0].name),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "ガイドツアー" }),
+    ).not.toBeInTheDocument();
     expect(window.localStorage.getItem(firstVisitTourKey)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
