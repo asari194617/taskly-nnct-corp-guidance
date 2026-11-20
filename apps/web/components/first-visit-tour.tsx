@@ -64,8 +64,7 @@ export default function FirstVisitTour({
     <TourDialog
       onDismiss={() => {
         setVisible(false);
-        if (document.activeElement === document.body)
-          returnFocusRef.current?.focus({ preventScroll: true });
+        returnFocusRef.current?.focus({ preventScroll: true });
       }}
     />
   );
@@ -134,6 +133,7 @@ function TourDialog({ onDismiss }: { onDismiss: () => void }) {
             <Icon name={step.icon} size={28} />
           </span>
           <h3
+            key={step.title}
             ref={headingRef}
             tabIndex={-1}
             aria-describedby="first-visit-tour-progress first-visit-tour-description"

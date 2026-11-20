@@ -284,10 +284,20 @@ describe("first-visit guide tour", () => {
     const dialog = await screen.findByRole("dialog", tour);
     fireEvent(dialog, new Event("cancel", { cancelable: true }));
     expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveFocus();
     mounted.unmount();
     await ready();
     expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
     expect(window.localStorage.getItem(firstVisitTourKey)).toBe("1");
+  });
+
+  it("counts a visit even if the user leaves before reaching the end", async () => {
+    const tour = { name: "ガイドツアー" };
+    const mounted = await ready();
+    expect(await screen.findByRole("dialog", tour)).toBeVisible();
+    mounted.unmount();
+    await ready();
+    expect(screen.queryByRole("dialog", tour)).not.toBeInTheDocument();
   });
 
   it("leaves a linked company open before offering the tour", async () => {

@@ -581,6 +581,9 @@ h2 {
 .tour-feature h3 {
   font-size: 1.375rem;
 }
+.tour-feature h3:focus {
+  outline: none;
+}
 .tour-icon {
   display: grid;
   place-items: center;
