@@ -7,14 +7,25 @@ export const test = base.extend<{
   firstVisitTour: boolean;
 }>({
   firstVisitTour: [false, { option: true }],
+  storageState: async ({ baseURL, firstVisitTour }, use) => {
+    await use(
+      firstVisitTour || !baseURL
+        ? undefined
+        : {
+            cookies: [],
+            origins: [
+              {
+                origin: new URL(baseURL).origin,
+                localStorage: [
+                  { name: "guidance-first-visit-tour", value: "1" },
+                ],
+              },
+            ],
+          },
+    );
+  },
   browserCoverage: [
-    async ({ page, browserName, baseURL, firstVisitTour }, use, info) => {
-      if (!firstVisitTour) {
-        await page.addInitScript((url) => {
-          if (url && location.origin === new URL(url).origin)
-            localStorage.setItem("guidance-first-visit-tour", "1");
-        }, baseURL);
-      }
+    async ({ page, browserName }, use, info) => {
       if (browserName !== "chromium") {
         info.annotations.push({
           type: "coverage",

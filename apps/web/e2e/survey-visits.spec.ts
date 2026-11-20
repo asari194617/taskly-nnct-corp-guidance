@@ -497,6 +497,7 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
   page,
   request,
   browser,
+  storageState,
 }) => {
   const fixture = await fixtures(request);
   await resetCanonical(request, fixture);
@@ -504,7 +505,7 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
   await login(page);
   await expandSurveys(page);
   await mutate(page, "visit-survey-1", true);
-  const otherContext = await browser.newContext();
+  const otherContext = await browser.newContext({ storageState });
   try {
     const other = await otherContext.newPage();
     await login(other, "home-failure");
@@ -554,6 +555,7 @@ test("A disabled linked visit rejects the whole pair atomically and a forbidden 
   page,
   request,
   browser,
+  storageState,
 }) => {
   const fixture = await fixtures(request);
   await resetCanonical(request, fixture);
@@ -593,7 +595,7 @@ test("A disabled linked visit rejects the whole pair atomically and a forbidden 
   const states = await canonical(request, fixture);
   expect(states["visit-survey-1"]).toBe(false);
   expect(states["assigned-visit-1"]).toBe(false);
-  const deniedContext = await browser.newContext();
+  const deniedContext = await browser.newContext({ storageState });
   try {
     const denied = await deniedContext.newPage();
     await login(denied, "home-denied", 7, false);
