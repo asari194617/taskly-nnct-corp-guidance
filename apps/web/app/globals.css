@@ -1461,7 +1461,7 @@ html:has(.first-visit-tour) {
 }
 .home-task-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
   align-items: center;
   min-height: 64px;
   padding: var(--spacing-relative-spacing-lv4) 0;
@@ -1473,8 +1473,7 @@ html:has(.first-visit-tour) {
 .home-task-toggle {
   position: relative;
   display: grid;
-  place-items: center end;
-  width: 44px;
+  place-items: center start;
   height: 44px;
   padding-inline-end: var(--spacing-relative-spacing-lv4);
 }
