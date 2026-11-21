@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  allowedDevOrigins: ["local.nnct-corp-guidance-2026.taskly.iy0306.com"],
   output: "export",
   trailingSlash: true,
   images: { unoptimized: true },
