@@ -1914,8 +1914,8 @@ test("The home starts with tasks and explainable recommendations across readable
         await sheet.getByRole("heading").boundingBox(),
       );
       const gap = titleBox.x - (glyphBox.x + glyphBox.width);
-      expect(gap).toBeGreaterThanOrEqual(0);
-      expect(gap).toBeLessThanOrEqual(8);
+      expect(gap).toBeGreaterThanOrEqual(8);
+      expect(gap).toBeLessThanOrEqual(12);
       expect(await renderedForegroundContrast(glyph)).toBeGreaterThanOrEqual(3);
       await expect(recommendations.locator(".home-recommendation")).toHaveCount(
         2,
