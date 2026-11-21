@@ -39,7 +39,10 @@ NEXT_PUBLIC_API_URL=https://local.api.nnct-corp-guidance-2026.taskly.iy0306.com
 [taskly-auth の開発環境](https://github.com/asari194617/taskly-auth#ローカル-https) の `OAUTH_PUBLIC_CLIENTS_JSON` に下の登録を追加するか、同じ client ID の既存登録を更新してから、認証コンテナを再作成します。
 
 ```json
-{"client_id":"nnct-corp-guidance-2026","redirect_uri":"https://local.api.nnct-corp-guidance-2026.taskly.iy0306.com/auth/callback"}
+{
+  "client_id": "nnct-corp-guidance-2026",
+  "redirect_uri": "https://local.api.nnct-corp-guidance-2026.taskly.iy0306.com/auth/callback"
+}
 ```
 
 画面を `npm --prefix apps/web run dev -- --port 3000` で起動し、[ローカル画面](https://local.nnct-corp-guidance-2026.taskly.iy0306.com)を開きます。API のリッスン先は `127.0.0.1:3071` のままです。Linux で Go が開発 CA を参照できない場合は、起動時に `SSL_CERT_FILE` に開発 CA の PEM ファイルを指定します。
