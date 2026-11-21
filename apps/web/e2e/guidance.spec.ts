@@ -2321,20 +2321,10 @@ test("Account actions, interest labels and document guidance are available witho
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, "menu");
-  const policyNavigation = page.getByRole("navigation", {
-    name: "規約とポリシー",
-  });
-  for (const [name, path] of [
-    ["利用規約", "terms"],
-    ["プライバシーポリシー", "privacy"],
-    ["セキュリティポリシー", "security"],
-    ["サービスの継続性", "continuity"],
-  ]) {
-    await expect(policyNavigation.getByRole("link", { name })).toHaveAttribute(
-      "href",
-      `https://policies.taskly.iy0306.com/${path}/`,
-    );
-  }
+  await expect(page.getByRole("contentinfo")).toHaveCount(0);
+  await expect(
+    page.getByRole("navigation", { name: "規約とポリシー" }),
+  ).toHaveCount(0);
   const trigger = page.getByRole("button", {
     name: "ユーザーメニュー",
     exact: true,
