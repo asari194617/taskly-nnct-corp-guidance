@@ -1451,8 +1451,12 @@ html:has(.first-visit-tour) {
   align-items: start;
   gap: var(--spacing-relative-spacing-lv12);
 }
-.home-layout > section {
+.home-layout > * {
   min-width: 0;
+}
+.home-companies {
+  display: grid;
+  gap: var(--spacing-relative-spacing-lv12);
 }
 .home-section-heading,
 .home-group-heading,
@@ -1469,16 +1473,10 @@ html:has(.first-visit-tour) {
 .home-section-heading h2 {
   font-size: 1.25rem;
 }
-.home-task-summary {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-relative-spacing-lv6);
-}
-.home-count,
-.home-group-heading > span {
+.home-task-hint {
+  margin: 0;
   color: var(--color-text-medium-emphasis);
   font-size: 0.8125rem;
-  white-space: nowrap;
 }
 .home-group-heading {
   margin-bottom: var(--spacing-relative-spacing-lv4);
@@ -1502,15 +1500,60 @@ html:has(.first-visit-tour) {
   padding: var(--spacing-relative-spacing-lv4) 0;
   border-bottom: 1px solid var(--color-border-low-emphasis);
 }
-.home-task-toggle {
-  align-self: start;
+.home-assigned-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
-.home-task-toggle .spui-Checkbox-label {
-  min-width: 44px;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.home-task-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+}
+.home-task-toggle input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.home-task-check {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  color: var(--color-text-medium-emphasis);
+  pointer-events: none;
+}
+.home-task-toggle input:checked + .home-task-check {
+  color: var(--color-text-accent-primary);
+  background: currentColor;
+}
+.home-task-toggle input:checked + .home-task-check > svg {
+  color: var(--color-surface-primary);
+}
+.home-task-toggle input:focus-visible + .home-task-check {
+  outline: 2px solid var(--color-text-accent-primary);
+  outline-offset: 3px;
+}
+.home-task-toggle input:disabled {
+  cursor: default;
+}
+.home-task-toggle input:disabled + .home-task-check {
+  opacity: 0.55;
+}
+@media (forced-colors: active) {
+  .home-task-toggle input:checked + .home-task-check {
+    forced-color-adjust: none;
+    color: Highlight;
+  }
+  .home-task-toggle input:checked + .home-task-check > svg {
+    color: HighlightText;
+  }
 }
 .home-task-main {
   display: grid;
@@ -1562,11 +1605,6 @@ html:has(.first-visit-tour) {
   gap: var(--spacing-relative-spacing-lv4);
   padding-left: 0;
   font-size: 0.9375rem;
-}
-.home-survey-count {
-  color: var(--color-text-medium-emphasis);
-  font-size: 0.8125rem;
-  font-weight: normal;
 }
 .home-surveys-heading > .spui-TextLink {
   white-space: nowrap;

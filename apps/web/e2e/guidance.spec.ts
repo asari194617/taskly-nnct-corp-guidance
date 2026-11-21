@@ -1861,6 +1861,7 @@ test("The home starts with tasks and explainable recommendations across readable
         page.getByRole("heading", { name: "ホーム", level: 1 }),
       ).toBeVisible();
       const tasks = page.getByRole("region", { name: "やること", exact: true });
+      const assignments = page.getByRole("region", { name: "指定企業の見学" });
       const recommendations = page.getByRole("region", {
         name: "おすすめ",
         exact: true,
@@ -1884,11 +1885,13 @@ test("The home starts with tasks and explainable recommendations across readable
         }),
       ).toBeVisible();
       await expect(
-        homeTask(page, "assigned-visit-1").getByRole("checkbox", {
-          name: "架空あおばソフトを見学",
+        assignments.getByRole("link", {
+          name: "架空あおばソフト",
           exact: true,
         }),
       ).toBeVisible();
+      await expect(assignments.getByRole("checkbox")).toHaveCount(0);
+      await expect(tasks.getByText(/\d+\/\d+/)).toHaveCount(0);
       await expect(page.getByRole("searchbox")).toHaveCount(0);
       await expect(page.getByRole("combobox")).toHaveCount(0);
       const firstTask = tasks.locator(".home-task-row").first();
@@ -1915,7 +1918,7 @@ test("The home starts with tasks and explainable recommendations across readable
       ).toBeLessThanOrEqual(viewport.width);
       await expectTextOnlyHover(
         page,
-        tasks.locator(".home-task-main > a").first(),
+        assignments.locator(".home-task-main > a").first(),
       );
       await expectTextOnlyHover(
         page,
@@ -1942,7 +1945,7 @@ test("Home checks and native Taskly GraphQL share completion records and refresh
 }) => {
   await page.clock.install();
   const fixture = await tasklyFixture(request);
-  const key = "assigned-visit-1";
+  const key = "overall-survey";
   const id = fixture.bindings[key];
   expect(
     (

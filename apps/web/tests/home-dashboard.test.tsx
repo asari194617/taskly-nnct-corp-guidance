@@ -196,7 +196,11 @@ beforeEach(() => {
 });
 async function ready(props = options()) {
   const mounted = render(<HomeDashboard {...props} />);
-  await screen.findByLabelText(/14件中|10件中|0件中|1件中/);
+  await waitFor(() =>
+    expect(
+      screen.queryByText("やることを読み込んでいます"),
+    ).not.toBeInTheDocument(),
+  );
   return { ...mounted, props };
 }
 function writes() {
@@ -204,10 +208,13 @@ function writes() {
 }
 
 describe("Taskly-backed guidance home", () => {
-  it("groups four assigned visits, eight term surveys, the overall survey and the sheet into fourteen explicit tasks", async () => {
+  it("shows assigned companies separately and only gives surveys and submissions completion controls", async () => {
     await ready();
     const assignments = screen.getByRole("region", { name: "指定企業の見学" });
-    expect(within(assignments).getAllByRole("checkbox")).toHaveLength(4);
+    const tasks = screen.getByRole("region", { name: "やること" });
+    expect(tasks).not.toContainElement(assignments);
+    expect(within(assignments).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(assignments).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(
       within(assignments).queryByRole("link", { name: "Taskly" }),
     ).not.toBeInTheDocument();
@@ -218,7 +225,7 @@ describe("Taskly-backed guidance home", () => {
       level: 3,
     });
     const expand = within(surveys).getByRole("button", {
-      name: /見学アンケート.*0\/8/,
+      name: "見学アンケート",
     });
     expect(within(surveyHeading).queryByRole("button")).not.toBeInTheDocument();
     expect(expand.closest("h3")).toBeNull();
@@ -229,7 +236,7 @@ describe("Taskly-backed guidance home", () => {
     expect(
       within(assignments).getByRole("heading", {
         name: "指定企業の見学",
-        level: 3,
+        level: 2,
       }),
     ).toBeInTheDocument();
     expect(
@@ -243,8 +250,8 @@ describe("Taskly-backed guidance home", () => {
     expand.focus();
     await userEvent.keyboard("{Enter}");
     expect(within(surveys).getAllByRole("checkbox")).toHaveLength(8);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(14);
-    expect(screen.getByLabelText("14件中0件完了")).toHaveTextContent("0/14");
+    expect(screen.getAllByRole("checkbox")).toHaveLength(10);
+    expect(tasks).not.toHaveTextContent(/\d+\/\d+/);
     expect(
       screen.getByRole("checkbox", { name: "全体アンケート" }),
     ).not.toBeChecked();
@@ -287,7 +294,6 @@ describe("Taskly-backed guidance home", () => {
         body: JSON.stringify({ completed: true }),
       }),
     );
-    expect(screen.getByLabelText("14件中1件完了")).toHaveTextContent("1/14");
     await userEvent.click(checkbox);
     await waitFor(() => expect(checkbox).not.toBeChecked());
   });
@@ -334,7 +340,6 @@ describe("Taskly-backed guidance home", () => {
     expect(
       screen.queryByRole("region", { name: "指定企業の見学" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByLabelText("10件中0件完了")).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole("button", { name: "名簿番号を設定" }),
     );
@@ -354,9 +359,7 @@ describe("Taskly-backed guidance home", () => {
     );
     expect(props.onSelectCompany).toHaveBeenCalledWith(company);
     const row = requireValue(
-      within(assigned)
-        .getByRole("checkbox", { name: "指定企業ターム1" })
-        .closest("li"),
+      within(assigned).getByRole("link", { name: company.name }).closest("li"),
     );
     const map = within(row).getByRole("link", { name: "ブース 1" });
     expect(map).toHaveAttribute("href", "/map/?focus=AM-1&session=AM");
@@ -492,7 +495,9 @@ describe("Taskly-backed guidance home", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     failures.delete("/api/home");
     await userEvent.click(screen.getByRole("button", { name: "再読み込み" }));
-    expect(await screen.findByLabelText("14件中0件完了")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("checkbox", { name: "全体アンケート" }),
+    ).toBeInTheDocument();
   });
 
   it("renders an authoritative empty task list without generating synthetic completion rows", async () => {
@@ -754,7 +759,7 @@ describe("Taskly-backed guidance home", () => {
         <HomeDashboard {...props} />
       </OfflineProvider>,
     );
-    await screen.findByLabelText("14件中0件完了");
+    await screen.findByRole("checkbox", { name: "全体アンケート" });
     expect(fetchMock).not.toHaveBeenCalled();
     for (const checkbox of screen.getAllByRole("checkbox"))
       expect(checkbox).toBeDisabled();

@@ -301,7 +301,7 @@ export async function expectOfflineHome(page: Page) {
     page.getByRole("status", { name: "オフライン用データ", exact: true }),
   ).toHaveAttribute("data-offline", "true");
   const task = page
-    .locator('.home-task-row[data-task-id="assigned-visit-1"]')
+    .locator('.home-task-row[data-task-id="overall-survey"]')
     .getByRole("checkbox");
   await expect(task).toBeVisible();
   await expect(task).toBeDisabled();

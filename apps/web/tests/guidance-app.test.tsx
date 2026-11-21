@@ -882,7 +882,12 @@ describe("shareable routes and venue navigation", () => {
       return json(responseFor(requireValue(rosterNumber)));
     });
     await ready();
-    await screen.findByRole("checkbox", { name: "検証名簿7番の指定企業" });
+    const companies = () =>
+      within(screen.getByRole("region", { name: "指定企業の見学" }));
+    const [first, second] = dataset.companies;
+    await waitFor(() =>
+      expect(companies().getByRole("link", { name: first.name })).toBeVisible(),
+    );
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(reads).toBe(2));
     await accountAction("名簿番号の設定");
@@ -895,13 +900,17 @@ describe("shareable routes and venue navigation", () => {
     await userEvent.click(
       within(dialog).getByRole("button", { name: "保存する" }),
     );
-    await screen.findByRole("checkbox", { name: "検証名簿8番の指定企業" });
+    await waitFor(() =>
+      expect(
+        companies().getByRole("link", { name: second.name }),
+      ).toBeVisible(),
+    );
     await act(async () => finishOldPoll(json(responseFor(7))));
     expect(
-      screen.getByRole("checkbox", { name: "検証名簿8番の指定企業" }),
+      companies().getByRole("link", { name: second.name }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("checkbox", { name: "検証名簿7番の指定企業" }),
+      companies().queryByRole("link", { name: first.name }),
     ).not.toBeInTheDocument();
     await expectAccountNumber(8);
   });
