@@ -1446,11 +1446,6 @@ html:has(.first-visit-tour) {
 .home-section-heading h2 {
   font-size: 1.25rem;
 }
-.home-task-hint {
-  margin: 0;
-  color: var(--color-text-medium-emphasis);
-  font-size: 0.8125rem;
-}
 .home-group-heading {
   margin-bottom: var(--spacing-relative-spacing-lv4);
 }
@@ -1493,21 +1488,27 @@ html:has(.first-visit-tour) {
   cursor: pointer;
 }
 .home-task-check {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border: 2px solid currentColor;
   border-radius: 50%;
   color: var(--color-text-medium-emphasis);
   pointer-events: none;
 }
+.home-task-check > svg {
+  display: block;
+  stroke-width: 2.25;
+}
+@media (hover: hover) {
+  .home-task-toggle input:enabled:hover + .home-task-check {
+    color: var(--color-text-accent-primary);
+  }
+}
 .home-task-toggle input:checked + .home-task-check {
   color: var(--color-text-accent-primary);
-  background: currentColor;
 }
-.home-task-toggle input:checked + .home-task-check > svg {
-  color: var(--color-surface-primary);
+.home-task-toggle input:checked + .home-task-check circle {
+  fill: currentColor;
+}
+.home-task-toggle input:checked + .home-task-check path {
+  stroke: var(--color-surface-primary);
 }
 .home-task-toggle input:focus-visible + .home-task-check {
   outline: 2px solid var(--color-text-accent-primary);
@@ -1524,8 +1525,8 @@ html:has(.first-visit-tour) {
     forced-color-adjust: none;
     color: Highlight;
   }
-  .home-task-toggle input:checked + .home-task-check > svg {
-    color: HighlightText;
+  .home-task-toggle input:checked + .home-task-check path {
+    stroke: HighlightText;
   }
 }
 .home-task-main {
@@ -1564,9 +1565,6 @@ html:has(.first-visit-tour) {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
-}
-.home-surveys {
-  margin-top: var(--spacing-relative-spacing-lv8);
 }
 .home-surveys-heading {
   min-height: 44px;

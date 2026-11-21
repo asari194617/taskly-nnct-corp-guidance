@@ -167,7 +167,7 @@ export default function HomeDashboard({
               onChange={() => void tasks.toggle(task.id)}
             />
             <span className="home-task-check" aria-hidden="true">
-              <Icon name="check" size={16} />
+              <Icon name="check-circle" size={18} />
             </span>
           </label>
         )}
@@ -294,14 +294,6 @@ export default function HomeDashboard({
                     </Button>
                   </div>
                 )}
-                {!offline &&
-                  !tasks.readonly &&
-                  !tasks.error &&
-                  (surveys.length > 0 || remaining.length > 0) && (
-                    <p className="home-task-hint">
-                      回答・提出が済んだら、左のチェックを押してください。
-                    </p>
-                  )}
                 {surveys.length > 0 && (
                   <section
                     className="home-surveys"

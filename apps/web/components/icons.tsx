@@ -8,6 +8,7 @@ export type IconName =
   | "search"
   | "arrow"
   | "check"
+  | "check-circle"
   | "close"
   | "logout"
   | "location"
@@ -49,6 +50,12 @@ const paths: Record<IconName, React.ReactNode> = {
   ),
   arrow: <path d="M4 12h16m-6-6 6 6-6 6" />,
   check: <path d="m5 12 4 4L19 6" />,
+  "check-circle": (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m7.5 12 3 3 6-6" />
+    </>
+  ),
   close: <path d="m6 6 12 12M6 18 18 6" />,
   logout: (
     <>
