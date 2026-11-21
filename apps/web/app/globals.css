@@ -1476,7 +1476,7 @@ html:has(.first-visit-tour) {
   place-items: center end;
   width: 44px;
   height: 44px;
-  padding-inline-end: var(--spacing-relative-spacing-lv2);
+  padding-inline-end: var(--spacing-relative-spacing-lv4);
 }
 .home-task-toggle input {
   position: absolute;
