@@ -273,7 +273,9 @@ describe("first-visit guide tour", () => {
   it("waits for roster onboarding and remembers an Escape dismissal", async () => {
     rosterNumber = null;
     const mounted = await ready();
-    const roster = screen.getByRole("dialog", { name: "名簿番号の設定" });
+    const roster = await screen.findByRole("dialog", {
+      name: "名簿番号の設定",
+    });
     const tour = { name: "ガイドツアー" };
     expect(screen.queryByRole("region", tour)).not.toBeInTheDocument();
     expect(window.localStorage.getItem(firstVisitTourKey)).toBeNull();
