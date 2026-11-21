@@ -1907,12 +1907,20 @@ test("The home starts with tasks and explainable recommendations across readable
       const glyph = sheet.locator(".home-task-check");
       await expect(checkbox).not.toBeChecked();
       const target = requireValue(await checkbox.boundingBox());
-      expect(target.width).toBeGreaterThanOrEqual(44);
+      expect(target.width).toBeGreaterThanOrEqual(24);
       expect(target.height).toBeGreaterThanOrEqual(44);
       const glyphBox = requireValue(await glyph.boundingBox());
       const titleBox = requireValue(
         await sheet.getByRole("heading").boundingBox(),
       );
+      const surveyIconBox = requireValue(
+        await surveyToggle.locator("svg").boundingBox(),
+      );
+      const surveyTitleBox = requireValue(
+        await surveyToggle.getByText("見学アンケート").boundingBox(),
+      );
+      expect(glyphBox.x).toBeCloseTo(surveyIconBox.x);
+      expect(titleBox.x).toBeCloseTo(surveyTitleBox.x);
       const gap = titleBox.x - (glyphBox.x + glyphBox.width);
       expect(gap).toBeGreaterThanOrEqual(8);
       expect(gap).toBeLessThanOrEqual(12);

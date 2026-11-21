@@ -310,7 +310,7 @@ export default function HomeDashboard({
                         }
                         onClick={() => setSurveyOpen((value) => !value)}
                       >
-                        <Icon name={surveyOpen ? "minus" : "plus"} size={16} />
+                        <Icon name={surveyOpen ? "minus" : "plus"} size={18} />
                         <span>見学アンケート</span>
                       </TextButton>
                       {currentSurvey &&
