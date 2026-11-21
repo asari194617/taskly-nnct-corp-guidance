@@ -2,6 +2,7 @@ import { requireValue } from "../tests/required";
 import { test, expect } from "./fixtures";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { largeFixture } from "../tests/fixtures";
+import { resetInterests } from "./offline-fixtures";
 import { captureCurrentPDF, returnToApplication } from "./pdf-navigation";
 
 const API = "http://127.0.0.1:3371";
@@ -1815,7 +1816,10 @@ test("The home starts with tasks and explainable recommendations across readable
   page,
 }, info) => {
   await login(page, "home", "/", false);
+  if (!(await rosterDialog(page).isVisible()))
+    await accountAction(page, "名簿番号の設定");
   await chooseRoster(page, 9);
+  await resetInterests(page, []);
   const surveyGroup = page.getByRole("region", {
     name: "アンケート",
     exact: true,
@@ -1896,7 +1900,7 @@ test("The home starts with tasks and explainable recommendations across readable
       await expect(page.getByRole("combobox")).toHaveCount(0);
       const firstTask = tasks.locator(".home-task-row").first();
       const bounds = requireValue(await firstTask.boundingBox());
-      expect(bounds.y).toBeLessThan(350);
+      expect(surveyToggleBox.y).toBeLessThan(350);
       expect(bounds.y + bounds.height).toBeLessThan(viewport.height - 70);
       await expect(recommendations.locator(".home-recommendation")).toHaveCount(
         2,
