@@ -1769,8 +1769,8 @@ function contrastRatio(foreground: string, background: string) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-async function renderedTextContrast(text: Locator) {
-  const colors = await text.evaluate((node) => {
+async function renderedForegroundContrast(element: Locator) {
+  const colors = await element.evaluate((node) => {
     // Normalize computed CSS colors (including color(srgb ...)) using Canvas's
     // color parser. These are style colors, not sampled screenshot pixels.
     const canvas = document.createElement("canvas");
@@ -1902,6 +1902,21 @@ test("The home starts with tasks and explainable recommendations across readable
       const bounds = requireValue(await firstTask.boundingBox());
       expect(surveyToggleBox.y).toBeLessThan(350);
       expect(bounds.y + bounds.height).toBeLessThan(viewport.height - 70);
+      const sheet = homeTask(page, "sheet-submission");
+      const checkbox = sheet.getByRole("checkbox");
+      const glyph = sheet.locator(".home-task-check");
+      await expect(checkbox).not.toBeChecked();
+      const target = requireValue(await checkbox.boundingBox());
+      expect(target.width).toBeGreaterThanOrEqual(44);
+      expect(target.height).toBeGreaterThanOrEqual(44);
+      const glyphBox = requireValue(await glyph.boundingBox());
+      const titleBox = requireValue(
+        await sheet.getByRole("heading").boundingBox(),
+      );
+      const gap = titleBox.x - (glyphBox.x + glyphBox.width);
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThanOrEqual(8);
+      expect(await renderedForegroundContrast(glyph)).toBeGreaterThanOrEqual(3);
       await expect(recommendations.locator(".home-recommendation")).toHaveCount(
         2,
       );
@@ -3045,7 +3060,7 @@ test("Interest changes appear before a delayed API response and roll back a fail
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
     expect(
-      await renderedTextContrast(
+      await renderedForegroundContrast(
         errorAlert.locator(".spui-InlineNotification-text"),
       ),
     ).toBeGreaterThanOrEqual(4.5);
