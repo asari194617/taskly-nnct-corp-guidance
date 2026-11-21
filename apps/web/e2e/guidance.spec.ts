@@ -1885,7 +1885,7 @@ test("The home starts with tasks and explainable recommendations across readable
         }),
       ).toBeVisible();
       await expect(
-        assignments.getByRole("link", {
+        homeTask(page, "assigned-visit-1").getByRole("link", {
           name: "架空あおばソフト",
           exact: true,
         }),
