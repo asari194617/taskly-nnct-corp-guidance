@@ -2,6 +2,7 @@ import { requireValue } from "../tests/required";
 import { test, expect } from "./fixtures";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { largeFixture } from "../tests/fixtures";
+import { resetInterests } from "./offline-fixtures";
 import { captureCurrentPDF, returnToApplication } from "./pdf-navigation";
 
 const API = "http://127.0.0.1:3371";
@@ -1815,7 +1816,10 @@ test("The home starts with tasks and explainable recommendations across readable
   page,
 }, info) => {
   await login(page, "home", "/", false);
+  if (!(await rosterDialog(page).isVisible()))
+    await accountAction(page, "名簿番号の設定");
   await chooseRoster(page, 9);
+  await resetInterests(page, []);
   const surveyGroup = page.getByRole("region", {
     name: "アンケート",
     exact: true,
@@ -1861,6 +1865,7 @@ test("The home starts with tasks and explainable recommendations across readable
         page.getByRole("heading", { name: "ホーム", level: 1 }),
       ).toBeVisible();
       const tasks = page.getByRole("region", { name: "やること", exact: true });
+      const assignments = page.getByRole("region", { name: "指定企業の見学" });
       const recommendations = page.getByRole("region", {
         name: "おすすめ",
         exact: true,
@@ -1884,16 +1889,18 @@ test("The home starts with tasks and explainable recommendations across readable
         }),
       ).toBeVisible();
       await expect(
-        homeTask(page, "assigned-visit-1").getByRole("checkbox", {
-          name: "架空あおばソフトを見学",
+        homeTask(page, "assigned-visit-1").getByRole("link", {
+          name: "架空あおばソフト",
           exact: true,
         }),
       ).toBeVisible();
+      await expect(assignments.getByRole("checkbox")).toHaveCount(0);
+      await expect(tasks.getByText(/\d+\/\d+/)).toHaveCount(0);
       await expect(page.getByRole("searchbox")).toHaveCount(0);
       await expect(page.getByRole("combobox")).toHaveCount(0);
       const firstTask = tasks.locator(".home-task-row").first();
       const bounds = requireValue(await firstTask.boundingBox());
-      expect(bounds.y).toBeLessThan(350);
+      expect(surveyToggleBox.y).toBeLessThan(350);
       expect(bounds.y + bounds.height).toBeLessThan(viewport.height - 70);
       await expect(recommendations.locator(".home-recommendation")).toHaveCount(
         2,
@@ -1915,7 +1922,7 @@ test("The home starts with tasks and explainable recommendations across readable
       ).toBeLessThanOrEqual(viewport.width);
       await expectTextOnlyHover(
         page,
-        tasks.locator(".home-task-main > a").first(),
+        assignments.locator(".home-task-main > a").first(),
       );
       await expectTextOnlyHover(
         page,
@@ -1942,7 +1949,7 @@ test("Home checks and native Taskly GraphQL share completion records and refresh
 }) => {
   await page.clock.install();
   const fixture = await tasklyFixture(request);
-  const key = "assigned-visit-1";
+  const key = "overall-survey";
   const id = fixture.bindings[key];
   expect(
     (

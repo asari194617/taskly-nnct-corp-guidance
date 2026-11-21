@@ -189,6 +189,15 @@ async function put(page: Page, key: string, completed: boolean) {
     data: { completed },
   });
 }
+async function updateAssignedVisit(
+  page: Page,
+  completed: boolean,
+): Promise<HomeTaskUpdateResponse> {
+  const response = await put(page, "assigned-visit-1", completed);
+  expect(response.status()).toBe(200);
+  await refreshOnFocus(page);
+  return response.json();
+}
 function partner(
   update: HomeTaskUpdateResponse,
   key = "assigned-visit-1",
@@ -224,7 +233,7 @@ async function gateForward(page: Page, key: string) {
   return { requested, release, remove: () => page.unroute(url, handler) };
 }
 
-test("A survey optimistically checks its assigned visit, commits both Taskly records once, and owns a persistent undo", async ({
+test("A survey toggles immediately, commits both Taskly records once, and owns a persistent undo", async ({
   page,
   request,
 }) => {
@@ -246,10 +255,9 @@ test("A survey optimistically checks its assigned visit, commits both Taskly rec
   try {
     await checkbox(page, "visit-survey-1").press("Space");
     await gate.requested;
-    for (const key of ["visit-survey-1", "assigned-visit-1"]) {
-      await expect(checkbox(page, key)).toBeChecked();
-      await expect(checkbox(page, key)).toBeDisabled();
-    }
+    await expect(checkbox(page, "visit-survey-1")).toBeChecked();
+    await expect(checkbox(page, "visit-survey-1")).toBeDisabled();
+    await expect(checkbox(page, "assigned-visit-1")).toHaveCount(0);
     const beforeCommit = await canonical(request, fixture);
     expect(beforeCommit["visit-survey-1"]).toBe(false);
     expect(beforeCommit["assigned-visit-1"]).toBe(false);
@@ -264,7 +272,6 @@ test("A survey optimistically checks its assigned visit, commits both Taskly rec
   expect(update.id).toBe("visit-survey-1");
   expect(partner(update).completed).toBe(true);
   expect(partner(update).auto_completed_by).toBe("visit-survey-1");
-  await expect(checkbox(page, "assigned-visit-1")).toBeEnabled();
   await gate.remove();
   const committed = await canonical(request, fixture);
   expect(committed["visit-survey-1"]).toBe(true);
@@ -272,14 +279,15 @@ test("A survey optimistically checks its assigned visit, commits both Taskly rec
   expect(committed["assigned-visit-3"]).toBe(false);
   await page.reload();
   await expandSurveys(page);
-  await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
+  await expect(checkbox(page, "visit-survey-1")).toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(true);
   expect(task(await home(page), "assigned-visit-1").auto_completed_by).toBe(
     "visit-survey-1",
   );
   const undone = await mutate(page, "visit-survey-1", false);
   expect(partner(undone).completed).toBe(false);
   expect(partner(undone).auto_completed_by).toBeUndefined();
-  await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(false);
   const final = await canonical(request, fixture);
   expect(final["visit-survey-1"]).toBe(false);
   expect(final["assigned-visit-1"]).toBe(false);
@@ -294,7 +302,7 @@ test("A visit already completed manually in Taskly remains complete when its sur
   await nativeComplete(request, fixture, ACTOR, "assigned-visit-1", true);
   await login(page);
   await expandSurveys(page);
-  await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(true);
   const update = await mutate(page, "visit-survey-1", true);
   expect(partner(update).completed).toBe(true);
   expect(partner(update).auto_completed_by).toBeUndefined();
@@ -302,13 +310,13 @@ test("A visit already completed manually in Taskly remains complete when its sur
   expect(partner(undone).completed).toBe(true);
   expect(partner(undone).auto_completed_by).toBeUndefined();
   await page.reload();
-  await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(true);
   const states = await canonical(request, fixture);
   expect(states["assigned-visit-1"]).toBe(true);
   expect(states["visit-survey-1"]).toBe(false);
 });
 
-test("Either Guidance checkbox can undo an automatically owned pair while a subsequent manual visit stays protected", async ({
+test("Undoing an assigned visit through the Guidance API clears its linked survey and protects subsequent manual completion", async ({
   page,
   request,
 }) => {
@@ -317,36 +325,14 @@ test("Either Guidance checkbox can undo an automatically owned pair while a subs
   await login(page);
   await expandSurveys(page);
   await mutate(page, "visit-survey-1", true);
-  const gate = await gateForward(page, "assigned-visit-1");
-  const response = page.waitForResponse(
-    (r) =>
-      r.url() === `${API}/api/home/tasks/assigned-visit-1` &&
-      r.request().method() === "PUT",
-  );
-  try {
-    await checkbox(page, "assigned-visit-1").press("Space");
-    await gate.requested;
-    for (const key of ["assigned-visit-1", "visit-survey-1"]) {
-      await expect(checkbox(page, key)).not.toBeChecked();
-      await expect(checkbox(page, key)).toBeDisabled();
-    }
-    const held = await canonical(request, fixture);
-    expect(held["assigned-visit-1"]).toBe(true);
-    expect(held["visit-survey-1"]).toBe(true);
-  } finally {
-    gate.release();
-  }
-  const settled = await response;
-  expect(settled.status()).toBe(200);
-  const off: HomeTaskUpdateResponse = await settled.json();
+  const off = await updateAssignedVisit(page, false);
   expect(off.auto_completed_by).toBeUndefined();
   expect(partner(off, "visit-survey-1").completed).toBe(false);
-  await expect(checkbox(page, "assigned-visit-1")).toBeEnabled();
-  await gate.remove();
+  await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
   const undone = await canonical(request, fixture);
   expect(undone["assigned-visit-1"]).toBe(false);
   expect(undone["visit-survey-1"]).toBe(false);
-  const manual = await mutate(page, "assigned-visit-1", true);
+  const manual = await updateAssignedVisit(page, true);
   expect(manual.auto_completed_by).toBeUndefined();
   await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
   expect(
@@ -355,11 +341,11 @@ test("Either Guidance checkbox can undo an automatically owned pair while a subs
   const manualUndone = await mutate(page, "visit-survey-1", false);
   expect(partner(manualUndone).completed).toBe(true);
   expect(partner(manualUndone).auto_completed_by).toBeUndefined();
-  await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(true);
   expect((await canonical(request, fixture))["assigned-visit-1"]).toBe(true);
 });
 
-test("Native Taskly touches of either automatic checkbox release ownership through the live poll and focus refresh", async ({
+test("Native Taskly changes to either linked record release ownership through the live poll and focus refresh", async ({
   page,
   request,
 }) => {
@@ -392,23 +378,21 @@ test("Native Taskly touches of either automatic checkbox release ownership throu
     await checkbox(page, "visit-survey-1").press("Space");
     await gate.requested;
     await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
-    await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
   } finally {
     gate.release();
   }
   expect((await response).status()).toBe(200);
   await gate.remove();
-  await expect(checkbox(page, "assigned-visit-1")).toBeEnabled();
   await nativeComplete(request, fixture, ACTOR, "assigned-visit-1", false);
   await refreshOnFocus(page);
-  await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(false);
   await mutate(page, "visit-survey-1", true);
   await nativeComplete(request, fixture, ACTOR, "visit-survey-1", true);
   await refreshOnFocus(page);
   expect(
     task(await home(page), "assigned-visit-1").auto_completed_by,
   ).toBeUndefined();
-  const manuallyClaimed = await mutate(page, "assigned-visit-1", false);
+  const manuallyClaimed = await updateAssignedVisit(page, false);
   expect(partner(manuallyClaimed, "visit-survey-1").completed).toBe(true);
   await expect(checkbox(page, "visit-survey-1")).toBeChecked();
   const states = await canonical(request, fixture);
@@ -428,7 +412,7 @@ test("Idempotent survey retries do not recreate a manually undone visit or retro
   await mutate(page, "visit-survey-1", true);
   await nativeComplete(request, fixture, ACTOR, "assigned-visit-1", false);
   await refreshOnFocus(page);
-  await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(false);
   const retry = await put(page, "visit-survey-1", true);
   expect(retry.status()).toBe(200);
   expect(partner(await retry.json()).completed).toBe(false);
@@ -443,7 +427,7 @@ test("Idempotent survey retries do not recreate a manually undone visit or retro
   await nativeComplete(request, fixture, ACTOR, "visit-survey-1", true);
   await refreshOnFocus(page);
   await expect(checkbox(page, "visit-survey-1")).toBeChecked();
-  await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
+  expect(task(await home(page), "assigned-visit-1").completed).toBe(false);
   const nativeRetry = await put(page, "visit-survey-1", true);
   expect(nativeRetry.status()).toBe(200);
   const visit = partner(await nativeRetry.json());
@@ -509,7 +493,6 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
   try {
     const other = await otherContext.newPage();
     await login(other, "home-failure");
-    await expect(checkbox(other, "assigned-visit-1")).not.toBeChecked();
     expect(
       task(await home(other), "assigned-visit-1").auto_completed_by,
     ).toBeUndefined();
@@ -518,7 +501,6 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
     ).toBe(false);
     await setRoster(page, 8);
     await expandSurveys(page);
-    await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
     expect(
       task(await home(page), "assigned-visit-1").auto_completed_by,
     ).toBeUndefined();
@@ -527,7 +509,6 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
     expect(partner(undone).auto_completed_by).toBeUndefined();
     await page.reload();
     await expect(row(page, "assigned-visit-1")).toContainText("架空いろは機械");
-    await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
     expect(
       task(await home(page), "assigned-visit-1").auto_completed_by,
     ).toBeUndefined();
@@ -537,7 +518,7 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
       partner(await mutate(page, "visit-survey-1", true)).auto_completed_by,
     ).toBeUndefined();
     expect(
-      partner(await mutate(page, "assigned-visit-1", false), "visit-survey-1")
+      partner(await updateAssignedVisit(page, false), "visit-survey-1")
         .completed,
     ).toBe(true);
     await expect(checkbox(page, "visit-survey-1")).toBeChecked();
@@ -545,7 +526,6 @@ test("Automatic ownership is isolated between accounts and a changed roster cann
     expect(scoped["assigned-visit-1"]).toBe(false);
     expect(scoped["visit-survey-1"]).toBe(true);
     await refreshOnFocus(other);
-    await expect(checkbox(other, "assigned-visit-1")).not.toBeChecked();
   } finally {
     await otherContext.close();
   }
@@ -573,7 +553,9 @@ test("A disabled linked visit rejects the whole pair atomically and a forbidden 
   try {
     await page.reload();
     await expandSurveys(page);
-    await expect(checkbox(page, "assigned-visit-1")).toBeDisabled();
+    expect(task(await home(page), "assigned-visit-1").completion_disabled).toBe(
+      true,
+    );
     const response = page.waitForResponse(
       (r) =>
         r.url() === `${API}/api/home/tasks/visit-survey-1` &&
@@ -582,7 +564,6 @@ test("A disabled linked visit rejects the whole pair atomically and a forbidden 
     await checkbox(page, "visit-survey-1").press("Space");
     expect((await response).status()).toBe(409);
     await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
-    await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
     await expect(
       page
         .getByRole("region", { name: "やること", exact: true })
@@ -629,11 +610,9 @@ test("Actual identity outages roll back a linked check and reverse undo before s
     await checkbox(page, "visit-survey-1").press("Space");
     await gate.requested;
     await expect(checkbox(page, "visit-survey-1")).toBeChecked();
-    await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
     gate.release();
     expect((await response).status()).toBe(503);
     await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
-    await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
     const states = await canonical(request, fixture);
     expect(states["visit-survey-1"]).toBe(false);
     expect(states["assigned-visit-1"]).toBe(false);
@@ -652,39 +631,22 @@ test("Actual identity outages roll back a linked check and reverse undo before s
   const retried = await canonical(request, fixture);
   expect(retried["visit-survey-1"]).toBe(true);
   expect(retried["assigned-visit-1"]).toBe(true);
-  const reverseGate = await gateForward(page, "assigned-visit-1");
   expect(
     (await request.post(`${ISSUER}/__test/outage?enabled=1`)).status(),
   ).toBe(200);
-  const reverseResponse = page.waitForResponse(
-    (r) =>
-      r.url() === `${API}/api/home/tasks/assigned-visit-1` &&
-      r.request().method() === "PUT",
-  );
   try {
-    await checkbox(page, "assigned-visit-1").press("Space");
-    await reverseGate.requested;
-    await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
-    await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
-    reverseGate.release();
-    expect((await reverseResponse).status()).toBe(503);
-    await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
+    expect((await put(page, "assigned-visit-1", false)).status()).toBe(503);
     await expect(checkbox(page, "visit-survey-1")).toBeChecked();
     const preserved = await canonical(request, fixture);
     expect(preserved["assigned-visit-1"]).toBe(true);
     expect(preserved["visit-survey-1"]).toBe(true);
   } finally {
-    reverseGate.release();
-    await reverseGate.remove();
     expect(
       (await request.post(`${ISSUER}/__test/outage?enabled=0`)).status(),
     ).toBe(200);
   }
-  await page.getByRole("button", { name: "再読み込み", exact: true }).click();
-  await expect(checkbox(page, "assigned-visit-1")).toBeEnabled();
   expect(
-    partner(await mutate(page, "assigned-visit-1", false), "visit-survey-1")
-      .completed,
+    partner(await updateAssignedVisit(page, false), "visit-survey-1").completed,
   ).toBe(false);
   const reversed = await canonical(request, fixture);
   expect(reversed["assigned-visit-1"]).toBe(false);
@@ -712,7 +674,6 @@ test("Revocation during a linked write creates neither record and reauthenticati
     await checkbox(page, "visit-survey-1").press("Space");
     await gate.requested;
     await expect(checkbox(page, "visit-survey-1")).toBeChecked();
-    await expect(checkbox(page, "assigned-visit-1")).toBeChecked();
     gate.release();
     expect((await response).status()).toBe(401);
     await expect(
@@ -726,8 +687,9 @@ test("Revocation during a linked write creates neither record and reauthenticati
     await gate.remove();
   }
   await login(page);
-  expect(
-    task(await home(page), "assigned-visit-1").auto_completed_by,
-  ).toBeUndefined();
-  await expect(checkbox(page, "assigned-visit-1")).not.toBeChecked();
+  await expandSurveys(page);
+  await expect(checkbox(page, "visit-survey-1")).not.toBeChecked();
+  const visit = task(await home(page), "assigned-visit-1");
+  expect(visit.completed).toBe(false);
+  expect(visit.auto_completed_by).toBeUndefined();
 });

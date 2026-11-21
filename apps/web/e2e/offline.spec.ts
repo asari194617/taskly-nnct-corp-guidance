@@ -150,7 +150,7 @@ test.describe("Native service worker and private IndexedDB snapshots", () => {
     const fixture = await (
       await request.get("http://127.0.0.1:3374/__test/fixture")
     ).json();
-    const taskID = fixture.bindings["assigned-visit-1"];
+    const taskID = fixture.bindings["overall-survey"];
     const taskly = async (completed: boolean) => {
       const operation = completed ? "completeTask" : "uncompleteTask";
       const response = await request.post("http://127.0.0.1:3374/graphql/", {
@@ -168,7 +168,7 @@ test.describe("Native service worker and private IndexedDB snapshots", () => {
       await resetInterests(page, []);
       const prepared = await waitForOfflinePack(page);
       const task = page
-        .locator('.home-task-row[data-task-id="assigned-visit-1"]')
+        .locator('.home-task-row[data-task-id="overall-survey"]')
         .getByRole("checkbox");
       await expect(task).not.toBeChecked();
       const writes: string[] = [];

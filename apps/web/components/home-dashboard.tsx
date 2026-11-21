@@ -3,7 +3,6 @@
 import { useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { Button } from "@openameba/spindle-ui/Button";
-import { Checkbox } from "@openameba/spindle-ui/Form/Checkbox";
 import { TextButton } from "@openameba/spindle-ui/TextButton";
 import { TextLink } from "@openameba/spindle-ui/TextLink";
 import { InlineNotification } from "@openameba/spindle-ui/InlineNotification";
@@ -119,7 +118,6 @@ export default function HomeDashboard({
     surveys.find((task) => task.term === currentTerm) ||
     surveys.find((task) => !task.completed) ||
     surveys[0];
-  const completed = all.filter((task) => task.completed).length;
   const tasklyURL = all.find((task) => task.taskly_url)?.taskly_url;
 
   function map(company: Company) {
@@ -138,32 +136,43 @@ export default function HomeDashboard({
   }
   function row(task: HomeTask) {
     const documentID = task.document_id;
-    const company = data.companies.find((item) => item.id === task.company_id);
+    const isAssigned = task.kind === "assigned_visit";
+    const company = isAssigned
+      ? data.companies.find((item) => item.id === task.company_id)
+      : undefined;
     const slot = data.schedule.find((item) => item.term === task.term);
-    const pending = tasks.pending.has(task.id);
+    const pending = !isAssigned && tasks.pending.has(task.id);
     return (
       <li
         key={task.id}
-        className="home-task-row"
+        className={
+          isAssigned ? "home-task-row home-assigned-row" : "home-task-row"
+        }
         data-task-id={task.id}
         aria-busy={pending || undefined}
       >
-        <div className="home-task-toggle">
-          <Checkbox
-            checked={task.completed}
-            aria-label={task.title}
-            disabled={
-              offline ||
-              tasks.readonly ||
-              pending ||
-              Boolean(tasks.error) ||
-              (task.completion_disabled && !task.completed)
-            }
-            onChange={() => void tasks.toggle(task.id)}
-          />
-        </div>
+        {!isAssigned && (
+          <label className="home-task-toggle">
+            <input
+              type="checkbox"
+              checked={task.completed}
+              aria-label={task.title}
+              disabled={
+                offline ||
+                tasks.readonly ||
+                pending ||
+                Boolean(tasks.error) ||
+                (task.completion_disabled && !task.completed)
+              }
+              onChange={() => void tasks.toggle(task.id)}
+            />
+            <span className="home-task-check" aria-hidden="true">
+              <Icon name="check" size={16} />
+            </span>
+          </label>
+        )}
         <div className="home-task-main">
-          {company && task.kind === "assigned_visit" ? (
+          {company ? (
             <TextLink
               href={routeHref({ ...route, company: company.id })}
               onClick={(event) => follow(event, () => onSelectCompany(company))}
@@ -184,7 +193,7 @@ export default function HomeDashboard({
           )}
         </div>
         <div className="home-task-actions">
-          {company && task.kind === "assigned_visit" && (
+          {company && (
             <TextLink
               href={routeHref(map(company))}
               onClick={(event) =>
@@ -237,27 +246,16 @@ export default function HomeDashboard({
         >
           <div className="home-section-heading">
             <h2 id="home-tasks-heading">やること</h2>
-            <div className="home-task-summary">
-              {tasks.data && (
-                <span
-                  role="status"
-                  className="home-count"
-                  aria-label={`${all.length}件中${completed}件完了`}
-                >
-                  {completed}/{all.length}
-                </span>
-              )}
-              {tasklyURL && !offline && (
-                <TextLink
-                  href={tasklyURL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  icon={<Icon name="external" size={14} />}
-                >
-                  Taskly
-                </TextLink>
-              )}
-            </div>
+            {tasklyURL && !offline && (
+              <TextLink
+                href={tasklyURL}
+                target="_blank"
+                rel="noopener noreferrer"
+                icon={<Icon name="external" size={14} />}
+              >
+                Taskly
+              </TextLink>
+            )}
           </div>
           {tasks.error && (
             <div className="home-task-error">
@@ -296,21 +294,14 @@ export default function HomeDashboard({
                     </Button>
                   </div>
                 )}
-                {assigned.length > 0 && (
-                  <section
-                    className="home-assigned"
-                    aria-labelledby="home-assigned-heading"
-                  >
-                    <div className="home-group-heading">
-                      <h3 id="home-assigned-heading">指定企業の見学</h3>
-                      <span>
-                        {assigned.filter((task) => task.completed).length}/
-                        {assigned.length}
-                      </span>
-                    </div>
-                    <ul className="home-task-list">{assigned.map(row)}</ul>
-                  </section>
-                )}
+                {!offline &&
+                  !tasks.readonly &&
+                  !tasks.error &&
+                  (surveys.length > 0 || remaining.length > 0) && (
+                    <p className="home-task-hint">
+                      回答・提出が済んだら、左のチェックを押してください。
+                    </p>
+                  )}
                 {surveys.length > 0 && (
                   <section
                     className="home-surveys"
@@ -329,10 +320,6 @@ export default function HomeDashboard({
                       >
                         <Icon name={surveyOpen ? "minus" : "plus"} size={16} />
                         <span>見学アンケート</span>
-                        <span className="home-survey-count">
-                          {surveys.filter((task) => task.completed).length}/
-                          {surveys.length}
-                        </span>
                       </TextButton>
                       {currentSurvey &&
                         (currentSurvey.url || offline) &&
@@ -367,74 +354,84 @@ export default function HomeDashboard({
                     {remaining.map(row)}
                   </ul>
                 )}
-                {all.length === 0 && (
+                {surveys.length === 0 && remaining.length === 0 && (
                   <p className="home-empty">やることはありません</p>
                 )}
               </>
             )
           )}
         </section>
-        <section
-          className="home-recommendations"
-          aria-labelledby="home-recommendations-heading"
-        >
-          <div className="home-section-heading">
-            <h2 id="home-recommendations-heading">おすすめ</h2>
-            <TextLink
-              href={routeHref({ ...route, view: "search", company: "" })}
-              onClick={(event) =>
-                follow(event, () =>
-                  onRouteChange({ view: "search", company: "" }),
-                )
-              }
-            >
-              探す
-            </TextLink>
-          </div>
-          {recommendations.length ? (
-            <ul className="home-recommendation-list">
-              {recommendations.map(({ company, reasons }) => (
-                <li key={company.id} className="home-recommendation">
-                  <div className="home-recommendation-heading">
-                    <h3>
-                      <TextLink
-                        href={routeHref({ ...route, company: company.id })}
-                        onClick={(event) =>
-                          follow(event, () => onSelectCompany(company))
-                        }
-                      >
-                        {company.name}
-                      </TextLink>
-                    </h3>
-                    <FavoriteButton
-                      company={company}
-                      saved={savedIDs.has(company.id)}
-                      onToggle={() => onSaveCompany(company)}
-                    />
-                  </div>
-                  <div className="home-recommendation-meta">
-                    <span>
-                      {company.session === "AM" ? "午前" : "午後"} · ブース{" "}
-                      {company.booth}
-                    </span>
-                  </div>
-                  {reasons.length > 0 && (
-                    <ul
-                      className="home-recommendation-reasons"
-                      aria-label="おすすめの理由"
-                    >
-                      {reasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="home-empty">条件に合う企業はありません</p>
+        <div className="home-companies">
+          {assigned.length > 0 && (
+            <section aria-labelledby="home-assigned-heading">
+              <div className="home-section-heading">
+                <h2 id="home-assigned-heading">指定企業の見学</h2>
+              </div>
+              <ul className="home-task-list">{assigned.map(row)}</ul>
+            </section>
           )}
-        </section>
+          <section
+            className="home-recommendations"
+            aria-labelledby="home-recommendations-heading"
+          >
+            <div className="home-section-heading">
+              <h2 id="home-recommendations-heading">おすすめ</h2>
+              <TextLink
+                href={routeHref({ ...route, view: "search", company: "" })}
+                onClick={(event) =>
+                  follow(event, () =>
+                    onRouteChange({ view: "search", company: "" }),
+                  )
+                }
+              >
+                探す
+              </TextLink>
+            </div>
+            {recommendations.length ? (
+              <ul className="home-recommendation-list">
+                {recommendations.map(({ company, reasons }) => (
+                  <li key={company.id} className="home-recommendation">
+                    <div className="home-recommendation-heading">
+                      <h3>
+                        <TextLink
+                          href={routeHref({ ...route, company: company.id })}
+                          onClick={(event) =>
+                            follow(event, () => onSelectCompany(company))
+                          }
+                        >
+                          {company.name}
+                        </TextLink>
+                      </h3>
+                      <FavoriteButton
+                        company={company}
+                        saved={savedIDs.has(company.id)}
+                        onToggle={() => onSaveCompany(company)}
+                      />
+                    </div>
+                    <div className="home-recommendation-meta">
+                      <span>
+                        {company.session === "AM" ? "午前" : "午後"} · ブース{" "}
+                        {company.booth}
+                      </span>
+                    </div>
+                    {reasons.length > 0 && (
+                      <ul
+                        className="home-recommendation-reasons"
+                        aria-label="おすすめの理由"
+                      >
+                        {reasons.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="home-empty">条件に合う企業はありません</p>
+            )}
+          </section>
+        </div>
       </div>
     </>
   );
