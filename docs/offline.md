@@ -26,7 +26,7 @@ CSPは既存のスクリプトSHAと `frame-src 'none'` / `object-src 'none'` �
 
 ## 検証とカバレッジ
 
-既存の必須CIジョブは全ての変更で実行されます。Web unit coverageには保存・認証境界・オフラインUIを含め、Service Workerは実際に配備する関数そのものをNodeで別途実行し、行・分岐・関数それぞれ80%以上を要求します。PRには `Service worker unit execution` の行カバレッジを表示し、LCOVをCI artifactに保存します。この数値はページJavaScriptのChromium E2Eカバレッジとは別です。ブラウザー結合テストでは実際のService WorkerとIndexedDBを使い、通信断からの再読み込み・直接ページ訪問・画像表示・書き込み抑止・期限切れ・認証変更・オンライン復帰を検証します。
+既存の必須CIジョブは全ての変更で実行されます。Web unit coverageには保存・認証境界・オフラインUIを含め、Service Workerは実際に配備する関数そのものをNodeで別途実行し、行・分岐・関数それぞれ80%以上を要求します。PRには「Service Worker の単体実行（行カバレッジ）」を表示し、LCOVをCI artifactに保存します。この数値はページJavaScriptのChromium E2Eカバレッジとは別です。ブラウザー結合テストでは実際のService WorkerとIndexedDBを使い、通信断からの再読み込み・直接ページ訪問・画像表示・書き込み抑止・期限切れ・認証変更・オンライン復帰を検証します。
 
 単独でシェルのテストとカバレッジを再現するには、Node 26.13.1で次を実行します。
 

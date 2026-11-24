@@ -42,30 +42,40 @@ jobs:
             const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: metadata.number});
             if (pr.state !== 'open' || pr.head.sha !== metadata.sha ||
                 pr.head.repo?.full_name !== metadata.repository || pr.head.ref !== run.head_branch) return;
-            const rows = [['API + commands (Go statements)', 'api'], ['Importer (Go statements)', 'importer'], ['Web (lines)', 'web'], ['Service worker unit execution (lines)', 'offline-worker'], ['PDF extractor (Python statements)', 'extractor'], ['Chromium E2E execution (lines)', 'e2e'], ['Real MySQL integration (Go statements)', 'integration'], ['MCP API suite component (Go statements)', 'mcp-api'], ['MCP real MySQL component (Go statements)', 'mcp-integration']].map(([name,id]) => {
-              let value = 'Unavailable (test/setup failed)';
+            const rows = [
+              ['API とコマンド（Go ステートメント）', 'api'],
+              ['インポーター（Go ステートメント）', 'importer'],
+              ['Web（行カバレッジ）', 'web'],
+              ['Service Worker の単体実行（行カバレッジ）', 'offline-worker'],
+              ['PDF 抽出（Python ステートメント）', 'extractor'],
+              ['Chromium E2E（行カバレッジ）', 'e2e'],
+              ['実 MySQL 統合テスト（Go ステートメント）', 'integration'],
+              ['MCP API テスト（Go ステートメント）', 'mcp-api'],
+              ['MCP 実 MySQL テスト（Go ステートメント）', 'mcp-integration'],
+            ].map(([name,id]) => {
+              let value = '計測結果なし（テストまたはセットアップに失敗）';
               try {
                 const {percent,covered,total} = read(id);
                 if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) throw Error('Invalid percentage');
                 const component = id === 'mcp-api' || id === 'mcp-integration';
                 if (component && (!Number.isSafeInteger(covered) || !Number.isSafeInteger(total) || covered < 0 || total < 1 || covered > total || total > 10000000 || Math.abs(percent - 100 * covered / total) > 1e-8)) throw Error('Invalid MCP statement counts');
                 value = `${percent.toFixed(1)}% ${id === 'e2e' ? '' : percent >= 80 ? '✅' : '❌'}`;
-                if (component) value += ` (${covered}/${total} statements)`;
-              } catch { value = 'Unavailable (test/setup failed)'; }
-              return `| ${name} | ${value} | ${id === 'e2e' ? 'Measured' : '80%'} |`;
+                if (component) value += `（全 ${total} 文のうち ${covered} 文）`;
+              } catch { value = '計測結果なし（テストまたはセットアップに失敗）'; }
+              return `| ${name} | ${value} | ${id === 'e2e' ? '計測のみ' : '80%'} |`;
             });
-            let functional = 'Unavailable (test/setup failed)';
+            let functional = '結果なし（テストまたはセットアップに失敗）';
             try {
               const {passed,total} = read('mcp-functional');
               if (Number.isSafeInteger(passed) && total === 18 && passed >= 0 && passed <= total)
-                functional = `${passed}/${total} tests ${passed === total ? '✅' : '❌'}`;
+                functional = `${total} 件中 ${passed} 件成功 ${passed === total ? '✅' : '❌'}`;
             } catch {}
-            rows.push(`| MCP HTTP / official SDK (functional) | ${functional} | All 18 |`);
+            rows.push(`| MCP HTTP・公式 SDK（機能テスト） | ${functional} | 全 18 件成功 |`);
             const marker = '<!-- nnct-guidance-coverage -->';
-            const body = [marker, '### Test coverage', '', '| Group | Coverage / result | Required |',
-              '| --- | ---: | ---: |', ...rows, '', `Commit: ${metadata.sha.slice(0,7)}`,
-              'Go application, importer, Web unit tests, service worker unit execution, PDF extraction, standalone real MySQL integration and both MCP component profiles require 80%. Full API/MySQL denominators are unchanged. MCP HTTP functional scenarios and page browser execution are separate metrics; scenario counts are not coverage. Service worker coverage measures its actual runtime in Node.',
-              `[CI run](${run.html_url})`].join('\n');
+            const body = [marker, '### テストカバレッジ', '', '| テストグループ | カバレッジ・結果 | 必須基準 |',
+              '| --- | ---: | ---: |', ...rows, '', `コミット ${metadata.sha.slice(0,7)} の計測結果です。`,
+              '表の 80% は各グループの最低基準です。API と実 MySQL 統合テストはそれぞれの全対象コードを計測します。MCP HTTP の機能テストは成功件数、Chromium E2E はページの行カバレッジを表示します。Service Worker は実際のコードを Node で実行して計測します。',
+              `[CI の実行結果](${run.html_url})`].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments,
               {owner,repo,issue_number:metadata.number,per_page:100});
             const previous = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
