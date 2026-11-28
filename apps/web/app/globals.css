@@ -34,6 +34,15 @@ a {
 button {
   cursor: pointer;
 }
+a {
+  color: var(--color-text-accent-primary);
+}
+a,
+button,
+.spui-TextLink,
+.spui-TextButton {
+  text-decoration: none;
+}
 button:disabled {
   cursor: not-allowed;
 }
@@ -42,17 +51,6 @@ a:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--color-focus-clarity);
   outline-offset: 4px;
-}
-a {
-  color: var(--color-text-accent-primary);
-}
-a,
-button,
-.spui-TextLink,
-.spui-TextLink:hover,
-.spui-TextButton,
-.spui-TextButton:hover {
-  text-decoration: none;
 }
 .spui-TextLink,
 .spui-TextButton {
@@ -141,9 +139,6 @@ h2 {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-}
-.header-actions > .spui-TextLink:hover {
-  background: var(--color-surface-secondary);
 }
 .venue-map-navigation .header-actions {
   border: 1px solid var(--color-border-low-emphasis);
@@ -636,9 +631,6 @@ html:has(.first-visit-tour) {
 .tour-content h2 {
   font-size: 1.25rem;
 }
-.tour-content h2:focus {
-  outline: none;
-}
 .tour-content p {
   font-size: 0.9375rem;
 }
@@ -999,10 +991,6 @@ html:has(.first-visit-tour) {
 .assignment-visit:last-child {
   border-bottom: 0;
 }
-.assignment-visit > span:first-child {
-  font-size: 0.8125rem;
-  font-weight: bold;
-}
 .assignment-visit small {
   display: block;
   color: var(--color-text-medium-emphasis);
@@ -1307,12 +1295,6 @@ html:has(.first-visit-tour) {
   cursor: pointer;
   font-weight: bold;
 }
-.company-map-accordion > summary svg:last-child {
-  margin-left: auto;
-}
-.company-map-accordion[open] > summary svg:last-child {
-  transform: rotate(45deg);
-}
 .company-map-content {
   display: grid;
   gap: var(--spacing-relative-spacing-lv6);
@@ -1369,10 +1351,6 @@ html:has(.first-visit-tour) {
 .company-map-accordion > summary:hover {
   background-color: var(--color-hover-outlined-button);
 }
-.desktop-navigation .spui-TextLink:hover,
-.mobile-navigation .spui-TextLink:hover {
-  background-color: transparent;
-}
 @media (prefers-reduced-motion: reduce) {
   .brand {
     transition: none;
@@ -1388,11 +1366,6 @@ html:has(.first-visit-tour) {
   margin: 0 auto;
 }
 
-/* Company names use text feedback; their surrounding rows remain unpainted. */
-.company-name-link > .spui-TextLink:hover,
-.company-name-link > .spui-TextButton:hover {
-  background-color: transparent;
-}
 .session-tabs {
   width: min(100%, 360px);
 }
@@ -1542,10 +1515,6 @@ html:has(.first-visit-tour) {
 .home-task-main > .spui-TextLink {
   color: var(--color-text-high-emphasis);
 }
-.home-task-main > .spui-TextLink:hover {
-  color: var(--color-text-accent-primary);
-  background-color: transparent;
-}
 .home-task-title {
   font-size: inherit;
   font-weight: bold;
@@ -1623,10 +1592,6 @@ html:has(.first-visit-tour) {
   color: var(--color-text-high-emphasis);
   text-align: left;
 }
-.home-recommendation-heading h3 .spui-TextLink:hover {
-  color: var(--color-text-accent-primary);
-  background-color: transparent;
-}
 .home-recommendation-heading > .spui-Button {
   flex: none;
 }
@@ -1664,6 +1629,41 @@ html:has(.first-visit-tour) {
 .section-heading h2 > span {
   color: var(--color-text-medium-emphasis);
   font-size: 0.875rem;
+}
+
+/* Component states follow the base styles that use the same elements. */
+.tour-content h2:focus {
+  outline: none;
+}
+.assignment-visit > span:first-child {
+  font-size: 0.8125rem;
+  font-weight: bold;
+}
+.company-map-accordion > summary svg:last-child {
+  margin-left: auto;
+}
+.company-map-accordion[open] > summary svg:last-child {
+  transform: rotate(45deg);
+}
+.header-actions > .spui-TextLink:hover {
+  background: var(--color-surface-secondary);
+}
+.desktop-navigation .spui-TextLink:hover,
+.mobile-navigation .spui-TextLink:hover {
+  background-color: transparent;
+}
+/* Company names use text feedback; their surrounding rows remain unpainted. */
+.company-name-link > .spui-TextLink:hover,
+.company-name-link > .spui-TextButton:hover {
+  background-color: transparent;
+}
+.home-task-main > .spui-TextLink:hover {
+  color: var(--color-text-accent-primary);
+  background-color: transparent;
+}
+.home-recommendation-heading h3 .spui-TextLink:hover {
+  color: var(--color-text-accent-primary);
+  background-color: transparent;
 }
 .timeline-item.is-term .timeline-track > span {
   background: var(--color-object-accent-primary);
